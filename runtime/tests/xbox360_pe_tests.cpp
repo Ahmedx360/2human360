@@ -138,6 +138,17 @@ int main() {
     assert(imports.imports[1].type == 1);
     assert(imports.imports[1].ordinal == 0x74);
     assert(imports.imports[1].thunk_address == 0x82001004);
+    auto patched_image = import_image;
+    std::size_t patched_iat_count = 0;
+    std::string patch_error;
+    assert(toohuman::runtime::patch_xex_function_iat_slots(
+        patched_image, imports.imports, &patched_iat_count, &patch_error));
+    assert(patched_iat_count == 1);
+    assert(patched_image.bytes[0x1000] == 0x82);
+    assert(patched_image.bytes[0x1001] == 0x00);
+    assert(patched_image.bytes[0x1002] == 0x10);
+    assert(patched_image.bytes[0x1003] == 0x04);
+    assert(import_image.bytes[0x1000] == 0x00); // Source image is unchanged.
     assert(imports.default_stack_size == 0x00100000);
     assert(imports.default_heap_size == 0x02000000);
     assert(imports.tls_info.has_value());
