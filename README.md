@@ -14,7 +14,7 @@ You must provide your own legally obtained game files. No game executable, asset
 | Recompiler fixes | Title-specific PE loader, switch-boundary and VMX/codegen fixes |
 | Generated-code library | CMake static-library target added; requires Clang and SIMDe |
 | Kernel/XAM HLE | Not implemented; import names are not resolved |
-| Guest memory, threads and synchronization | Runtime implementation still required |
+| Guest memory | Initial bounded, big-endian guest-memory view implemented and unit-tested; image loading, permissions, MMIO, threads and synchronization remain future work |
 | Xenos graphics / EDRAM | Runtime implementation still required |
 | XMA audio | Runtime implementation still required |
 | Controller/input | Runtime implementation still required |
@@ -75,6 +75,16 @@ cmake --preset validate-only
 ctest --preset validate
 ~~~
 
+The validation configuration also builds and tests the independent host-side runtime core. To build only that runtime foundation (without the generated PPC library or XenonRecomp submodule):
+
+~~~sh
+cmake -S . -B build/runtime -DTH_BUILD_RECOMP_LIB=OFF -DTH_BUILD_RUNTIME_CORE=ON -DBUILD_TESTING=ON
+cmake --build build/runtime --parallel
+ctest --test-dir build/runtime --output-on-failure
+~~~
+
+See [docs/runtime-foundation.md](docs/runtime-foundation.md) for its current scope and limitations. It does not load or boot the game.
+
 On Windows, use a Developer Command Prompt with LLVM's clang-cl and Ninja available, and configure the compiler explicitly when needed:
 
 ~~~powershell
@@ -113,7 +123,7 @@ A bare PE does not preserve the XEX2 import metadata. As a result, this workflow
 
 ## Architecture and next runtime milestones
 
-See [docs/architecture.md](docs/architecture.md) for the proposed runtime boundaries and an incremental implementation order. The broad lesson taken from [LostOdysseyRecomp](https://github.com/freefrank/LostOdysseyRecomp) is to keep generated PPC code separate from the host runtime, and to implement kernel, memory, graphics, audio, input, and diagnostics as distinct systems.
+See [docs/architecture.md](docs/architecture.md) for the runtime boundaries and implementation order, and [docs/runtime-foundation.md](docs/runtime-foundation.md) for the first implemented runtime primitive. The broad lesson taken from [LostOdysseyRecomp](https://github.com/freefrank/LostOdysseyRecomp) is to keep generated PPC code separate from the host runtime, and to implement kernel, memory, graphics, audio, input, and diagnostics as distinct systems.
 
 ## Copyright and game data
 
