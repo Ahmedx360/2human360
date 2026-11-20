@@ -4,7 +4,7 @@
   "configurePresets": [
     {
       "name": "clang-release",
-      "displayName": "Clang Release (generated game-code library)",
+      "displayName": "Clang Release (generated game-code library and PPC runtime adapter)",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/clang-release",
       "cacheVariables": {
