@@ -78,6 +78,8 @@ int main(int argc, char** argv) {
     std::cout << "Registered PPC functions: " << report.translated_functions << '\n';
     std::cout << "Registered function imports: " << report.function_imports << '\n';
     std::cout << "Parsed variable imports: " << report.variable_imports << '\n';
+    std::cout << "XEX default stack size: 0x" << std::hex << report.default_stack_size
+              << "  default heap size: 0x" << report.default_heap_size << std::dec << '\n';
     std::cout << "Runtime memory and dispatch are initialized. The game entry point "
                  "was NOT invoked; startup stack/TLS and kernel HLE are not ready.\n";
     return 0;
