@@ -77,7 +77,7 @@ cmake --build --preset validate-only --parallel
 ctest --preset validate
 ~~~
 
-The validation configuration also builds and tests the independent host-side runtime core, including synthetic PE and XEX import fixtures, and builds `TooHumanXexImportAudit`. The full Clang build additionally compiles the PPC function-table/import adapters against the generated library. Run the adapter test after building with `ctest --test-dir build/clang-release -R TooHumanPpcImportRegistryTests --output-on-failure`. To build only that runtime foundation (without the generated PPC library or XenonRecomp submodule):
+The validation configuration also builds and tests the independent host-side runtime core, including guest-heap allocation/coalescing, synthetic PE loading and XEX import/TLS fixtures, and builds `TooHumanXexImportAudit`. The full Clang build additionally compiles the PPC function-table/import adapters against the generated library. Run the adapter test after building with `ctest --test-dir build/clang-release -R TooHumanPpcImportRegistryTests --output-on-failure`. To build only that runtime foundation (without the generated PPC library or XenonRecomp submodule):
 
 ~~~sh
 cmake -S . -B build/runtime -DTH_BUILD_RECOMP_LIB=OFF -DTH_BUILD_RUNTIME_CORE=ON -DBUILD_TESTING=ON
