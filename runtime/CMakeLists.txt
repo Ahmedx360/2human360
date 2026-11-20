@@ -5,6 +5,7 @@ add_library(TooHumanRuntimeCore STATIC
     memory/guest_heap.cpp
     memory/guest_address_space.cpp
     image/xbox360_pe.cpp
+    image/xex_image.cpp
     image/xex_imports.cpp
 )
 add_library(TooHumanRecomp::RuntimeCore ALIAS TooHumanRuntimeCore)
