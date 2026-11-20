@@ -28,6 +28,11 @@ bool GuestHeap::initialize(std::string* error) {
         return false;
     }
 
+    if (memory_->image_mapped() && !memory_->function_table_ready()) {
+        set_error(error, "Initialize the PPC function table before creating a guest heap");
+        return false;
+    }
+
     const auto heap_start = static_cast<std::uint64_t>(guest_base_);
     const auto heap_end = heap_start + size_;
     if (memory_->image_mapped()) {
