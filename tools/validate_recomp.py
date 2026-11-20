@@ -89,6 +89,8 @@ def main() -> int:
             errors.append(f"Malformed switch table #{index + 1}")
         elif any(not isinstance(label, int) for label in labels):
             errors.append(f"Non-integer switch label in table #{index + 1}")
+        elif item["default"] % 4 or any(label % 4 for label in labels):
+            errors.append(f"Unaligned PPC branch target in switch table #{index + 1}")
 
     if not mapping_path.is_file() or not shared_path.is_file():
         errors.append("Generated function mapping or shared declaration header is missing")
@@ -135,6 +137,15 @@ def main() -> int:
         remaining = bad_patterns.search(normalized)
         if remaining:
             errors.append(f"Unfixed scratch/literal emission in {source_path.name}: {remaining.group(0)}")
+
+        label_definitions = set(re.findall(r"^\\s*(loc_[0-9A-Fa-f]+):", normalized, re.MULTILINE))
+        label_references = set(re.findall(r"\\bgoto\\s+(loc_[0-9A-Fa-f]+)\\s*;", normalized))
+        unresolved_labels = sorted(label_references - label_definitions)
+        if unresolved_labels:
+            errors.append(
+                f"Unresolved PPC labels in {source_path.name}: "
+                + ", ".join(unresolved_labels[:8])
+            )
 
     nonempty_error_logs = []
     for sidecar in ppc_dir.glob("ppc_recomp.*.cpp.err"):
