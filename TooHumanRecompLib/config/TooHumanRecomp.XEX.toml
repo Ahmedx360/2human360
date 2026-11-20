@@ -1,5 +1,5 @@
 # Too Human (Xbox 360) - XenonRecomp configuration
-# Image: PE, base 0x82000000, entry 0x82A46B18 (RVA 0xA46B18)
+# Image: original XEX2; expected extracted image base 0x82000000 and entry 0x82A46B18
 [main]
 file_path = "../../private/default.xex"
 out_directory_path = "../ppc"
