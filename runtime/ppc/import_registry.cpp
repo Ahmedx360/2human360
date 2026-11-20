@@ -525,6 +525,44 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) const 
         return;
     }
 
+    if (binding.handler == nullptr &&
+        import.library == "xboxkrnl.exe" && import.ordinal == 0x0194) {
+        // XexCheckExecutablePrivilege reads the immediate XEX system-flags
+        // header (0x00030000). The privilege argument is a bit index.
+        const auto privilege = context.r3.u32;
+        std::uint32_t system_flags = 0;
+        if (xex_header_guest_address_ != 0 && xex_header_size_ >= 0x18 &&
+            guest_range_valid(xex_header_guest_address_, xex_header_size_)) {
+            const auto* bytes = base + xex_header_guest_address_;
+            const auto count =
+                (static_cast<std::uint32_t>(bytes[0x14]) << 24) |
+                (static_cast<std::uint32_t>(bytes[0x15]) << 16) |
+                (static_cast<std::uint32_t>(bytes[0x16]) << 8) |
+                static_cast<std::uint32_t>(bytes[0x17]);
+            if (count <= (xex_header_size_ - 0x18) / 8) {
+                for (std::uint32_t i = 0; i < count; ++i) {
+                    const auto offset = static_cast<std::size_t>(0x18) +
+                                        static_cast<std::size_t>(i) * 8;
+                    const auto key =
+                        (static_cast<std::uint32_t>(bytes[offset]) << 24) |
+                        (static_cast<std::uint32_t>(bytes[offset + 1]) << 16) |
+                        (static_cast<std::uint32_t>(bytes[offset + 2]) << 8) |
+                        static_cast<std::uint32_t>(bytes[offset + 3]);
+                    if (key != 0x00030000u) continue;
+                    system_flags =
+                        (static_cast<std::uint32_t>(bytes[offset + 4]) << 24) |
+                        (static_cast<std::uint32_t>(bytes[offset + 5]) << 16) |
+                        (static_cast<std::uint32_t>(bytes[offset + 6]) << 8) |
+                        static_cast<std::uint32_t>(bytes[offset + 7]);
+                    break;
+                }
+            }
+        }
+        context.r3.u32 = privilege < 32u
+            ? ((system_flags >> privilege) & 1u) : 0u;
+        return;
+    }
+
     if (binding.handler == nullptr) {
         const auto resolved_name = lookup_title_export_name(import.library, import.ordinal);
         const auto export_name = resolved_name.empty()
