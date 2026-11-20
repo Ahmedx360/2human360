@@ -100,6 +100,13 @@ int main() {
     xex_header[9] = 0;
     xex_header[10] = 0;
     xex_header[11] = 0x80;
+    // One optional-header directory entry: import metadata at file offset 0x40.
+    xex_header[0x17] = 1;
+    xex_header[0x19] = 0x01;
+    xex_header[0x1A] = 0x03;
+    xex_header[0x1B] = 0xFF;
+    xex_header[0x1F] = 0x40;
+    xex_header[0x43] = 0x10;
     const std::vector<toohuman::runtime::XexImport> variable_imports{
         {"xboxkrnl.exe", 0x01C0u, 0, 0, 0x82000600u, 0},
         {"xboxkrnl.exe", 0x0193u, 0, 0, 0x82000604u, 0}
@@ -143,12 +150,23 @@ int main() {
         {"xboxkrnl.exe", 0x000Bu, 0, 1, thunk_base, 0},
         {"xboxkrnl.exe", 0x000Fu, 0, 1, thunk_base + 4, 0},
         {"xam.xex", 0x01EAu, 0, 1, thunk_base + 8, 0},
-        {"xam.xex", 0x01ECu, 0, 1, thunk_base + 12, 0}
+        {"xam.xex", 0x01ECu, 0, 1, thunk_base + 12, 0},
+        {"xboxkrnl.exe", 0x012Bu, 0, 1, thunk_base + 16, 0}
     };
     std::size_t registered_pool_imports = 0;
     assert(variable_registry.install(
         variable_memory, pool_imports, &registered_pool_imports, &error));
-    assert(registered_pool_imports == 4);
+    assert(registered_pool_imports == 5);
+
+    PPCContext header_field_context{};
+    header_field_context.ctr.u32 = thunk_base + 16;
+    header_field_context.r3.u32 = header_copy;
+    header_field_context.r4.u32 = 0x000103FFu;
+    const auto header_field_function =
+        variable_memory.get_function<PPCFunc*>(thunk_base + 16);
+    assert(header_field_function != nullptr);
+    header_field_function(header_field_context, variable_memory.base());
+    assert(header_field_context.r3.u32 == header_copy + 0x40u);
 
     const auto call_import = [&](std::uint32_t thunk, PPCContext& ctx) {
         ctx.ctr.u32 = thunk;
