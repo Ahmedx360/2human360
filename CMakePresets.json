@@ -30,7 +30,7 @@
     {
       "name": "clang-release",
       "configurePreset": "clang-release",
-      "targets": [ "TooHumanPpcRuntime", "TooHumanPpcImportRegistryTests", "TooHumanXexImportAudit" ]
+      "targets": [ "TooHumanPpcRuntime", "TooHumanPpcImportRegistryTests", "TooHumanXexImportAudit", "TooHumanGuestHeapTests" ]
     },
     {
       "name": "validate-only",
