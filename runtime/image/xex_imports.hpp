@@ -19,6 +19,8 @@ struct XexImport {
 
 struct XexImportResult {
     std::vector<XexImport> imports;
+    std::uint32_t default_stack_size{};
+    std::uint32_t default_heap_size{};
     std::string error;
 
     [[nodiscard]] explicit operator bool() const noexcept {
