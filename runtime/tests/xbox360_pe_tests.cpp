@@ -116,6 +116,14 @@ int main() {
     auto mismatched_base = xex;
     put32(mismatched_base, 0x24, 0x83000000);
     assert(!toohuman::runtime::parse_xex2_imports(mismatched_base, import_image));
+    auto security_base = xex;
+    put32(security_base, 0x10, 0x100);
+    put32(security_base, 0x14, 2);
+    put32(security_base, 0x20, 0x00010100);
+    put32(security_base, 0x24, 0x82001000);
+    put32(security_base, 0x28, 0);
+    put32(security_base, 0x210, 0x82000000);
+    assert(toohuman::runtime::parse_xex2_imports(security_base, import_image));
 
     std::string address_space_error;
     auto address_space = toohuman::runtime::GuestAddressSpace::reserve(&address_space_error);
