@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <string>
 #include <cstring>
+#include <algorithm>
 #include <type_traits>
 #include <utility>
 
@@ -75,6 +76,27 @@ public:
         return function;
     }
 
+    template <typename FunctionPointer>
+    [[nodiscard]] bool fill_function_table(FunctionPointer function) noexcept {
+        static_assert(std::is_pointer_v<FunctionPointer> &&
+                      std::is_function_v<std::remove_pointer_t<FunctionPointer>>,
+                      "fill_function_table requires a function pointer");
+        static_assert(sizeof(FunctionPointer) == sizeof(std::uintptr_t),
+                      "Host function pointers must fit in uintptr_t");
+        if (!function_table_ready_ || function_table_size_ % sizeof(FunctionPointer) != 0)
+            return false;
+        const auto count = function_table_size_ / sizeof(FunctionPointer);
+        const auto table = reinterpret_cast<std::uintptr_t>(reservation_) +
+                           function_table_base_;
+        for (std::uint64_t i = 0; i < count; ++i) {
+            std::memcpy(reinterpret_cast<void*>(table + i * sizeof(FunctionPointer)),
+                        &function, sizeof(function));
+        }
+        return true;
+    }
+
+    [[nodiscard]] std::uint32_t image_base() const noexcept;
+    [[nodiscard]] std::uint32_t image_size() const noexcept;
     [[nodiscard]] std::uint8_t* base() noexcept;
     [[nodiscard]] const std::uint8_t* base() const noexcept;
     [[nodiscard]] bool valid() const noexcept;
