@@ -3,10 +3,13 @@
 #include "image/xex_imports.hpp"
 #include "ppc_context.h"
 #include "memory/guest_address_space.hpp"
+#include "memory/guest_heap.hpp"
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <span>
+#include <thread>
 #include <string>
 #include <unordered_map>
 
@@ -28,6 +31,14 @@ public:
                                         PPCFunc* handler,
                                         std::string* error = nullptr);
 
+    [[nodiscard]] bool prepare_variable_imports(
+        GuestAddressSpace& memory,
+        LoadedPeImage& image,
+        std::span<const std::uint8_t> xex_file,
+        std::span<const XexImport> imports,
+        std::size_t* bound_count = nullptr,
+        std::string* error = nullptr);
+
     [[nodiscard]] bool install(GuestAddressSpace& memory,
                                std::span<const XexImport> imports,
                                std::size_t* registered_count = nullptr,
@@ -46,6 +57,9 @@ private:
 
     std::unordered_map<std::uint32_t, ImportBinding> imports_by_thunk_;
     std::unordered_map<std::string, PPCFunc*> handlers_;
+    std::unique_ptr<GuestHeap> variable_heap_;
+    std::jthread timestamp_thread_;
+    bool variables_prepared_{};
     bool installed_{};
 };
 
