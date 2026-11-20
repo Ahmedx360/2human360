@@ -95,7 +95,7 @@ int main(int argc, char** argv) {
     std::cout << "Registered PPC functions: " << report.translated_functions << '\n';
     std::cout << "Registered function imports: " << report.function_imports << '\n';
     std::cout << "Patched function IAT slots: " << report.function_iat_slots << '\n';
-    std::cout << "Unbound variable imports: " << report.variable_imports << '\n';
+    std::cout << "Bound kernel variable exports: " << report.variable_imports << '\n';
     std::cout << "XEX default stack size: 0x" << std::hex << report.default_stack_size
               << "  default heap size: 0x" << report.default_heap_size << std::dec << '\n';
     if (report.tls_info) {
@@ -105,7 +105,8 @@ int main(int argc, char** argv) {
                   << "  raw size: 0x" << report.tls_info->raw_data_size
                   << std::dec << '\n';
     }
-    std::cout << "Runtime memory and dispatch are initialized. The game entry point "
-                 "was NOT invoked; guest stack/TLS allocation and kernel HLE are not ready.\n";
+    std::cout << "Runtime memory, variable exports and import dispatch are initialized. "
+                 "The game entry point was NOT invoked; guest stack/TLS and most kernel "
+                 "services are not ready.\n";
     return 0;
 }
