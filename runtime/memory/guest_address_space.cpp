@@ -182,6 +182,11 @@ bool GuestAddressSpace::initialize_function_table(std::uint32_t code_base,
 
     const auto table_base = image_end;
     const auto table_size = static_cast<std::uint64_t>(code_size) * 2;
+    if (table_base % alignof(std::uintptr_t) != 0 ||
+        table_size % sizeof(std::uintptr_t) != 0) {
+        set_error(error, "PPC function table base or size is not host-pointer aligned");
+        return false;
+    }
     if (table_base > kSize || table_size > kSize - table_base) {
         set_error(error, "PPC function table would exceed the 4 GiB guest reservation");
         return false;
@@ -198,6 +203,14 @@ bool GuestAddressSpace::initialize_function_table(std::uint32_t code_base,
     function_table_size_ = table_size;
     function_table_ready_ = true;
     return true;
+}
+
+std::uint32_t GuestAddressSpace::image_base() const noexcept {
+    return image_base_;
+}
+
+std::uint32_t GuestAddressSpace::image_size() const noexcept {
+    return image_size_;
 }
 
 std::uint8_t* GuestAddressSpace::base() noexcept {
