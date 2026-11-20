@@ -59,6 +59,8 @@ private:
     std::unordered_map<std::string, PPCFunc*> handlers_;
     std::unique_ptr<GuestHeap> guest_heap_;
     std::jthread timestamp_thread_;
+    std::uint32_t xex_header_guest_address_{};
+    std::uint32_t xex_header_size_{};
     bool variables_prepared_{};
     bool installed_{};
 };
