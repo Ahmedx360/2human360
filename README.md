@@ -13,7 +13,7 @@ You must provide your own legally obtained game files. No game executable, asset
 | Jump-table recovery | 396 initial tables, plus manually recovered NOP-padded tables |
 | Recompiler fixes | Title-specific PE loader, switch-boundary and VMX/codegen fixes |
 | Generated-code library | CMake static-library target added; requires Clang and SIMDe |
-| Kernel/XAM HLE | Actual XEX import inventory/name map, function-IAT patching and backing storage for 11 kernel data exports implemented; callable kernel/XAM handlers remain missing |
+| Kernel/XAM HLE | Actual XEX import inventory/name map, function-IAT patching and backing storage for 11 kernel data exports implemented; only basic pool/XAM allocation handlers are implemented; most kernel/XAM services remain missing |
 | Guest memory / image loader | Bounded big-endian memory view, standalone PE loader, direct unencrypted/basic-compressed XEX loader, section protections, 4 GiB guest address space and 128 MiB synchronized guest pool heap implemented; MMIO, aliases and guest threads remain future work |
 | PPC indirect calls | Generated function map, diagnostic unresolved-target trap, caller-context invocation, function IAT patching and exact library/ordinal trampoline dispatch implemented |
 | Xenos graphics / EDRAM | Runtime implementation still required |
@@ -50,7 +50,7 @@ These are image-specific observations, not generic Xbox 360 addresses.
 
 ## Build the generated game-code library
 
-The CMake targets build the generated PPC translation units as **TooHumanRecompLib** and, when runtime support is enabled, **TooHumanPpcRuntime**, which installs the generated function map, parses XEX imports and wires the title memory/dispatch setup through `initialize_title_runtime`. They are libraries, not a game executable. The runtime can invoke caller-selected translated functions and route XEX imports, but the title's real startup state, kernel/XAM handlers, graphics, audio and input are still missing.
+The CMake targets build the generated PPC translation units as **TooHumanRecompLib** and, when runtime support is enabled, **TooHumanPpcRuntime**, which installs the generated function map, parses XEX imports and wires the title memory/dispatch setup through `initialize_title_runtime`. They are libraries, not a game executable. The runtime can invoke caller-selected translated functions and route XEX imports, but the title's real startup state, most kernel/XAM handlers, graphics, audio and input are still missing.
 
 ### Requirements
 
@@ -133,7 +133,7 @@ The checked-in XenonRecomp patch corrects the known scalar-scratch code-emission
 
 The analyzed executable is a bare PE rather than an XEX2 container. XenonRecomp's normal XEX2/ELF loading path does not directly handle this PE, so the patch adds an Xbox 360 PowerPC PE loader and accounts for the observed section-address delta in this image.
 
-A bare PE does not preserve the XEX2 import metadata. The matching original `default.xex` is required to recover the title's actual library/ordinal/thunk records. The supplied Too Human XEX is unencrypted and uses basic compression, which the new XEX-only loader handles directly. The runtime now binds the 11 data exports and routes all 242 function imports through a diagnostic trampoline. Their actual kernel/XAM service handlers still need to be implemented and tested.
+A bare PE does not preserve the XEX2 import metadata. The matching original `default.xex` is required to recover the title's actual library/ordinal/thunk records. The supplied Too Human XEX is unencrypted and uses basic compression, which the new XEX-only loader handles directly. The runtime now binds the 11 data exports and routes all 242 function imports through a diagnostic trampoline. Most kernel/XAM service handlers still need to be implemented and tested.
 
 ## Architecture and next runtime milestones
 
