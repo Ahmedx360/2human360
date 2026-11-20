@@ -16,7 +16,7 @@ The runtime core is an incremental foundation, not a complete emulator. A host e
 | TooHumanRecompLib | Static library containing generated PowerPC functions and dispatch map | Generated sources and build target exist |
 | runtime/memory | Bounded PPC big-endian access, 4 GiB guest VA reservation and heap allocation | Reservation, PE mapping/protections and synchronized first-fit guest heap implemented; MMIO/aliases pending |
 | runtime/image | Standalone PE and direct XEX2 loading, import metadata | PE32/PPCBE loader, unencrypted none/basic XEX decompression, embedded PE validation, import library metadata and function-IAT pairing implemented and synthetic-fixture tested |
-| runtime/ppc | Populate XenonRecomp's indirect-call table, invoke known functions and route XEX imports | Generated map registration, unresolved-target trap, caller-context invocation, function IAT patching, a verified 253-entry title import-name manifest and variable-export preparation implemented; callable HLE handlers and full object semantics remain missing |
+| runtime/ppc | Populate XenonRecomp's indirect-call table, invoke known functions and route XEX imports | Generated map registration, unresolved-target trap, caller-context invocation, function IAT patching, a verified 253-entry title import-name manifest and variable-export backing and basic pool/XAM allocation HLE implemented; most callable HLE handlers and full object semantics remain missing |
 | TooHumanRecomp (future) | Host executable, startup, window, configuration, logging and game-data discovery | Not implemented |
 | kernel (future) | Verified Xbox kernel/XAM imports, handles, virtual files, events and synchronization | Actual Too Human import inventory is decoded and named; function thunk dispatch and backing storage for all 11 variable exports exist; basic pool/XAM allocation HLE exists; most function handlers and full object/device semantics remain missing |
 | cpu / os (future) | PPC context lifecycle, guest-thread scheduling, TLS, exceptions and host/guest call bridges | Generated PPC context exists; runtime lifecycle not implemented |
@@ -77,7 +77,7 @@ Map a host gamepad API into the XInput/HID structures expected by the game. Keep
 
 1. Build correctness — generated sources compile into TooHumanRecompLib; keep generator and artifact checks reproducible.
 2. Guest memory and image loader — validate the direct XEX reconstruction and per-section permissions; define explicit MMIO ranges.
-3. Variable exports — allocate and initialize the 11 imported Xbox kernel data objects, patch their IAT slots and provide a live KeTimeStampBundle.
+3. Variable exports — validate the 11 imported Xbox kernel data objects, IAT patching and live KeTimeStampBundle against title startup call sites.
 4. Startup context — establish the verified 256 KiB guest stack, 64-slot TLS template, initial PPCContext and thread lifecycle before invoking the entry point.
 5. Boot-critical HLE — implement only imports proven to be called during startup, with documented semantics and tests.
 6. File I/O and threading — support asset reads, synchronization and guest thread scheduling.
