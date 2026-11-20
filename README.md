@@ -46,7 +46,7 @@ These are image-specific observations, not generic Xbox 360 addresses.
 
 ## Build the generated game-code library
 
-The CMake targets build the generated PPC translation units as **TooHumanRecompLib** and, when runtime support is enabled, **TooHumanPpcRuntime**, which installs the generated function map into the guest indirect-call table. They are libraries, not a game executable. The runtime can invoke caller-selected translated functions and route XEX imports, but the title's real startup state, kernel/XAM handlers, graphics, audio and input are still missing.
+The CMake targets build the generated PPC translation units as **TooHumanRecompLib** and, when runtime support is enabled, **TooHumanPpcRuntime**, which installs the generated function map, parses XEX imports and wires the title memory/dispatch setup through `initialize_title_runtime`. They are libraries, not a game executable. The runtime can invoke caller-selected translated functions and route XEX imports, but the title's real startup state, kernel/XAM handlers, graphics, audio and input are still missing.
 
 ### Requirements
 
