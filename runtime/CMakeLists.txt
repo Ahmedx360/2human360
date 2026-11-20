@@ -7,6 +7,7 @@ add_library(TooHumanRuntimeCore STATIC
     image/xbox360_pe.cpp
     image/xex_image.cpp
     image/xex_imports.cpp
+    ppc/title_import_manifest.cpp
 )
 add_library(TooHumanRecomp::RuntimeCore ALIAS TooHumanRuntimeCore)
 
