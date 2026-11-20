@@ -74,16 +74,20 @@ std::vector<std::uint8_t> make_xex_imports() {
     put32(b, 0x3C, 0x02000000);
     put32(b, 0x40, 0x00020104);
     put32(b, 0x44, 0xC0);
-    put32(b, 0x50, 0x50);    // Header size.
+    put32(b, 0x50, 0x4C);    // Header size.
     put32(b, 0x54, 16);      // Padded library-name table.
     put32(b, 0x58, 1);       // One import library.
     const char name[] = "xboxkrnl.exe";
     for (std::size_t i = 0; i < sizeof(name); ++i) b[0x5C + i] = name[i];
     const std::size_t library = 0x6C;
-    put32(b, library, 0x2C);
+    put32(b, library, 0x30);
+    put32(b, library + 0x18, 0x12345678);
+    put32(b, library + 0x1C, 0x00010002);
+    put32(b, library + 0x20, 0x00010001);
     put16(b, library + 0x24, 0);
-    put16(b, library + 0x26, 1);
+    put16(b, library + 0x26, 2);
     put32(b, library + 0x28, 0x82001000);
+    put32(b, library + 0x2C, 0x82001004);
     put32(b, 0xC0, 64);
     put32(b, 0xC4, 0x82004000);
     put32(b, 0xC8, 0x40);
@@ -108,19 +112,32 @@ int main() {
     assert(image.bytes[0x3000] == 0); // BSS/zero-fill remains zero.
 
     auto import_image = image;
-    import_image.bytes[0x1000] = 0x01;
+    import_image.bytes[0x1000] = 0x00;
     import_image.bytes[0x1001] = 0x00;
     import_image.bytes[0x1002] = 0x00;
     import_image.bytes[0x1003] = 0x74;
+    import_image.bytes[0x1004] = 0x01;
+    import_image.bytes[0x1005] = 0x00;
+    import_image.bytes[0x1006] = 0x00;
+    import_image.bytes[0x1007] = 0x74;
     const auto xex = make_xex_imports();
     const auto imports = toohuman::runtime::parse_xex2_imports(xex, import_image);
     assert(imports);
-    assert(imports.imports.size() == 1);
+    assert(imports.imports.size() == 2);
+    assert(imports.libraries.size() == 1);
+    assert(imports.libraries[0].name == "xboxkrnl.exe");
+    assert(imports.libraries[0].library_id == 0x12345678);
+    assert(imports.libraries[0].version == 0x00010002);
+    assert(imports.libraries[0].minimum_version == 0x00010001);
     assert(imports.imports[0].library == "xboxkrnl.exe");
     assert(imports.imports[0].ordinal == 0x74);
-    assert(imports.imports[0].type == 1);
+    assert(imports.imports[0].type == 0);
     assert(imports.imports[0].hint == 0);
     assert(imports.imports[0].thunk_address == 0x82001000);
+    assert(imports.imports[0].paired_thunk_address == 0x82001004);
+    assert(imports.imports[1].type == 1);
+    assert(imports.imports[1].ordinal == 0x74);
+    assert(imports.imports[1].thunk_address == 0x82001004);
     assert(imports.default_stack_size == 0x00100000);
     assert(imports.default_heap_size == 0x02000000);
     assert(imports.tls_info.has_value());
