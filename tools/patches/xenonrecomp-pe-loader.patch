@@ -1,0 +1,109 @@
+diff --git a/XenonUtils/image.cpp b/XenonUtils/image.cpp
+index 39afe92..1260f24 100644
+--- a/XenonUtils/image.cpp
++++ b/XenonUtils/image.cpp
+@@ -3,6 +3,7 @@
+ #include "xex.h"
+ #include <cassert>
+ #include <cstring>
++#include <algorithm>
+ 
+ void Image::Map(const std::string_view& name, size_t base, uint32_t size, uint8_t flags, uint8_t* data)
+ {
+@@ -29,6 +30,76 @@ const Section* Image::Find(const std::string_view& name) const
+     return nullptr;
+ }
+ 
++// Loads an already-extracted Xbox 360 PE image (e.g. the output of xextool/xex2exe).
++// Little-endian PE headers; sections are copied to their RVAs so the result is
++// laid out exactly like the memory image produced by Xex2LoadImage.
++// NOTE: the XEX2 import tables do not exist in a bare PE, so no import symbols are created.
++Image PeLoadImage(const uint8_t* data, size_t size)
++{
++    auto rd16 = [&](size_t o) { uint16_t v; memcpy(&v, data + o, 2); return v; };
++    auto rd32 = [&](size_t o) { uint32_t v; memcpy(&v, data + o, 4); return v; };
++
++    if (size < 0x40 || rd32(0x3C) + 0x100 > size)
++        return {};
++
++    const size_t pe = rd32(0x3C);
++    if (rd32(pe) != 0x00004550) // "PE\0\0"
++        return {};
++
++    const uint16_t machine = rd16(pe + 4);
++    if (machine != 0x01F2) // IMAGE_FILE_MACHINE_POWERPCBE (Xbox 360)
++        return {};
++
++    const uint16_t numSections = rd16(pe + 6);
++    const uint16_t optSize = rd16(pe + 20);
++    const size_t opt = pe + 24;
++    if (rd16(opt) != 0x10B)
++        return {};
++
++    const uint32_t entryRva = rd32(opt + 16);
++    const uint32_t imageBase = rd32(opt + 28);
++    const uint32_t sizeOfImage = rd32(opt + 56);
++    const uint32_t sizeOfHeaders = rd32(opt + 60);
++
++    Image image{};
++    image.size = sizeOfImage;
++    image.base = imageBase;
++    image.entry_point = imageBase + entryRva;
++    image.data = std::make_unique<uint8_t[]>(sizeOfImage);
++    memset(image.data.get(), 0, sizeOfImage);
++    memcpy(image.data.get(), data, std::min<size_t>(sizeOfHeaders, std::min<size_t>(size, sizeOfImage)));
++
++    const size_t secTable = opt + optSize;
++    for (size_t i = 0; i < numSections; i++)
++    {
++        const size_t sh = secTable + i * 40;
++        char name[9] = {};
++        memcpy(name, data + sh, 8);
++
++        const uint32_t virtualSize = rd32(sh + 8);
++        const uint32_t virtualAddress = rd32(sh + 12);
++        const uint32_t rawSize = rd32(sh + 16);
++        const uint32_t rawPtr = rd32(sh + 20);
++        const uint32_t characteristics = rd32(sh + 36);
++
++        if (virtualAddress >= sizeOfImage || rawPtr >= size)
++            continue;
++
++        const size_t copy = std::min<size_t>({ rawSize, virtualSize ? virtualSize : rawSize,
++            size - rawPtr, sizeOfImage - virtualAddress });
++        memcpy(image.data.get() + virtualAddress, data + rawPtr, copy);
++
++        uint8_t flags{};
++        if (characteristics & 0x20) // IMAGE_SCN_CNT_CODE
++            flags |= SectionFlags_Code;
++
++        image.Map(name, virtualAddress, virtualSize ? virtualSize : rawSize, flags,
++            image.data.get() + virtualAddress);
++    }
++
++    return image;
++}
++
+ Image Image::ParseImage(const uint8_t* data, size_t size)
+ {
+     if (data[0] == ELFMAG0 && data[1] == ELFMAG1 && data[2] == ELFMAG2 && data[3] == ELFMAG3)
+@@ -39,6 +110,10 @@ Image Image::ParseImage(const uint8_t* data, size_t size)
+     {
+         return Xex2LoadImage(data, size);
+     }
++    else if (data[0] == 'M' && data[1] == 'Z')
++    {
++        return PeLoadImage(data, size);
++    }
+ 
+     return {};
+ }
+diff --git a/XenonUtils/image.h b/XenonUtils/image.h
+index be61119..c33b3d9 100644
+--- a/XenonUtils/image.h
++++ b/XenonUtils/image.h
+@@ -47,3 +47,4 @@ struct Image
+ };
+ 
+ Image ElfLoadImage(const uint8_t* data, size_t size);
++Image PeLoadImage(const uint8_t* data, size_t size);

@@ -1,0 +1,30 @@
+# Too Human (Xbox 360) - XenonRecomp configuration
+# Image: PE, base 0x82000000, entry 0x82A46B18 (RVA 0xA46B18)
+[main]
+file_path = "../private/default.exe"
+out_directory_path = "../ppc"
+switch_table_file_path = "switch_tables.toml"
+
+# Leave all optimizations OFF until a working build exists.
+skip_lr = false
+skip_msr = false
+ctr_as_local = false
+xer_as_local = false
+reserved_as_local = false
+cr_as_local = false
+non_argument_as_local = false
+non_volatile_as_local = false
+
+# Compiler save/restore helpers (found via XenonRecomp README byte patterns)
+restgprlr_14_address = 0x82A53A20
+savegprlr_14_address = 0x82A539D0
+restfpr_14_address   = 0x82A6675C
+savefpr_14_address   = 0x82A66710
+restvmx_14_address   = 0x82EC9BD8
+savevmx_14_address   = 0x82EC9940
+restvmx_64_address   = 0x82EC9C6C
+savevmx_64_address   = 0x82EC99D4
+
+# setjmp/longjmp: not located yet (needs RtlUnwind import name) - TODO
+# longjmp_address = 0x........
+# setjmp_address  = 0x........

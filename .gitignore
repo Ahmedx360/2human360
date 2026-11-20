@@ -1,0 +1,4 @@
+# Game binaries are copyrighted - never commit them
+private/
+*.xex
+*.exe
