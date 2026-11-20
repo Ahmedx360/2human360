@@ -233,7 +233,7 @@ bool PpcImportRegistry::prepare_variable_imports(
             bytes[4] = 6;
             break;
         case 0x0158: // XboxKrnlVersion: permissive retail-compatible version.
-            store_be16(bytes, 0, 2);
+            store_be16(bytes, 2);
             store_be16(bytes + 2, 0xFFFF);
             store_be16(bytes + 4, 0xFFFF);
             bytes[6] = 0x80;
