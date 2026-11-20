@@ -24,7 +24,8 @@ bool read_file(const char* path, std::vector<std::uint8_t>& bytes) {
         return false;
     }
     const auto size = static_cast<std::uint64_t>(end);
-    if (size > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
+    if (size > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max()) ||
+        size > static_cast<std::uint64_t>(std::numeric_limits<std::streamsize>::max())) {
         std::cerr << "File is too large for this host: " << path << '\n';
         return false;
     }
