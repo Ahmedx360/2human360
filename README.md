@@ -13,9 +13,9 @@ You must provide your own legally obtained game files. No game executable, asset
 | Jump-table recovery | 396 initial tables, plus manually recovered NOP-padded tables |
 | Recompiler fixes | Title-specific PE loader, switch-boundary and VMX/codegen fixes |
 | Generated-code library | CMake static-library target added; requires Clang and SIMDe |
-| Kernel/XAM HLE | XEX2 import parser and exact library/ordinal dispatch registry implemented; actual kernel/XAM handlers are not implemented yet |
-| Guest memory / image loader | Bounded big-endian memory view, checked PE32/PPCBE loader, 4 GiB guest address space, section protections and synchronized first-fit guest heap implemented; MMIO, aliases, threads and synchronization remain future work |
-| PPC indirect calls | Generated function map, diagnostic unresolved-target trap, and caller-context invocation bridge implemented; XEX function-import thunks can be routed by library/ordinal |
+| Kernel/XAM HLE | Actual XEX import inventory/name map, function-IAT patching and backing storage for 11 kernel data exports implemented; callable kernel/XAM handlers remain missing |
+| Guest memory / image loader | Bounded big-endian memory view, standalone PE loader, direct unencrypted/basic-compressed XEX loader, section protections, 4 GiB guest address space and synchronized first-fit heap implemented; MMIO, aliases and guest threads remain future work |
+| PPC indirect calls | Generated function map, diagnostic unresolved-target trap, caller-context invocation, function IAT patching and exact library/ordinal trampoline dispatch implemented |
 | Xenos graphics / EDRAM | Runtime implementation still required |
 | XMA audio | Runtime implementation still required |
 | Controller/input | Runtime implementation still required |
@@ -29,6 +29,10 @@ The analyzed input is default.exe, a big-endian PowerPC Xbox 360 PE image:
 
 - Image base: 0x82000000
 - Entry point: 0x82A46B18
+- PE SizeOfImage: 0x017AFE00
+- XEX title ID: 0x4D5307DE
+- XEX default stack: 0x40000 bytes
+- XEX TLS: 64 slots, 0x450-byte template
 - .text real RVA: 0x32B000 (the section header reports 0x330000)
 - .text size: 0xDFF2AC
 - .pdata size: 0x8E200
@@ -85,7 +89,7 @@ cmake --build build/runtime --parallel
 ctest --test-dir build/runtime --output-on-failure
 ~~~
 
-To inspect the real Too Human imports directly from the original decrypted `default.xex`, run `./build/runtime/TooHumanXexImportAudit private/default.xex`. The XEX loader handles the title's unencrypted basic-compressed payload, reconstructs its guest-RVA image, and reports library IDs/versions, import ordinals, paired function IAT slots, true variable imports, stack size and TLS metadata. The older two-file form with a matching extracted `default.exe` remains available. To link the generated PPC library and exercise the full memory/function-table/import initialization path using only the XEX, configure with `-DTH_BUILD_RUNTIME_PROBE=ON`, build `TooHumanRuntimeProbe`, then run `./build/probe/TooHumanRuntimeProbe private/default.xex`. The probe deliberately does not invoke the game entry point. To build it explicitly (with the XenonRecomp checkout and generated PPC sources available):
+To inspect the real Too Human imports directly from the original decrypted `default.xex`, run `./build/runtime/TooHumanXexImportAudit private/default.xex`. The XEX loader handles the title's unencrypted basic-compressed payload, reconstructs its guest-RVA image, and reports library IDs/versions, import ordinals, paired function IAT slots, true variable imports, stack size and TLS metadata. The older two-file form with a matching extracted `default.exe` remains available. To link the generated PPC library and exercise memory/function-table/function-IAT/kernel-variable initialization using only the XEX, configure with `-DTH_BUILD_RUNTIME_PROBE=ON`, build `TooHumanRuntimeProbe`, then run `./build/probe/TooHumanRuntimeProbe private/default.xex`. The probe deliberately does not invoke the game entry point. To build it explicitly (with the XenonRecomp checkout and generated PPC sources available):
 
 ~~~sh
 cmake -S . -B build/probe -DTH_BUILD_RECOMP_LIB=ON -DTH_BUILD_RUNTIME_CORE=ON -DTH_BUILD_RUNTIME_PROBE=ON -DBUILD_TESTING=OFF
@@ -129,7 +133,7 @@ The checked-in XenonRecomp patch corrects the known scalar-scratch code-emission
 
 The analyzed executable is a bare PE rather than an XEX2 container. XenonRecomp's normal XEX2/ELF loading path does not directly handle this PE, so the patch adds an Xbox 360 PowerPC PE loader and accounts for the observed section-address delta in this image.
 
-A bare PE does not preserve the XEX2 import metadata. The matching original `default.xex` is required to recover the title's actual library/ordinal/thunk records. The supplied Too Human XEX is unencrypted and uses basic compression, which the new XEX-only loader handles directly. The registry is ready to route those records, but actual kernel/XAM service handlers still need to be implemented and tested.
+A bare PE does not preserve the XEX2 import metadata. The matching original `default.xex` is required to recover the title's actual library/ordinal/thunk records. The supplied Too Human XEX is unencrypted and uses basic compression, which the new XEX-only loader handles directly. The runtime now binds the 11 data exports and routes all 242 function imports through a diagnostic trampoline. Their actual kernel/XAM service handlers still need to be implemented and tested.
 
 ## Architecture and next runtime milestones
 
