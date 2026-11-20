@@ -22,12 +22,12 @@ if(BUILD_TESTING)
     )
 endif()
 
-# Host runtime primitives are independent from generated PPC code and can be
-# built/tested without the XenonRecomp submodule.
-if(TH_BUILD_RUNTIME_CORE)
-    add_subdirectory(runtime)
-endif()
-
 if(TH_BUILD_RECOMP_LIB)
     add_subdirectory(TooHumanRecompLib)
+endif()
+
+# Host runtime primitives remain independently buildable. When the generated
+# library is enabled, runtime also builds its PPC function-table adapter.
+if(TH_BUILD_RUNTIME_CORE)
+    add_subdirectory(runtime)
 endif()
