@@ -62,9 +62,10 @@ Names are resolved from the pinned XenonRecomp/Xenia Xbox export table.
 | `0x01C1` | `VdHSIOCalibrationLock` |
 | `0x0266` | `KeCertMonitorData` |
 
-The runtime currently identifies these variables but does not yet provide their
-guest storage or full semantics. This is a concrete next implementation task;
-they must not be mistaken for callable function imports.
+The runtime now allocates guest backing storage for all 11 variables and patches
+their IAT slots before image protections. Hardware/version/command-line/module-
+handle values are initialized and KeTimeStampBundle is updated every millisecond.
+Object-type, monitor, device and critical-section semantics remain partial.
 
 ## Import name manifest
 
