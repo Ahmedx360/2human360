@@ -6,6 +6,10 @@ add_library(TooHumanRuntimeCore STATIC
 )
 add_library(TooHumanRecomp::RuntimeCore ALIAS TooHumanRuntimeCore)
 
+add_executable(TooHumanXexImportAudit ../tools/xex_import_audit.cpp)
+target_link_libraries(TooHumanXexImportAudit PRIVATE TooHumanRuntimeCore)
+target_compile_features(TooHumanXexImportAudit PRIVATE cxx_std_20)
+
 target_include_directories(TooHumanRuntimeCore
     PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}"
 )
