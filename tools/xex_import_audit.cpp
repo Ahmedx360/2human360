@@ -66,6 +66,9 @@ int main(int argc, char** argv) {
     std::cout << "Image base: 0x" << std::hex << std::uppercase
               << pe.image->image_base << "  size: 0x" << pe.image->image_size
               << "  entry: 0x" << pe.image->entry_point << std::dec << '\n';
+    std::cout << "Default stack size: 0x" << std::hex << imports.default_stack_size
+              << "  default heap size: 0x" << imports.default_heap_size
+              << std::dec << "\n";
     std::cout << "Imported thunk records: " << imports.imports.size() << "\n\n";
 
     std::size_t functions = 0;
