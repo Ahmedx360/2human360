@@ -390,14 +390,16 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) const 
     const auto& binding = import_it->second;
     const auto& import = binding.import;
     if (binding.handler == nullptr) {
-        const auto export_name = lookup_title_export_name(import.library, import.ordinal);
+        const auto resolved_name = lookup_title_export_name(import.library, import.ordinal);
+        const auto export_name = resolved_name.empty()
+            ? std::string_view("<unknown>") : resolved_name;
         std::fprintf(stderr,
                      "[TooHuman] Unimplemented import %s!%.*s ordinal 0x%04X "
                      "(thunk=0x%08X, LR=0x%016llX, r3=0x%08X, r4=0x%08X, "
                      "r5=0x%08X, r6=0x%08X)\n",
                      import.library.c_str(),
                      static_cast<int>(export_name.size()),
-                     export_name.empty() ? "<unknown>" : export_name.data(),
+                     export_name.data(),
                      static_cast<unsigned>(import.ordinal),
                      static_cast<unsigned>(thunk_address),
                      static_cast<unsigned long long>(context.lr),
