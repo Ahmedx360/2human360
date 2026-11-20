@@ -19,6 +19,7 @@ set_target_properties(TooHumanRuntimeCore PROPERTIES
 if(TH_BUILD_RECOMP_LIB)
     add_library(TooHumanPpcRuntime STATIC
         ppc/function_table.cpp
+        ppc/import_registry.cpp
     )
     target_link_libraries(TooHumanPpcRuntime
         PUBLIC TooHumanRuntimeCore TooHumanRecompLib
@@ -29,6 +30,21 @@ if(TH_BUILD_RECOMP_LIB)
         CXX_STANDARD_REQUIRED ON
         POSITION_INDEPENDENT_CODE ON
     )
+endif()
+
+
+if(BUILD_TESTING AND TH_BUILD_RECOMP_LIB)
+    add_executable(TooHumanPpcImportRegistryTests
+        tests/ppc_import_registry_tests.cpp
+    )
+    target_link_libraries(TooHumanPpcImportRegistryTests PRIVATE TooHumanPpcRuntime)
+    target_compile_features(TooHumanPpcImportRegistryTests PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(TooHumanPpcImportRegistryTests PRIVATE /UNDEBUG)
+    else()
+        target_compile_options(TooHumanPpcImportRegistryTests PRIVATE -UNDEBUG)
+    endif()
+    add_test(NAME TooHumanPpcImportRegistryTests COMMAND TooHumanPpcImportRegistryTests)
 endif()
 
 if(BUILD_TESTING)
