@@ -11,7 +11,7 @@ The artifact validator checks:
 - generated translation-unit numbering is contiguous;
 - function-map entries and shared declarations agree;
 - no non-empty compiler-error sidecars are left behind;
-- the two known scalar-scratch codegen defects are normalized before compilation.
+- known scalar-scratch and computed-branch defects are normalized before compilation; branch targets are also checked for PowerPC word alignment.
 
 Run the checks with:
 
@@ -20,14 +20,18 @@ cmake --preset validate-only
 ctest --preset validate
 ~~~
 
-## Known generator defects corrected
+## Known generator and translation defects corrected
 
 Two custom emitter cases in tools/patches/xenonrecomp-pe-loader.patch previously treated the scalar PPCRegister temp scratch value as if its f32 or u8 members were vector arrays:
 
 - PPC_INST_VCFPUXWS128 emitted temp.f32[0] and the invalid C++ float literal 1f;
 - PPC_INST_VRLH emitted temp.u8[0].
 
-The patch now emits scalar temp.f32 / temp.u8 accesses and a decimal float literal. The CMake build also creates corrected copies of the two already-generated legacy translation units in the build directory. The checked-in generated PPC files are not rewritten by the build.
+The patch now emits scalar temp.f32 / temp.u8 accesses and a decimal float literal.
+
+A full Clang build then exposed a second issue in ppc_recomp.125.cpp. Two NOP-padded computed-switch entries retained the low bits of their bctr destinations (0x8281405E and 0x82814C67). PowerPC bctr uses CTR[0:29] with the low two target bits cleared, so the valid destinations are 0x8281405C and 0x82814C64. The switch-table recovery script now applies that alignment rule; the existing switch table was corrected, and the build-time normalizer adds the missing instruction labels to a temporary compilation copy.
+
+CMake therefore normalizes three legacy translation units in the build directory only (ppc_recomp.125.cpp, .191.cpp and .372.cpp). The checked-in generated PPC files are not rewritten by the build.
 
 ## Recompiler-specific findings
 
