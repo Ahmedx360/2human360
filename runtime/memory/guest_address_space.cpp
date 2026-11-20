@@ -161,6 +161,15 @@ bool GuestAddressSpace::map_image(const LoadedPeImage& image, std::string* error
     return true;
 }
 
+bool GuestAddressSpace::commit_region(std::uint32_t guest_address, std::size_t size,
+                                      std::string* error) {
+    if (!valid()) {
+        set_error(error, "Guest address space has not been reserved");
+        return false;
+    }
+    return commit_range(guest_address, size, error);
+}
+
 bool GuestAddressSpace::initialize_function_table(std::uint32_t code_base,
                                                   std::uint32_t code_size,
                                                   std::string* error) {
