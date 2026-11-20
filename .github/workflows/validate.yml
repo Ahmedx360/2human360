@@ -1,8 +1,14 @@
 name: Validate and build Too Human recompilation
 
 on:
-  push:
   pull_request:
+  workflow_dispatch:
+
+# Keep only the newest validation for a given PR/ref. This prevents a backlog
+# when several commits are pushed while a build is still queued or running.
+concurrency:
+  group: too-human-validation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -14,11 +20,6 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
 
       - name: Configure validation build
         run: cmake -S . -B build/validate -DTH_BUILD_RECOMP_LIB=OFF -DBUILD_TESTING=ON
@@ -56,5 +57,6 @@ jobs:
 
       - name: Compile the recompiled game-code library
         run: cmake --build build/clang --target TooHumanRuntimeProbe TooHumanPpcImportRegistryTests --parallel 2
+
       - name: Test XEX import dispatch
         run: ctest --test-dir build/clang -R TooHumanPpcImportRegistryTests --output-on-failure
