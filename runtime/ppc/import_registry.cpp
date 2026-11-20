@@ -272,6 +272,8 @@ bool PpcImportRegistry::prepare_variable_imports(
                 return false;
             }
             std::memcpy(memory.base() + *header_copy, xex_file.data(), xex_header_size);
+            xex_header_guest_address_ = *header_copy;
+            xex_header_size_ = xex_header_size;
             store_be32(memory.base() + *module_record + 0x58, *header_copy);
             store_be32(bytes, *module_record);
             break;
@@ -473,6 +475,54 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) const 
             }
             return;
         }
+    }
+
+    if (binding.handler == nullptr &&
+        import.library == "xboxkrnl.exe" && import.ordinal == 0x012B) {
+        // RtlImageXexHeaderField: inline values (key kind 0/1) are returned
+        // by address of their directory entry; larger fields are offsets
+        // from the XEX header base. The title's import descriptor is kind FF.
+        const auto header = context.r3.u32;
+        const auto requested_key = context.r4.u32;
+        std::uint32_t result = 0;
+        if (header == xex_header_guest_address_ && xex_header_size_ >= 0x18 &&
+            guest_range_valid(header, xex_header_size_)) {
+            const auto* bytes = base + header;
+            const auto count =
+                (static_cast<std::uint32_t>(bytes[0x14]) << 24) |
+                (static_cast<std::uint32_t>(bytes[0x15]) << 16) |
+                (static_cast<std::uint32_t>(bytes[0x16]) << 8) |
+                static_cast<std::uint32_t>(bytes[0x17]);
+            if (count <= (xex_header_size_ - 0x18) / 8) {
+                for (std::uint32_t i = 0; i < count; ++i) {
+                    const auto offset = static_cast<std::size_t>(0x18) +
+                                        static_cast<std::size_t>(i) * 8;
+                    const auto key =
+                        (static_cast<std::uint32_t>(bytes[offset]) << 24) |
+                        (static_cast<std::uint32_t>(bytes[offset + 1]) << 16) |
+                        (static_cast<std::uint32_t>(bytes[offset + 2]) << 8) |
+                        static_cast<std::uint32_t>(bytes[offset + 3]);
+                    if (key != requested_key) continue;
+                    const auto value =
+                        (static_cast<std::uint32_t>(bytes[offset + 4]) << 24) |
+                        (static_cast<std::uint32_t>(bytes[offset + 5]) << 16) |
+                        (static_cast<std::uint32_t>(bytes[offset + 6]) << 8) |
+                        static_cast<std::uint32_t>(bytes[offset + 7]);
+                    const auto kind = key & 0xFFu;
+                    if (kind <= 1u) {
+                        result = header + static_cast<std::uint32_t>(offset + 4);
+                    } else if (value < xex_header_size_) {
+                        std::uint64_t required = kind == 0xFFu
+                            ? 4u : static_cast<std::uint64_t>(kind) * 4u;
+                        if (required <= xex_header_size_ - value)
+                            result = header + value;
+                    }
+                    break;
+                }
+            }
+        }
+        context.r3.u32 = result;
+        return;
     }
 
     if (binding.handler == nullptr) {
