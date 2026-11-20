@@ -15,6 +15,7 @@ You must provide your own legally obtained game files. No game executable, asset
 | Generated-code library | CMake static-library target added; requires Clang and SIMDe |
 | Kernel/XAM HLE | Not implemented; import names are not resolved |
 | Guest memory / image loader | Bounded big-endian memory view, checked Xbox 360 PE32/PPCBE loader, and 4 GiB guest address-space reservation/image mapping implemented and unit-tested; per-section permissions, MMIO, threads and synchronization remain future work |
+| PPC indirect calls | Generated function map is registered into the expected guest lookup table; unresolved targets reach a diagnostic trap. Host entry/return bridge and imports remain future work |
 | Xenos graphics / EDRAM | Runtime implementation still required |
 | XMA audio | Runtime implementation still required |
 | Controller/input | Runtime implementation still required |
@@ -45,7 +46,7 @@ These are image-specific observations, not generic Xbox 360 addresses.
 
 ## Build the generated game-code library
 
-The CMake target builds the generated PPC translation units as **TooHumanRecompLib**. It is a library of translated guest functions only; it is not an executable and cannot launch the game without the runtime layers listed above.
+The CMake targets build the generated PPC translation units as **TooHumanRecompLib** and, when runtime support is enabled, **TooHumanPpcRuntime**, which installs the generated function map into the guest indirect-call table. They are libraries, not a game executable; the host entry/return bridge, kernel imports, graphics, audio and input are still missing.
 
 ### Requirements
 
@@ -76,7 +77,7 @@ cmake --build --preset validate-only --parallel
 ctest --preset validate
 ~~~
 
-The validation configuration also builds and tests the independent host-side runtime core. To build only that runtime foundation (without the generated PPC library or XenonRecomp submodule):
+The validation configuration also builds and tests the independent host-side runtime core. The full Clang build additionally compiles the PPC function-table adapter against the generated library. To build only that runtime foundation (without the generated PPC library or XenonRecomp submodule):
 
 ~~~sh
 cmake -S . -B build/runtime -DTH_BUILD_RECOMP_LIB=OFF -DTH_BUILD_RUNTIME_CORE=ON -DBUILD_TESTING=ON
@@ -90,7 +91,7 @@ On Windows, use a Developer Command Prompt with LLVM's clang-cl and Ninja availa
 
 ~~~powershell
 cmake -S . -B build -G Ninja -DCMAKE_CXX_COMPILER=clang-cl -DCMAKE_BUILD_TYPE=Release
-cmake --build build --target TooHumanRecompLib --parallel
+cmake --build build --target TooHumanPpcRuntime --parallel
 ~~~
 
 ## Reproduce the recompilation
