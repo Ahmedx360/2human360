@@ -41,6 +41,10 @@ XexImportResult fail(const char* message) {
     return result;
 }
 
+void set_error(std::string* error, const char* message) {
+    if (error) *error = message;
+}
+
 } // namespace
 
 XexImportResult parse_xex2_imports(std::span<const std::uint8_t> xex_file,
@@ -255,6 +259,51 @@ XexImportResult parse_xex2_imports(std::span<const std::uint8_t> xex_file,
         return fail("XEX2 import-library records do not fill the declared import block");
     }
     return result;
+}
+
+bool patch_xex_function_iat_slots(LoadedPeImage& image,
+                                  std::span<const XexImport> imports,
+                                  std::size_t* patched_count,
+                                  std::string* error) {
+    if (image.image_size == 0 || image.bytes.size() != image.image_size ||
+        static_cast<std::uint64_t>(image.image_base) + image.image_size >
+            (std::uint64_t{1} << 32)) {
+        set_error(error, "Cannot patch function IAT slots in an invalid guest image");
+        return false;
+    }
+
+    std::vector<std::pair<std::size_t, std::uint32_t>> patches;
+    for (const auto& item : imports) {
+        if (item.type != 0 || item.paired_thunk_address == 0) continue;
+        if (item.thunk_address < image.image_base ||
+            item.paired_thunk_address < image.image_base ||
+            (item.thunk_address & 3u) != 0 ||
+            (item.paired_thunk_address & 3u) != 0) {
+            set_error(error, "XEX function IAT pairing contains an invalid guest address");
+            return false;
+        }
+        const auto slot_offset =
+            static_cast<std::uint64_t>(item.thunk_address) - image.image_base;
+        const auto thunk_offset =
+            static_cast<std::uint64_t>(item.paired_thunk_address) - image.image_base;
+        if (slot_offset > image.bytes.size() ||
+            sizeof(std::uint32_t) > image.bytes.size() - static_cast<std::size_t>(slot_offset) ||
+            thunk_offset >= image.bytes.size()) {
+            set_error(error, "XEX function IAT pairing points outside the guest image");
+            return false;
+        }
+        patches.emplace_back(static_cast<std::size_t>(slot_offset),
+                             item.paired_thunk_address);
+    }
+
+    for (const auto& [offset, value] : patches) {
+        image.bytes[offset] = static_cast<std::uint8_t>(value >> 24);
+        image.bytes[offset + 1] = static_cast<std::uint8_t>(value >> 16);
+        image.bytes[offset + 2] = static_cast<std::uint8_t>(value >> 8);
+        image.bytes[offset + 3] = static_cast<std::uint8_t>(value);
+    }
+    if (patched_count) *patched_count = patches.size();
+    return true;
 }
 
 } // namespace toohuman::runtime
