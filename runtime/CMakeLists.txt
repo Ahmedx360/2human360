@@ -80,7 +80,10 @@ if(BUILD_TESTING)
     add_executable(TooHumanXbox360PeTests
         tests/xbox360_pe_tests.cpp
     )
-    foreach(test_target IN ITEMS TooHumanGuestMemoryTests TooHumanXbox360PeTests)
+    add_executable(TooHumanXexImageTests
+        tests/xex_image_tests.cpp
+    )
+    foreach(test_target IN ITEMS TooHumanGuestMemoryTests TooHumanXbox360PeTests TooHumanXexImageTests)
         target_link_libraries(${test_target} PRIVATE TooHumanRuntimeCore)
         target_compile_features(${test_target} PRIVATE cxx_std_20)
         if(MSVC)
@@ -91,4 +94,5 @@ if(BUILD_TESTING)
     endforeach()
     add_test(NAME TooHumanGuestMemoryTests COMMAND TooHumanGuestMemoryTests)
     add_test(NAME TooHumanXbox360PeTests COMMAND TooHumanXbox360PeTests)
+    add_test(NAME TooHumanXexImageTests COMMAND TooHumanXexImageTests)
 endif()
