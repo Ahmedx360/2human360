@@ -35,10 +35,16 @@ The guest-memory tests cover big-endian scalar access, boundary checks, unaligne
 
 When the generated library is enabled, `TooHumanPpcRuntime` registers every non-null entry in `PPCFuncMappings` into the guest table located immediately after the image. Its index formula matches `PPC_LOOKUP_FUNC`: `(guest_address - PPC_CODE_BASE) * 2`, yielding one host function-pointer slot for each aligned PPC instruction address. All unregistered slots point to a diagnostic trap that reports the unresolved CTR target and LR, then aborts instead of calling a null pointer. This does not resolve Xbox kernel/XAM imports; it makes missing targets observable. `invoke_recompiled_function` can call a known mapped guest function using a caller-prepared `PPCContext`. `commit_region` lets the host reserve guest stack/TLS/heap ranges at explicitly selected guest addresses, but no default stack layout or thread lifecycle is assumed.
 
+## Implemented: XEX2 import metadata and dispatch registry
+
+`parse_xex2_imports` reads the XEX2 optional-header table, library string table, per-library descriptors and big-endian thunk ordinals. It combines the original XEX metadata with the separately extracted PE image, so it can recover each import's library, ordinal, thunk address, type and hint without decrypting or decompressing the XEX payload. `PpcImportRegistry` installs function-import thunks into the PPC table and dispatches by exact `(library, ordinal)` keys. Handlers must be registered explicitly. Unknown imports log the library, ordinal, thunk, LR and r3-r6 before aborting; variable imports are parsed but are not callable thunks and are not dispatched. Only one active registry is supported per process.
+
+The PE-only workflow cannot provide this metadata. Use the optional XEX TOML configuration with the matching original `default.xex` to preserve imports when regenerating the PPC translation.
+
 ## Next implementation sequence
 
 1. Add per-section page permissions and guard unmapped ranges; the current loader commits the complete PE image range read/write. Keep MMIO outside ordinary RAM.
-2. Obtain the matching original XEX2 metadata and regenerate or augment the import stubs using verified library/ordinal identities. Unknown imports must report the guest PC and arguments; never guess ordinal names.
+2. Register and implement the imports proven to be called during Too Human startup, beginning with memory, synchronization and thread creation. Keep unknown ordinals fail-fast.
 3. Implement synchronization and thread primitives only after their ABI and observed call sites are documented.
 4. Establish Too Human's real startup stack, TLS, register state and guest-thread lifecycle from XEX metadata and observed call sites.
 5. Add virtual file access and save-data isolation.
