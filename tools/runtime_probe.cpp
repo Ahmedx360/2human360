@@ -1,4 +1,5 @@
 #include "image/xbox360_pe.hpp"
+#include "image/xex_image.hpp"
 #include "memory/guest_address_space.hpp"
 #include "ppc/title_runtime.hpp"
 
@@ -42,19 +43,34 @@ bool read_file(const char* path, std::vector<std::uint8_t>& bytes) {
 } // namespace
 
 int main(int argc, char** argv) {
-    if (argc != 3) {
-        std::cerr << "Usage: TooHumanRuntimeProbe <default.xex> <default.exe>\n";
+    if (argc != 2 && argc != 3) {
+        std::cerr << "Usage: TooHumanRuntimeProbe <default.xex> [default.exe]\n";
         return 2;
     }
 
     std::vector<std::uint8_t> xex_bytes;
-    std::vector<std::uint8_t> pe_bytes;
-    if (!read_file(argv[1], xex_bytes) || !read_file(argv[2], pe_bytes)) return 2;
+    if (!read_file(argv[1], xex_bytes)) return 2;
 
-    const auto image = toohuman::runtime::load_xbox360_pe(pe_bytes);
-    if (!image) {
-        std::cerr << "PE load failed: " << image.error.message << '\n';
-        return 1;
+    std::optional<toohuman::runtime::LoadedPeImage> loaded_image;
+    if (argc == 2) {
+        const auto xex_image = toohuman::runtime::load_xex2_image(xex_bytes);
+        if (!xex_image) {
+            std::cerr << "XEX image load failed: " << xex_image.error << '\n';
+            return 1;
+        }
+        loaded_image = *xex_image.image;
+        std::cout << "XEX compression type: " << xex_image.compression_type
+                  << "  decompressed image bytes: 0x" << std::hex
+                  << xex_image.decompressed_size << std::dec << '\\n';
+    } else {
+        std::vector<std::uint8_t> pe_bytes;
+        if (!read_file(argv[2], pe_bytes)) return 2;
+        const auto pe = toohuman::runtime::load_xbox360_pe(pe_bytes);
+        if (!pe) {
+            std::cerr << "PE load failed: " << pe.error.message << '\n';
+            return 1;
+        }
+        loaded_image = *pe.image;
     }
 
     std::string error;
@@ -67,17 +83,18 @@ int main(int argc, char** argv) {
     toohuman::runtime::PpcImportRegistry imports;
     toohuman::runtime::TitleRuntimeInitReport report{};
     if (!toohuman::runtime::initialize_title_runtime(
-            memory, *image.image, xex_bytes, imports, &report, &error)) {
+            memory, *loaded_image, xex_bytes, imports, &report, &error)) {
         std::cerr << "Runtime initialization failed: " << error << '\n';
         return 1;
     }
 
     std::cout << "Guest image mapped at 0x" << std::hex << std::uppercase
-              << image.image->image_base << " (size 0x" << image.image->image_size
-              << ", entry 0x" << image.image->entry_point << ")\n" << std::dec;
+              << loaded_image->image_base << " (size 0x" << loaded_image->image_size
+              << ", entry 0x" << loaded_image->entry_point << ")\n" << std::dec;
     std::cout << "Registered PPC functions: " << report.translated_functions << '\n';
     std::cout << "Registered function imports: " << report.function_imports << '\n';
-    std::cout << "Parsed variable imports: " << report.variable_imports << '\n';
+    std::cout << "Patched function IAT slots: " << report.function_iat_slots << '\n';
+    std::cout << "Unbound variable imports: " << report.variable_imports << '\n';
     std::cout << "XEX default stack size: 0x" << std::hex << report.default_stack_size
               << "  default heap size: 0x" << report.default_heap_size << std::dec << '\n';
     if (report.tls_info) {
