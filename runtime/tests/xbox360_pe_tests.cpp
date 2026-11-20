@@ -1,4 +1,5 @@
 #include "image/xbox360_pe.hpp"
+#include "image/xex_imports.hpp"
 #include "memory/guest_address_space.hpp"
 
 #include <array>
@@ -56,6 +57,25 @@ std::vector<std::uint8_t> make_pe() {
 }
 }
 
+std::vector<std::uint8_t> make_xex_imports() {
+    std::vector<std::uint8_t> b(0x100, 0);
+    put32(b, 0, 0x58455832); // XEX2
+    put32(b, 0x14, 1);       // One optional header.
+    put32(b, 0x18, 0x000103FF);
+    put32(b, 0x1C, 0x40);    // Import header file offset.
+    put32(b, 0x40, 0x50);    // Header size.
+    put32(b, 0x44, 16);      // Padded library-name table.
+    put32(b, 0x48, 1);       // One import library.
+    const char name[] = "xboxkrnl.exe";
+    for (std::size_t i = 0; i < sizeof(name); ++i) b[0x4C + i] = name[i];
+    const std::size_t library = 0x5C;
+    put32(b, library, 0x2C);
+    put16(b, library + 0x24, 0);
+    put16(b, library + 0x26, 1);
+    put32(b, library + 0x28, 0x82001000);
+    return b;
+}
+
 int main() {
     auto file = make_pe();
     auto result = load_xbox360_pe(file);
@@ -71,6 +91,24 @@ int main() {
     assert(image.sections[1].virtual_address == 0x4000);
     assert(image.bytes[0x4000] == 0x5A);
     assert(image.bytes[0x3000] == 0); // BSS/zero-fill remains zero.
+
+    auto import_image = image;
+    import_image.bytes[0x1000] = 0x01;
+    import_image.bytes[0x1001] = 0x00;
+    import_image.bytes[0x1002] = 0x00;
+    import_image.bytes[0x1003] = 0x74;
+    const auto xex = make_xex_imports();
+    const auto imports = toohuman::runtime::parse_xex2_imports(xex, import_image);
+    assert(imports);
+    assert(imports.imports.size() == 1);
+    assert(imports.imports[0].library == "xboxkrnl.exe");
+    assert(imports.imports[0].ordinal == 0x74);
+    assert(imports.imports[0].type == 1);
+    assert(imports.imports[0].hint == 0);
+    assert(imports.imports[0].thunk_address == 0x82001000);
+    auto invalid_xex = xex;
+    invalid_xex[0] = 'N';
+    assert(!toohuman::runtime::parse_xex2_imports(invalid_xex, import_image));
 
     std::string address_space_error;
     auto address_space = toohuman::runtime::GuestAddressSpace::reserve(&address_space_error);
