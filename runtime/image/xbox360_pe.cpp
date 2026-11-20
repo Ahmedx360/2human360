@@ -11,6 +11,7 @@ namespace {
 constexpr std::uint16_t kXbox360PowerPcBe = 0x01F2;
 constexpr std::uint16_t kPe32Magic = 0x010B;
 constexpr std::uint32_t kCodeSection = 0x00000020;
+constexpr std::uint32_t kMaxImageSize = 512u * 1024u * 1024u;
 constexpr std::uint64_t kGuestAddressLimit = std::uint64_t{1} << 32;
 
 bool range_fits(std::size_t offset, std::size_t length, std::size_t total) noexcept {
@@ -69,7 +70,7 @@ PeLoadResult load_xbox360_pe(std::span<const std::uint8_t> file) {
     const auto image_base = read_u32(file, optional_offset + 28);
     const auto image_size = read_u32(file, optional_offset + 56);
     const auto headers_size = read_u32(file, optional_offset + 60);
-    if (image_size == 0 ||
+    if (image_size == 0 || image_size > kMaxImageSize ||
         static_cast<std::uint64_t>(image_base) + image_size > kGuestAddressLimit) {
         return failure("PE image range is empty or exceeds the 32-bit guest address space");
     }
