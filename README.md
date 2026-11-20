@@ -103,7 +103,7 @@ cmake --build build --target TooHumanRecompLib --parallel
 
 The configuration points to ../../private/default.exe, ../ppc, and switch_tables.toml relative to TooHumanRecompLib/config/.
 
-The checked-in XenonRecomp patch also corrects two known code-emission mistakes. The build has a non-destructive fallback normalizer for the already-generated legacy units, so the tracked PPC output is not rewritten by CMake.
+The checked-in XenonRecomp patch corrects the known scalar-scratch code-emission mistakes, and the NOP-padded switch-table scanner now aligns computed bctr destinations to PowerPC instruction boundaries. The build has a non-destructive fallback normalizer for three already-generated legacy translation units, so the tracked PPC output is not rewritten by CMake.
 
 ## Why the PE loader patch is needed
 
