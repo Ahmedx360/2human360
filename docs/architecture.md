@@ -16,6 +16,7 @@ The runtime core is an incremental foundation, not a complete emulator. A host e
 | TooHumanRecompLib | Static library containing generated PowerPC functions and dispatch map | Generated sources and build target exist |
 | runtime/memory | Bounded PPC big-endian access and full 4 GiB guest VA reservation | Reservation and PE image mapping implemented; per-section permissions pending |
 | runtime/image | Extracted Xbox 360 PE parsing and image-relative section loading | PE32/PPCBE loader implemented and synthetic-fixture tested; no XEX imports |
+| runtime/ppc | Populate XenonRecomp's indirect-call function table | Generated map registration and unresolved-target trap implemented; not a host entry/return bridge |
 | TooHumanRecomp (future) | Host executable, startup, window, configuration, logging and game-data discovery | Not implemented |
 | kernel (future) | Verified Xbox kernel/XAM imports, handles, virtual files, events and synchronization | Not implemented |
 | cpu / os (future) | PPC context lifecycle, guest-thread scheduling, TLS, exceptions and host/guest call bridges | Generated PPC context exists; runtime lifecycle not implemented |
@@ -37,7 +38,7 @@ Before invoking translated code, the runtime still must:
 - map the complete guest image at its verified guest virtual addresses;
 - apply per-section permissions and reserve/handle MMIO ranges;
 - ensure image base and PPC code base agree with ppc_config.h;
-- validate all indirect branch targets against the function map or explicit import trampolines;
+- populate the indirect-call table from `PPCFuncMappings` and trap unmapped targets;
 - establish guest stack, TLS and per-thread PPC contexts;
 - trap or emulate MMIO rather than treating device registers as ordinary RAM.
 
@@ -77,7 +78,7 @@ Map a host gamepad API into the XInput/HID structures expected by the game. Keep
 
 1. Build correctness — generated sources compile into TooHumanRecompLib; keep generator and artifact checks reproducible.
 2. Guest memory and image loader — apply per-section permissions to the validated PE image and define explicit MMIO ranges.
-3. PPC dispatcher — add a validated adapter around the generated function map and execute a harmless verified function.
+3. PPC execution bridge — establish a guest stack and initial PPCContext, then invoke a verified entry through the generated function table.
 4. Import observability — add trampolines reporting unknown library/ordinal, guest PC and arguments.
 5. Boot-critical kernel — implement only imports proven to be called during startup, with documented semantics and tests.
 6. File I/O and threading — support asset reads, synchronization and guest thread scheduling.
