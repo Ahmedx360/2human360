@@ -100,7 +100,7 @@ int main() {
     xex_header[9] = 0;
     xex_header[10] = 0;
     xex_header[11] = 0x80;
-    // One optional-header directory entry: import metadata at file offset 0x40.
+    // Two optional-header entries: import metadata and immediate system flags.
     xex_header[0x17] = 2;
     xex_header[0x19] = 0x01;
     xex_header[0x1A] = 0x03;
