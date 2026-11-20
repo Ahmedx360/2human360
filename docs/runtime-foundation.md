@@ -8,7 +8,7 @@ This runtime foundation now includes a bounded guest-memory view and a tested lo
 
 ## Implemented: guest address-space reservation and PE image loading
 
-`TooHumanRecomp::RuntimeCore` provides two complementary memory layers. `GuestMemory` is a non-owning bounded view over a caller-owned byte span. `GuestAddressSpace` reserves the full 4 GiB guest virtual address range in a 64-bit host process and commits the loaded image at `base + guest_virtual_address`, matching the addressing model emitted into translated PPC code. The image mapper currently uses read/write pages for the complete image range; section-specific permissions are not yet applied. The memory view:
+`TooHumanRecomp::RuntimeCore` provides two complementary memory layers. `GuestMemory` is a non-owning bounded view over a caller-owned byte span. `GuestAddressSpace` reserves the full 4 GiB guest virtual address range in a 64-bit host process and commits the loaded image at `base + guest_virtual_address`, matching the addressing model emitted into translated PPC code. The image mapper applies read-only protections to headers and non-writable sections, read/write protections to writable sections, and no-access protections to gaps. Guest stack/heap/MMIO regions can be committed explicitly as read/write. The memory view:
 
 - maps a contiguous span to an explicit 32-bit guest base;
 - validates the complete range using 64-bit arithmetic, including the 4 GiB boundary;
@@ -17,7 +17,7 @@ This runtime foundation now includes a bounded guest-memory view and a tested lo
 - reads and writes unsigned PPC scalar values in big-endian order;
 - avoids alignment assumptions by operating on bytes.
 
-The owner remains responsible for retaining the `GuestMemory` backing storage. The address-space reservation is owned by `GuestAddressSpace` and released with it. Sparse mappings, per-section permissions, aliases and MMIO dispatch are future work.
+The owner remains responsible for retaining the `GuestMemory` backing storage. The address-space reservation is owned by `GuestAddressSpace` and released with it. Sparse region tracking, aliases, guard-page policy and MMIO dispatch are future work.
 
 ## Build and test
 
@@ -43,7 +43,7 @@ The PE-only workflow cannot provide this metadata. Use the optional XEX TOML con
 
 ## Next implementation sequence
 
-1. Add per-section page permissions and guard unmapped ranges; the current loader commits the complete PE image range read/write. Keep MMIO outside ordinary RAM.
+1. Add explicit MMIO ranges and aliases without exposing them as ordinary RAM.
 2. Implement only the imports proven to be called during Too Human startup, beginning with memory, synchronization and thread creation. Keep unknown ordinals fail-fast and document each ABI.
 3. Establish Too Human's real startup stack, TLS, register state and guest-thread lifecycle from XEX metadata and observed call sites.
 4. Add virtual file access and save-data isolation.
