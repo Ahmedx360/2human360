@@ -15,6 +15,7 @@ The runtime core is an incremental foundation, not a complete emulator. A host e
 |---|---|---|
 | TooHumanRecompLib | Static library containing generated PowerPC functions and dispatch map | Generated sources and build target exist |
 | runtime/memory | Bounded guest address-space views and PPC big-endian scalar access | Initial contiguous-memory view implemented and tested |
+| runtime/image | Extracted Xbox 360 PE parsing and image-relative section loading | PE32/PPCBE loader implemented and synthetic-fixture tested; no XEX imports |
 | TooHumanRecomp (future) | Host executable, startup, window, configuration, logging and game-data discovery | Not implemented |
 | kernel (future) | Verified Xbox kernel/XAM imports, handles, virtual files, events and synchronization | Not implemented |
 | cpu / os (future) | PPC context lifecycle, guest-thread scheduling, TLS, exceptions and host/guest call bridges | Generated PPC context exists; runtime lifecycle not implemented |
@@ -29,7 +30,7 @@ Keep title-specific patches and constants separate from generic execution servic
 
 ### 1. Guest address space and PPC dispatch
 
-The generated code accesses guest memory through a 32-bit guest address space and a host base pointer. TooHumanRecomp::RuntimeCore currently provides a bounded, non-owning contiguous memory view with big-endian scalar reads/writes. See runtime-foundation.md.
+The generated code accesses guest memory through a 32-bit guest address space and a host base pointer. TooHumanRecomp::RuntimeCore provides a bounded, non-owning contiguous memory view with big-endian scalar reads/writes, plus a checked loader for the extracted Too Human PE. See runtime-foundation.md. The PE loader returns compact image-relative storage; generated PPC code instead computes host addresses as `base + guest_virtual_address`, so a 4 GiB guest address-space reservation is still required before translated functions can safely run.
 
 Before invoking translated code, the runtime still must:
 
@@ -75,7 +76,7 @@ Map a host gamepad API into the XInput/HID structures expected by the game. Keep
 ## Milestone order
 
 1. Build correctness — generated sources compile into TooHumanRecompLib; keep generator and artifact checks reproducible.
-2. Guest memory and image loader — extend the tested memory view with regions/permissions and load only verified PE/XEX layouts.
+2. Guest memory and image loader — reserve the full guest address space, apply region permissions, and map the validated PE image at its guest virtual addresses.
 3. PPC dispatcher — add a validated adapter around the generated function map and execute a harmless verified function.
 4. Import observability — add trampolines reporting unknown library/ordinal, guest PC and arguments.
 5. Boot-critical kernel — implement only imports proven to be called during startup, with documented semantics and tests.
