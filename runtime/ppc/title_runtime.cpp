@@ -50,6 +50,7 @@ bool initialize_title_runtime(GuestAddressSpace& memory,
         report->variable_imports = variable_import_count;
         report->default_stack_size = import_result.default_stack_size;
         report->default_heap_size = import_result.default_heap_size;
+        report->tls_info = import_result.tls_info;
     }
     return true;
 }
