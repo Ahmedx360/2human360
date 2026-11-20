@@ -65,7 +65,7 @@ Names are resolved from the pinned XenonRecomp/Xenia Xbox export table.
 The runtime now allocates guest backing storage for all 11 variables and patches
 their IAT slots before image protections. Hardware/version/command-line/module-
 handle values are initialized and KeTimeStampBundle is updated every millisecond.
-Object-type, monitor, device and critical-section semantics remain partial.
+Object-type, monitor, device and critical-section semantics remain partial. The same 128 MiB guest pool also backs initial `ExAllocatePoolTypeWithTag`/`ExFreePool` and `XamAlloc`/`XamFree` HLE.
 
 ## Import name manifest
 
