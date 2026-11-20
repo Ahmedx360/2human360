@@ -121,6 +121,10 @@ int main() {
     auto address_space = toohuman::runtime::GuestAddressSpace::reserve(&address_space_error);
     assert(address_space.valid());
     assert(address_space.map_image(image, &address_space_error));
+    auto* guest_data = reinterpret_cast<std::uint8_t*>(
+        reinterpret_cast<std::uintptr_t>(address_space.base()) + image.image_base + 0x4000u);
+    guest_data[0] = 0x7B;
+    assert(guest_data[0] == 0x7B);
     assert(address_space.commit_region(0x70000000, 0x10000, &address_space_error));
     const auto stack_probe = reinterpret_cast<std::uint8_t*>(
         reinterpret_cast<std::uintptr_t>(address_space.base()) + 0x70000000u);
