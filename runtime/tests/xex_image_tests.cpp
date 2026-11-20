@@ -1,5 +1,6 @@
 #include "image/xex_image.hpp"
 
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <vector>
