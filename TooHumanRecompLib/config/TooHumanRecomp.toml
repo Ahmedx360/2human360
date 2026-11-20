@@ -1,7 +1,7 @@
 # Too Human (Xbox 360) - XenonRecomp configuration
 # Image: PE, base 0x82000000, entry 0x82A46B18 (RVA 0xA46B18)
 [main]
-file_path = "../private/default.exe"
+file_path = "../../private/default.exe"
 out_directory_path = "../ppc"
 switch_table_file_path = "switch_tables.toml"
 

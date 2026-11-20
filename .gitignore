@@ -2,3 +2,15 @@
 private/
 *.xex
 *.exe
+
+# Local CMake/Ninja build output
+/build/
+/cmake-build-*/
+CMakeUserPresets.json
+CMakeCache.txt
+CMakeFiles/
+*.o
+*.obj
+*.a
+*.lib
+*.pdb
