@@ -69,7 +69,7 @@ def main() -> int:
     elif code_base + code_size > image_end:
         warnings.append("PPC_CODE_SIZE extends beyond the declared image; verify section boundaries")
 
-    function_bounds = config.get("functions", [])
+    function_bounds = main_config.get("functions", [])
     addresses = [item.get("address") for item in function_bounds]
     if len(addresses) != len(set(addresses)):
         errors.append("Duplicate manually-bounded function addresses are present")
