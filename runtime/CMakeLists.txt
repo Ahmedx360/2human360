@@ -15,6 +15,21 @@ set_target_properties(TooHumanRuntimeCore PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
 
+if(TH_BUILD_RECOMP_LIB)
+    add_library(TooHumanPpcRuntime STATIC
+        ppc/function_table.cpp
+    )
+    target_link_libraries(TooHumanPpcRuntime
+        PUBLIC TooHumanRuntimeCore TooHumanRecompLib
+    )
+    target_compile_features(TooHumanPpcRuntime PUBLIC cxx_std_20)
+    set_target_properties(TooHumanPpcRuntime PROPERTIES
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+        POSITION_INDEPENDENT_CODE ON
+    )
+endif()
+
 if(BUILD_TESTING)
     add_executable(TooHumanGuestMemoryTests
         tests/guest_memory_tests.cpp
