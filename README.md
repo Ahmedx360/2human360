@@ -46,7 +46,7 @@ These are image-specific observations, not generic Xbox 360 addresses.
 
 ## Build the generated game-code library
 
-The CMake targets build the generated PPC translation units as **TooHumanRecompLib** and, when runtime support is enabled, **TooHumanPpcRuntime**, which installs the generated function map into the guest indirect-call table. They are libraries, not a game executable; the host entry/return bridge, kernel imports, graphics, audio and input are still missing.
+The CMake targets build the generated PPC translation units as **TooHumanRecompLib** and, when runtime support is enabled, **TooHumanPpcRuntime**, which installs the generated function map into the guest indirect-call table. They are libraries, not a game executable. The runtime can invoke caller-selected translated functions and route XEX imports, but the title's real startup state, kernel/XAM handlers, graphics, audio and input are still missing.
 
 ### Requirements
 
@@ -121,7 +121,7 @@ The checked-in XenonRecomp patch corrects the known scalar-scratch code-emission
 
 The analyzed executable is a bare PE rather than an XEX2 container. XenonRecomp's normal XEX2/ELF loading path does not directly handle this PE, so the patch adds an Xbox 360 PowerPC PE loader and accounts for the observed section-address delta in this image.
 
-A bare PE does not preserve the XEX2 import metadata. As a result, this workflow does not recover the original Xbox kernel/XAM import names. A matching original default.xex with its XEX2 metadata, or a researched ordinal-to-import map, is still needed for import resolution.
+A bare PE does not preserve the XEX2 import metadata. The matching original `default.xex` is required to populate the import registry with the title's actual library/ordinal/thunk records. The registry is ready to route those records, but actual kernel/XAM service handlers still need to be implemented and tested.
 
 ## Architecture and next runtime milestones
 
