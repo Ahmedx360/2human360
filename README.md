@@ -14,7 +14,7 @@ You must provide your own legally obtained game files. No game executable, asset
 | Recompiler fixes | Title-specific PE loader, switch-boundary and VMX/codegen fixes |
 | Generated-code library | CMake static-library target added; requires Clang and SIMDe |
 | Kernel/XAM HLE | Not implemented; import names are not resolved |
-| Guest memory | Initial bounded, big-endian guest-memory view implemented and unit-tested; image loading, permissions, MMIO, threads and synchronization remain future work |
+| Guest memory / image loader | Bounded big-endian memory view and checked Xbox 360 PE32/PPCBE loader implemented and unit-tested; full 4 GiB address-space mapping, permissions, MMIO, threads and synchronization remain future work |
 | Xenos graphics / EDRAM | Runtime implementation still required |
 | XMA audio | Runtime implementation still required |
 | Controller/input | Runtime implementation still required |
@@ -84,7 +84,7 @@ cmake --build build/runtime --parallel
 ctest --test-dir build/runtime --output-on-failure
 ~~~
 
-See [docs/runtime-foundation.md](docs/runtime-foundation.md) for its current scope and limitations. It does not load or boot the game.
+See [docs/runtime-foundation.md](docs/runtime-foundation.md) for its current scope and limitations. The PE loader parses and maps sections into compact image-relative storage, but this is not yet the 4 GiB address-space model required by generated PPC code and does not boot the game.
 
 On Windows, use a Developer Command Prompt with LLVM's clang-cl and Ninja available, and configure the compiler explicitly when needed:
 
