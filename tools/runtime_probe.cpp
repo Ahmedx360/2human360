@@ -80,6 +80,13 @@ int main(int argc, char** argv) {
     std::cout << "Parsed variable imports: " << report.variable_imports << '\n';
     std::cout << "XEX default stack size: 0x" << std::hex << report.default_stack_size
               << "  default heap size: 0x" << report.default_heap_size << std::dec << '\n';
+    if (report.tls_info) {
+        std::cout << "XEX TLS slots: " << report.tls_info->slot_count
+                  << "  template: 0x" << std::hex << report.tls_info->raw_data_address
+                  << "  data size: 0x" << report.tls_info->data_size
+                  << "  raw size: 0x" << report.tls_info->raw_data_size
+                  << std::dec << '\n';
+    }
     std::cout << "Runtime memory and dispatch are initialized. The game entry point "
                  "was NOT invoked; startup stack/TLS and kernel HLE are not ready.\n";
     return 0;
