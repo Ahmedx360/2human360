@@ -12,6 +12,7 @@ constexpr std::uint32_t kImageBaseKey = 0x00010201;
 constexpr std::uint32_t kImportLibrariesKey = 0x000103FF;
 constexpr std::uint32_t kDefaultStackSizeKey = 0x00020200;
 constexpr std::uint32_t kDefaultHeapSizeKey = 0x00020401;
+constexpr std::uint32_t kTlsInfoKey = 0x00020104;
 constexpr std::size_t kFixedHeaderSize = 0x18;
 constexpr std::size_t kOptionalHeaderSize = 8;
 constexpr std::size_t kImportHeaderSize = 12;
@@ -35,7 +36,7 @@ std::uint32_t read_be32(std::span<const std::uint8_t> data, std::size_t offset) 
 }
 
 XexImportResult fail(const char* message) {
-    return {{}, 0, 0, message};
+    return {{}, 0, 0, std::nullopt, message};
 }
 
 } // namespace
@@ -58,6 +59,7 @@ XexImportResult parse_xex2_imports(std::span<const std::uint8_t> xex_file,
     std::uint32_t xex_entry_point = 0;
     std::uint32_t default_stack_size = 0;
     std::uint32_t default_heap_size = 0;
+    std::optional<XexTlsInfo> tls_info;
     for (std::size_t i = 0; i < optional_count; ++i) {
         const auto offset = kFixedHeaderSize + i * kOptionalHeaderSize;
         const auto key = read_be32(xex_file, offset);
@@ -73,6 +75,16 @@ XexImportResult parse_xex2_imports(std::span<const std::uint8_t> xex_file,
             default_stack_size = value;
         } else if (key == kDefaultHeapSizeKey) {
             default_heap_size = value;
+        } else if (key == kTlsInfoKey) {
+            if (!fits(value, 16, xex_file.size())) {
+                return fail("XEX2 TLS info points outside the file");
+            }
+            tls_info = XexTlsInfo{
+                read_be32(xex_file, value),
+                read_be32(xex_file, value + 4),
+                read_be32(xex_file, value + 8),
+                read_be32(xex_file, value + 12)
+            };
         }
     }
     if (!found_import_header) {
@@ -91,6 +103,21 @@ XexImportResult parse_xex2_imports(std::span<const std::uint8_t> xex_file,
     }
     if (xex_entry_point != 0 && xex_entry_point != image.entry_point) {
         return fail("XEX2 entry point does not match the extracted PE image entry point");
+    }
+    if (tls_info) {
+        if (tls_info->data_size < tls_info->raw_data_size) {
+            return fail("XEX2 TLS data size is smaller than its raw template size");
+        }
+        if (tls_info->raw_data_size != 0) {
+            if (tls_info->raw_data_address < image.image_base) {
+                return fail("XEX2 TLS template address precedes the extracted PE image");
+            }
+            const auto tls_offset = static_cast<std::uint64_t>(tls_info->raw_data_address) - image.image_base;
+            if (tls_offset > image.bytes.size() ||
+                tls_info->raw_data_size > image.bytes.size() - static_cast<std::size_t>(tls_offset)) {
+                return fail("XEX2 TLS template lies outside the extracted PE image");
+            }
+        }
     }
     const auto optional_table_end = kFixedHeaderSize +
                                     static_cast<std::size_t>(optional_count) * kOptionalHeaderSize;
@@ -148,6 +175,7 @@ XexImportResult parse_xex2_imports(std::span<const std::uint8_t> xex_file,
     XexImportResult result;
     result.default_stack_size = default_stack_size;
     result.default_heap_size = default_heap_size;
+    result.tls_info = tls_info;
     for (std::size_t library_index = 0; library_index < library_count; ++library_index) {
         if (!fits(library_cursor, kImportLibrarySize, xex_file.size())) {
             return fail("XEX2 import library header is truncated");
