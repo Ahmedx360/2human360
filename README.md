@@ -23,16 +23,12 @@ You must supply your own legally obtained game files. No game data is included h
 4. `XenonRecomp TooHumanRecompLib/config/TooHumanRecomp.toml <XenonRecomp>/XenonUtils/ppc_context.h`
 
 ## Status
-**Root cause of the earlier failures (fixed):** the PE's section VAs are shifted by +0x5000 for `.text`/`.embsec_`
-(code, `.pdata` and jump tables all use RVA == raw file offset; `.data` keeps its header VA). With the
-corrected loader, 72,029/72,768 `.pdata` entries start with `mflr r12`, jump tables have real labels, and
-XenonRecomp completes (no runaway functions, ~380 C++ files).
+Static recompilation output is **complete**: `TooHumanRecompLib/ppc/` (729 files, ~262 MB, 100% of functions)
+generated with the patched XenonRecomp. See `docs/recomp-diagnostics.md` for the final diagnostics.
+**Not playable yet** - there is no runtime (kernel imports, GPU, audio, input) and import names are unresolved.
 
-Remaining recompiler diagnostics (see `docs/recomp-diagnostics.md`): ~1.2k "switch case outside function"
-(functions with jump tables need manual `functions = [...]` boundaries), ~480 undecodable words,
-and unimplemented VMX int16 ops (vslh, vsubshs, vsrah, vaddsws, vspltish, vmaxsh, ...) plus eqv/cror/crorc.
-
-Generated `ppc/*.cpp` is not committed (derived from the game binary; ~250 MB). Regenerate it locally.
+> The generated C++ is a mechanical translation of the copyrighted game executable. Consider keeping this
+> repo private, or removing `TooHumanRecompLib/ppc/` before making it public (other recomp projects regenerate it locally).
 
 ## Known blockers / TODO
 - **Imports:** a bare PE has no XEX2 import tables, so kernel/xam import names are not recovered. The original `default.xex` (XEX2 header intact) is needed for named imports; otherwise imports must be reconstructed from ordinals.
