@@ -149,6 +149,10 @@ bool PpcImportRegistry::prepare_variable_imports(
         set_error(error, "Prepare kernel variables before mapping the guest image");
         return false;
     }
+    if (xex_file.size() < 0x18) {
+        set_error(error, "XEX header is truncated while preparing kernel variables");
+        return false;
+    }
     if (image.image_base != PPC_IMAGE_BASE || image.image_size != PPC_IMAGE_SIZE ||
         static_cast<std::uint64_t>(image.image_base) + image.image_size >
             (std::uint64_t{1} << 32)) {
@@ -311,6 +315,10 @@ bool PpcImportRegistry::install(GuestAddressSpace& memory,
         set_error(error, "Map the guest image before installing XEX imports");
         return false;
     }
+    if (!variables_prepared_) {
+        set_error(error, "Prepare the XEX variable exports before installing function imports");
+        return false;
+    }
     if (g_active_registry.load(std::memory_order_acquire) != nullptr) {
         set_error(error, "Another PPC import registry is already active in this process");
         return false;
@@ -374,11 +382,14 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) const 
     const auto& binding = import_it->second;
     const auto& import = binding.import;
     if (binding.handler == nullptr) {
+        const auto export_name = lookup_title_export_name(import.library, import.ordinal);
         std::fprintf(stderr,
-                     "[TooHuman] Unimplemented import %s ordinal 0x%04X "
+                     "[TooHuman] Unimplemented import %s!%.*s ordinal 0x%04X "
                      "(thunk=0x%08X, LR=0x%016llX, r3=0x%08X, r4=0x%08X, "
                      "r5=0x%08X, r6=0x%08X)\n",
                      import.library.c_str(),
+                     static_cast<int>(export_name.size()),
+                     export_name.empty() ? "<unknown>" : export_name.data(),
                      static_cast<unsigned>(import.ordinal),
                      static_cast<unsigned>(thunk_address),
                      static_cast<unsigned long long>(context.lr),
