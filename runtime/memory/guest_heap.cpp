@@ -50,7 +50,7 @@ std::optional<std::uint32_t> GuestHeap::allocate(std::size_t bytes,
     std::lock_guard lock(mutex_);
     if (!initialized_ || bytes == 0 || bytes > size_ ||
         alignment == 0 || (alignment & (alignment - 1)) != 0 ||
-        alignment > (std::size_t{1} << 32)) {
+        alignment > std::numeric_limits<std::uint32_t>::max()) {
         return std::nullopt;
     }
 
