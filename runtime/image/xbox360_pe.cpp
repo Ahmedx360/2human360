@@ -104,6 +104,7 @@ PeLoadResult load_xbox360_pe(std::span<const std::uint8_t> file) {
     loaded.image_base = image_base;
     loaded.entry_point = image_base + entry_rva;
     loaded.image_size = image_size;
+    loaded.headers_size = headers_size;
     loaded.bytes.assign(image_size, 0);
 
     const auto header_copy = std::min<std::size_t>(
