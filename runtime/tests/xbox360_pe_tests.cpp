@@ -67,7 +67,17 @@ int main() {
     assert(image.bytes[0x1000] == 0xA5);
     assert(image.sections[1].virtual_address == 0x4000);
     assert(image.bytes[0x4000] == 0x5A);
-    assert(image.bytes[0x3000] == 0); // BSS/zero-fill remains zero.\n\n    std::string address_space_error;\n    auto address_space = toohuman::runtime::GuestAddressSpace::reserve(&address_space_error);\n    assert(address_space.valid());\n    assert(address_space.map_image(image, &address_space_error));\n    assert(address_space.image_mapped());\n    const auto guest_entry = reinterpret_cast<const std::uint8_t*>(\n        reinterpret_cast<std::uintptr_t>(address_space.base()) + image.entry_point);\n    assert(*guest_entry == 0xA5);\n    assert(!address_space.map_image(image, &address_space_error));
+    assert(image.bytes[0x3000] == 0); // BSS/zero-fill remains zero.
+
+    std::string address_space_error;
+    auto address_space = toohuman::runtime::GuestAddressSpace::reserve(&address_space_error);
+    assert(address_space.valid());
+    assert(address_space.map_image(image, &address_space_error));
+    assert(address_space.image_mapped());
+    const auto guest_entry = reinterpret_cast<const std::uint8_t*>(
+        reinterpret_cast<std::uintptr_t>(address_space.base()) + image.entry_point);
+    assert(*guest_entry == 0xA5);
+    assert(!address_space.map_image(image, &address_space_error));
 
     auto wrong_machine = file;
     put16(wrong_machine, 0x84, 0x01F0);
