@@ -16,10 +16,10 @@ The runtime core is an incremental foundation, not a complete emulator. A host e
 | TooHumanRecompLib | Static library containing generated PowerPC functions and dispatch map | Generated sources and build target exist |
 | runtime/memory | Bounded PPC big-endian access and full 4 GiB guest VA reservation | Reservation and PE image mapping implemented; per-section permissions pending |
 | runtime/image | Extracted Xbox 360 PE parsing and image-relative section loading | PE32/PPCBE loader implemented and synthetic-fixture tested; no XEX imports |
-| runtime/ppc | Populate XenonRecomp's indirect-call table and invoke known translated functions | Generated map registration, unresolved-target trap and caller-context invocation implemented; game startup state is not initialized |
+| runtime/ppc | Populate XenonRecomp's indirect-call table, invoke known functions and route XEX imports | Generated map registration, unresolved-target trap, caller-context invocation and ordinal-keyed import registry implemented; game startup state/HLE handlers are missing |
 | runtime/ppc | Populate XenonRecomp's indirect-call function table | Generated map registration and unresolved-target trap implemented; not a host entry/return bridge |
 | TooHumanRecomp (future) | Host executable, startup, window, configuration, logging and game-data discovery | Not implemented |
-| kernel (future) | Verified Xbox kernel/XAM imports, handles, virtual files, events and synchronization | Not implemented |
+| kernel (future) | Verified Xbox kernel/XAM imports, handles, virtual files, events and synchronization | XEX2 metadata parsing and ordinal-keyed thunk dispatch exist; no HLE handlers yet |
 | cpu / os (future) | PPC context lifecycle, guest-thread scheduling, TLS, exceptions and host/guest call bridges | Generated PPC context exists; runtime lifecycle not implemented |
 | gpu (future) | Xenos command processor, register/MMIO handling, EDRAM and host graphics backend | Not implemented |
 | apu (future) | XMA stream decoding, guest audio callbacks, mixing and host output | Not implemented |
@@ -47,7 +47,7 @@ Do not infer that the PPC code range is the entire guest image. Data sections, r
 
 ### 2. Kernel and XAM imports
 
-Create an import registry keyed by the executable's actual import identifiers (library and ordinal, or verified symbol names). Each registered import should have a documented calling convention and argument/return contract, a host implementation or explicit diagnostic stub, and tests for ownership, wait semantics, memory bounds and error codes.
+The XEX2 import metadata parser and ordinal-keyed thunk registry are implemented. The registry accepts explicit handlers and fails fast with the library, ordinal, thunk, LR and argument registers when no handler exists. It currently skips variable imports and supports one active registry per process. Add real imports only from the matching `default.xex` metadata or a verified export table. Each registered import needs a documented calling convention and argument/return contract, plus tests for ownership, wait semantics, memory bounds and error codes.
 
 The current bare PE does not contain original XEX2 import-name tables. Do not guess names from ordinals. First inspect matching XEX2 metadata or build a verified Too Human-specific ordinal map. Then implement imports in observed dependency order: memory and synchronization, thread creation/waits, file I/O, timers, notifications and title/XAM services.
 
