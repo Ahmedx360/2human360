@@ -88,6 +88,6 @@ int main(int argc, char** argv) {
                   << std::dec << '\n';
     }
     std::cout << "Runtime memory and dispatch are initialized. The game entry point "
-                 "was NOT invoked; startup stack/TLS and kernel HLE are not ready.\n";
+                 "was NOT invoked; guest stack/TLS allocation and kernel HLE are not ready.\n";
     return 0;
 }
