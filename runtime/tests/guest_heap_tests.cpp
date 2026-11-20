@@ -24,7 +24,7 @@ int main() {
     assert(heap.allocation_size(*first) == 0x100u);
     assert(heap.allocation_size(*second) == 0x200u);
     assert(heap.owns(*first, 0x100u));
-    assert(!heap.owns(*first, 0x101u));
+    assert(!heap.owns(0x70010003u));
 
     auto* first_host = memory.base() + *first;
     auto* second_host = memory.base() + *second;
