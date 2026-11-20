@@ -2,6 +2,8 @@
 
 #include "image/xbox360_pe.hpp"
 
+#include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <span>
 #include <string>
