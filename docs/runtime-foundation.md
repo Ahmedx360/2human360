@@ -29,13 +29,17 @@ cmake --build build/runtime --parallel
 ctest --test-dir build/runtime --output-on-failure
 ~~~
 
-The guest-memory tests cover big-endian scalar access, boundary checks, unaligned access, const views and the upper end of the 32-bit address space. The PE tests use a synthetic Xbox 360 PE to verify machine/type checks, entry-point validation, zero-fill behavior, section copying, the observed 0x5000 section-RVA correction, malformed/truncated input rejection, and mapping at the correct guest virtual address inside the 4 GiB reservation.
+The guest-memory tests cover big-endian scalar access, boundary checks, unaligned access, const views and the upper end of the 32-bit address space. The PE tests use a synthetic Xbox 360 PE to verify machine/type checks, entry-point validation, zero-fill behavior, section copying, the observed 0x5000 section-RVA correction, malformed/truncated input rejection, and mapping at the correct guest virtual address inside the 4 GiB reservation. They also verify the PPC indirect-call table's eight-byte host pointer slots, range checks and registration semantics.
+
+## Implemented: generated PPC function table
+
+When the generated library is enabled, `TooHumanPpcRuntime` registers every non-null entry in `PPCFuncMappings` into the guest table located immediately after the image. Its index formula matches `PPC_LOOKUP_FUNC`: `(guest_address - PPC_CODE_BASE) * 2`, yielding one host function-pointer slot for each aligned PPC instruction address. All unregistered slots point to a diagnostic trap that reports the unresolved CTR target and LR, then aborts instead of calling a null pointer. This does not resolve Xbox kernel/XAM imports; it makes missing targets observable.
 
 ## Next implementation sequence
 
 1. Add per-section page permissions and guard unmapped ranges; the current loader commits the complete PE image range read/write. Keep MMIO outside ordinary RAM.
-2. Add a PPC dispatcher adapter around the generated function map, with validated guest entry points and a tested return/trap mechanism.
-3. Build an import registry keyed by verified library/ordinal identities. Unknown imports must report the guest PC and arguments; never guess ordinal names.
+2. Add a host-call entry/return bridge with a verified guest stack, initial register state and clean PPC context lifecycle.
+3. Obtain matching XEX2 import metadata and implement a registry keyed by verified library/ordinal identities. Unknown imports must report the guest PC and arguments; never guess ordinal names.
 4. Implement synchronization and thread primitives only after their ABI and observed call sites are documented.
 5. Add virtual file access and save-data isolation.
 6. Add GPU command capture/decoding before attempting a renderer; then add XMA and controller services.
