@@ -109,6 +109,7 @@ int main(int argc, char** argv) {
     std::size_t function_iat_slots = 0;
     for (const auto& item : imports.imports) {
         const char* kind = item.type == 1 ? "FUNCTION" :
+                           item.paired_thunk_address != 0 ? "IAT" :
                            item.type == 0 ? "VARIABLE" : "UNKNOWN";
         functions += item.type == 1;
         variables += item.type == 0 && item.paired_thunk_address == 0;
