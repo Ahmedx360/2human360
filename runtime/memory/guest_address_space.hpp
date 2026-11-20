@@ -109,6 +109,8 @@ private:
     void release() noexcept;
     [[nodiscard]] bool commit_range(std::uint64_t address, std::size_t size,
                                     std::string* error);
+    [[nodiscard]] bool apply_image_permissions(const LoadedPeImage& image,
+                                               std::string* error);
 
     void* reservation_{};
     bool image_mapped_{};
