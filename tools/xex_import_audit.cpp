@@ -69,7 +69,14 @@ int main(int argc, char** argv) {
     std::cout << "Default stack size: 0x" << std::hex << imports.default_stack_size
               << "  default heap size: 0x" << imports.default_heap_size
               << std::dec << "\n";
-    std::cout << "Imported thunk records: " << imports.imports.size() << "\n\n";
+    if (imports.tls_info) {
+        std::cout << "TLS slots: " << imports.tls_info->slot_count
+                  << "  template: 0x" << std::hex << imports.tls_info->raw_data_address
+                  << "  data size: 0x" << imports.tls_info->data_size
+                  << "  raw size: 0x" << imports.tls_info->raw_data_size
+                  << std::dec << '\\n';
+    }
+    std::cout << "Imported thunk records: " << imports.imports.size() << "\\n\\n";
 
     std::size_t functions = 0;
     std::size_t variables = 0;
