@@ -38,11 +38,13 @@ int main() {
     assert(imports.register_handler("xboxkrnl.exe", 0x74u,
                                     &test_import_handler, &error));
     const std::vector<toohuman::runtime::XexImport> metadata{
-        {"xboxkrnl.exe", 0x74u, 0, 1, 0x82001100u}
+        {"xboxkrnl.exe", 0x74u, 0, 1, 0x82001100u},
+        {"xboxkrnl.exe", 0x011Bu, 0, 1, 0x82001104u},
+        {"xboxkrnl.exe", 0x0126u, 0, 1, 0x82001108u}
     };
     std::size_t registered = 0;
     assert(imports.install(memory, metadata, &registered, &error));
-    assert(registered == 1);
+    assert(registered == 3);
     assert(memory.get_function<PPCFunc*>(0x82001100u) != &test_default_handler);
 
     PPCContext context{};
@@ -51,6 +53,36 @@ int main() {
     assert(import_thunk != nullptr);
     import_thunk(context, memory.base());
     assert(context.r3.u32 == 0xBEEF1234u);
+
+    // RtlFillMemoryUlong writes big-endian ULONGs and ignores a partial tail.
+    constexpr std::uint32_t test_buffer = 0x82011000u;
+    context = {};
+    context.ctr.u32 = 0x82001108u;
+    context.r3.u32 = test_buffer;
+    context.r4.u32 = 11;
+    context.r5.u32 = 0x11223344u;
+    memory.get_function<PPCFunc*>(context.ctr.u32)(context, memory.base());
+    const std::uint8_t expected_fill[]{0x11, 0x22, 0x33, 0x44,
+                                       0x11, 0x22, 0x33, 0x44, 0, 0, 0};
+    assert(std::memcmp(memory.base() + test_buffer, expected_fill,
+                       sizeof(expected_fill)) == 0);
+
+    // RtlCompareMemoryUlong returns the matching prefix in bytes.
+    context = {};
+    context.ctr.u32 = 0x82001104u;
+    context.r3.u32 = test_buffer;
+    context.r4.u32 = 11;
+    context.r5.u32 = 0x11223344u;
+    memory.get_function<PPCFunc*>(context.ctr.u32)(context, memory.base());
+    assert(context.r3.u32 == 8);
+    memory.base()[test_buffer + 4] = 0xAA;
+    context = {};
+    context.ctr.u32 = 0x82001104u;
+    context.r3.u32 = test_buffer;
+    context.r4.u32 = 11;
+    context.r5.u32 = 0x11223344u;
+    memory.get_function<PPCFunc*>(context.ctr.u32)(context, memory.base());
+    assert(context.r3.u32 == 4);
     }
 
     // Verify the real title's data exports are backed by guest memory and
