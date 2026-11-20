@@ -16,6 +16,7 @@ target_compile_features(TooHumanXexImportAudit PRIVATE cxx_std_20)
 target_include_directories(TooHumanRuntimeCore
     PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}"
 )
+target_link_libraries(TooHumanRuntimeCore PUBLIC Threads::Threads)
 target_compile_features(TooHumanRuntimeCore PUBLIC cxx_std_20)
 set_target_properties(TooHumanRuntimeCore PROPERTIES
     CXX_STANDARD 20
