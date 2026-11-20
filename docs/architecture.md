@@ -15,9 +15,8 @@ The runtime core is an incremental foundation, not a complete emulator. A host e
 |---|---|---|
 | TooHumanRecompLib | Static library containing generated PowerPC functions and dispatch map | Generated sources and build target exist |
 | runtime/memory | Bounded PPC big-endian access and full 4 GiB guest VA reservation | Reservation and PE image mapping implemented; per-section permissions pending |
-| runtime/image | Extracted Xbox 360 PE parsing and image-relative section loading | PE32/PPCBE loader implemented and synthetic-fixture tested; no XEX imports |
+| runtime/image | Extracted Xbox 360 PE parsing and XEX2 import metadata | PE32/PPCBE loader and XEX2 import parser implemented and synthetic-fixture tested |
 | runtime/ppc | Populate XenonRecomp's indirect-call table, invoke known functions and route XEX imports | Generated map registration, unresolved-target trap, caller-context invocation and ordinal-keyed import registry implemented; game startup state/HLE handlers are missing |
-| runtime/ppc | Populate XenonRecomp's indirect-call function table | Generated map registration and unresolved-target trap implemented; not a host entry/return bridge |
 | TooHumanRecomp (future) | Host executable, startup, window, configuration, logging and game-data discovery | Not implemented |
 | kernel (future) | Verified Xbox kernel/XAM imports, handles, virtual files, events and synchronization | XEX2 metadata parsing and ordinal-keyed thunk dispatch exist; no HLE handlers yet |
 | cpu / os (future) | PPC context lifecycle, guest-thread scheduling, TLS, exceptions and host/guest call bridges | Generated PPC context exists; runtime lifecycle not implemented |
@@ -34,9 +33,8 @@ Keep title-specific patches and constants separate from generic execution servic
 
 The generated code accesses guest memory through a 32-bit guest address space and a host base pointer. TooHumanRecomp::RuntimeCore provides a bounded, non-owning contiguous memory view with big-endian scalar reads/writes, plus a checked loader for the extracted Too Human PE. See runtime-foundation.md. The PE loader returns compact image-relative storage; `GuestAddressSpace` now reserves 4 GiB and maps those bytes at `base + guest_virtual_address`, matching generated PPC pointer calculations. The image is currently committed read/write as one range; section-level protection and MMIO remain unimplemented.
 
-Before invoking translated code, the runtime still must:
+Before invoking the game entry point, the runtime still must:
 
-- map the complete guest image at its verified guest virtual addresses;
 - apply per-section permissions and reserve/handle MMIO ranges;
 - ensure image base and PPC code base agree with ppc_config.h;
 - populate the indirect-call table from `PPCFuncMappings` and trap unmapped targets;
@@ -80,7 +78,7 @@ Map a host gamepad API into the XInput/HID structures expected by the game. Keep
 1. Build correctness — generated sources compile into TooHumanRecompLib; keep generator and artifact checks reproducible.
 2. Guest memory and image loader — apply per-section permissions to the validated PE image and define explicit MMIO ranges.
 3. Game startup — establish the title's verified stack, TLS, initial PPCContext and thread lifecycle before invoking the entry point.
-4. Import observability — add trampolines reporting unknown library/ordinal, guest PC and arguments.
+4. Game startup — initialize the verified guest stack, TLS, initial PPCContext and thread lifecycle.
 5. Boot-critical kernel — implement only imports proven to be called during startup, with documented semantics and tests.
 6. File I/O and threading — support asset reads, synchronization and guest thread scheduling.
 7. GPU bring-up — capture/decode command streams, then render the earliest deterministic scene.
