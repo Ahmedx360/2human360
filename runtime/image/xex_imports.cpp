@@ -35,7 +35,7 @@ std::uint32_t read_be32(std::span<const std::uint8_t> data, std::size_t offset) 
 }
 
 XexImportResult fail(const char* message) {
-    return {{}, message};
+    return {{}, 0, 0, message};
 }
 
 } // namespace
