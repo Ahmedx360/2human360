@@ -28,13 +28,21 @@ bool GuestHeap::initialize(std::string* error) {
         return false;
     }
 
+    const auto heap_start = static_cast<std::uint64_t>(guest_base_);
+    const auto heap_end = heap_start + size_;
     if (memory_->image_mapped()) {
-        const auto heap_start = static_cast<std::uint64_t>(guest_base_);
-        const auto heap_end = heap_start + size_;
         const auto image_start = static_cast<std::uint64_t>(memory_->image_base());
         const auto image_end = image_start + memory_->image_size();
         if (heap_start < image_end && image_start < heap_end) {
             set_error(error, "Guest heap range overlaps the mapped PE image");
+            return false;
+        }
+    }
+    if (memory_->function_table_ready()) {
+        const auto table_start = memory_->function_table_base();
+        const auto table_end = table_start + memory_->function_table_size();
+        if (heap_start < table_end && table_start < heap_end) {
+            set_error(error, "Guest heap range overlaps the PPC function table");
             return false;
         }
     }
