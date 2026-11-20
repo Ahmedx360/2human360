@@ -45,9 +45,9 @@ Do not infer that the PPC code range is the entire guest image. Data sections, r
 
 ### 2. Kernel and XAM imports
 
-The supplied XEX's import table is decoded: 82 XAM functions, 160 kernel functions, 242 paired function IAT slots and 11 kernel data exports. Export names are resolved against the pinned XenonRecomp/Xenia tables and stored in `runtime/ppc/title_import_manifest.cpp`. The loader patches paired function IATs before applying page protections; the registry routes type-1 thunks and fails fast when a function has no handler. The 11 variable exports are identified but not yet backed by guest storage. Each HLE implementation still needs a documented calling convention and argument/return contract, plus tests for ownership, wait semantics, memory bounds and error codes.
+The supplied XEX's import table is decoded: 82 XAM functions, 160 kernel functions, 242 paired function IAT slots and 11 kernel data exports. Export names are resolved against the pinned XenonRecomp/Xenia tables and stored in `runtime/ppc/title_import_manifest.cpp`. The loader patches paired function IATs before applying page protections; the registry routes type-1 thunks and fails fast when a function has no handler. The 11 variable exports now have guest backing storage and patched IAT slots; the time-stamp bundle is updated every millisecond. Each HLE implementation still needs a documented calling convention and argument/return contract, plus tests for ownership, wait semantics, memory bounds and error codes.
 
-The original XEX2 is now available and its imports are catalogued in `docs/too-human-xex-imports.md`. Continue from this inventory rather than guessing. The first implementation priorities are variable-export storage, memory allocation/protection, synchronization/events, thread creation/waits, file I/O, timers, graphics setup and XAM title services.
+The original XEX2 is now available and its imports are catalogued in `docs/too-human-xex-imports.md`. Continue from this inventory rather than guessing. The next implementation priorities are memory allocation/protection, synchronization/events, thread creation/waits, file I/O, timers, graphics setup and XAM title services.
 
 ### 3. File system and content
 
