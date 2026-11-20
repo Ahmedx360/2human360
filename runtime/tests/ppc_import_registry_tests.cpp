@@ -101,11 +101,17 @@ int main() {
     xex_header[10] = 0;
     xex_header[11] = 0x80;
     // One optional-header directory entry: import metadata at file offset 0x40.
-    xex_header[0x17] = 1;
+    xex_header[0x17] = 2;
     xex_header[0x19] = 0x01;
     xex_header[0x1A] = 0x03;
     xex_header[0x1B] = 0xFF;
     xex_header[0x1F] = 0x40;
+    xex_header[0x20] = 0x00;
+    xex_header[0x21] = 0x03;
+    xex_header[0x22] = 0x00;
+    xex_header[0x23] = 0x00; // XEX system flags, immediate value.
+    xex_header[0x25] = 0x02;
+    xex_header[0x26] = 0x20; // 0x00000220: privilege bits 5 and 9.
     xex_header[0x43] = 0x10;
     const std::vector<toohuman::runtime::XexImport> variable_imports{
         {"xboxkrnl.exe", 0x01C0u, 0, 0, 0x82000600u, 0},
@@ -151,12 +157,13 @@ int main() {
         {"xboxkrnl.exe", 0x000Fu, 0, 1, thunk_base + 4, 0},
         {"xam.xex", 0x01EAu, 0, 1, thunk_base + 8, 0},
         {"xam.xex", 0x01ECu, 0, 1, thunk_base + 12, 0},
-        {"xboxkrnl.exe", 0x012Bu, 0, 1, thunk_base + 16, 0}
+        {"xboxkrnl.exe", 0x012Bu, 0, 1, thunk_base + 16, 0},
+        {"xboxkrnl.exe", 0x0194u, 0, 1, thunk_base + 20, 0}
     };
     std::size_t registered_pool_imports = 0;
     assert(variable_registry.install(
         variable_memory, pool_imports, &registered_pool_imports, &error));
-    assert(registered_pool_imports == 5);
+    assert(registered_pool_imports == 6);
 
     PPCContext header_field_context{};
     header_field_context.ctr.u32 = thunk_base + 16;
@@ -167,6 +174,27 @@ int main() {
     assert(header_field_function != nullptr);
     header_field_function(header_field_context, variable_memory.base());
     assert(header_field_context.r3.u32 == header_copy + 0x40u);
+
+    // The real Too Human header's 0x220 system flags grant bits 5 and 9,
+    // while bit 10 is absent. Out-of-range bit indices are safely rejected.
+    const auto privilege_function =
+        variable_memory.get_function<PPCFunc*>(thunk_base + 20);
+    assert(privilege_function != nullptr);
+    PPCContext privilege_context{};
+    privilege_context.ctr.u32 = thunk_base + 20;
+    privilege_context.r3.u32 = 5;
+    privilege_function(privilege_context, variable_memory.base());
+    assert(privilege_context.r3.u32 == 1);
+    privilege_context = {};
+    privilege_context.ctr.u32 = thunk_base + 20;
+    privilege_context.r3.u32 = 10;
+    privilege_function(privilege_context, variable_memory.base());
+    assert(privilege_context.r3.u32 == 0);
+    privilege_context = {};
+    privilege_context.ctr.u32 = thunk_base + 20;
+    privilege_context.r3.u32 = 32;
+    privilege_function(privilege_context, variable_memory.base());
+    assert(privilege_context.r3.u32 == 0);
 
     const auto call_import = [&](std::uint32_t thunk, PPCContext& ctx) {
         ctx.ctr.u32 = thunk;
