@@ -28,10 +28,8 @@ bool initialize_title_runtime(GuestAddressSpace& memory,
     LoadedPeImage mapped_image = image;
     std::size_t function_iat_count = 0;
     std::size_t variable_import_count = 0;
-    std::size_t function_import_count = 0;
     for (const auto& item : import_result.imports) {
         if (item.type == 1) {
-            ++function_import_count;
         } else if (item.type == 0 && item.paired_thunk_address != 0) {
             const auto slot_offset = static_cast<std::uint64_t>(item.thunk_address) -
                                      mapped_image.image_base;
