@@ -110,8 +110,9 @@ int main() {
     xex_header[0x21] = 0x03;
     xex_header[0x22] = 0x00;
     xex_header[0x23] = 0x00; // XEX system flags, immediate value.
-    xex_header[0x25] = 0x02;
-    xex_header[0x26] = 0x20; // 0x00000220: privilege bits 5 and 9.
+    xex_header[0x25] = 0x00;
+    xex_header[0x26] = 0x06;
+    xex_header[0x27] = 0x00; // 0x00000600: privilege bits 9 and 10.
     xex_header[0x43] = 0x10;
     const std::vector<toohuman::runtime::XexImport> variable_imports{
         {"xboxkrnl.exe", 0x01C0u, 0, 0, 0x82000600u, 0},
@@ -175,8 +176,8 @@ int main() {
     header_field_function(header_field_context, variable_memory.base());
     assert(header_field_context.r3.u32 == header_copy + 0x40u);
 
-    // The real Too Human header's 0x220 system flags grant bits 5 and 9,
-    // while bit 10 is absent. Out-of-range bit indices are safely rejected.
+    // The uploaded Too Human XEX has system flags 0x600: bits 9 and 10
+    // are set, bit 5 is clear. Out-of-range indices are safely rejected.
     const auto privilege_function =
         variable_memory.get_function<PPCFunc*>(thunk_base + 20);
     assert(privilege_function != nullptr);
@@ -184,12 +185,17 @@ int main() {
     privilege_context.ctr.u32 = thunk_base + 20;
     privilege_context.r3.u32 = 5;
     privilege_function(privilege_context, variable_memory.base());
+    assert(privilege_context.r3.u32 == 0);
+    privilege_context = {};
+    privilege_context.ctr.u32 = thunk_base + 20;
+    privilege_context.r3.u32 = 9;
+    privilege_function(privilege_context, variable_memory.base());
     assert(privilege_context.r3.u32 == 1);
     privilege_context = {};
     privilege_context.ctr.u32 = thunk_base + 20;
     privilege_context.r3.u32 = 10;
     privilege_function(privilege_context, variable_memory.base());
-    assert(privilege_context.r3.u32 == 0);
+    assert(privilege_context.r3.u32 == 1);
     privilege_context = {};
     privilege_context.ctr.u32 = thunk_base + 20;
     privilege_context.r3.u32 = 32;
