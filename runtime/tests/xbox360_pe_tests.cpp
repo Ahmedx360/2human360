@@ -60,7 +60,7 @@ std::vector<std::uint8_t> make_pe() {
 std::vector<std::uint8_t> make_xex_imports() {
     std::vector<std::uint8_t> b(0x300, 0);
     put32(b, 0, 0x58455832); // XEX2
-    put32(b, 0x14, 5);       // Import, image-base, entry, stack and heap headers.
+    put32(b, 0x14, 6);       // Import, image-base, entry, stack, heap and TLS headers.
     put32(b, 0x18, 0x000103FF);
     put32(b, 0x1C, 0x50);    // Import header file offset.
     put32(b, 0x20, 0x00010201);
@@ -71,6 +71,8 @@ std::vector<std::uint8_t> make_xex_imports() {
     put32(b, 0x34, 0x00100000);
     put32(b, 0x38, 0x00020401);
     put32(b, 0x3C, 0x02000000);
+    put32(b, 0x40, 0x00020104);
+    put32(b, 0x44, 0xC0);
     put32(b, 0x50, 0x50);    // Header size.
     put32(b, 0x54, 16);      // Padded library-name table.
     put32(b, 0x58, 1);       // One import library.
@@ -81,6 +83,10 @@ std::vector<std::uint8_t> make_xex_imports() {
     put16(b, library + 0x24, 0);
     put16(b, library + 0x26, 1);
     put32(b, library + 0x28, 0x82001000);
+    put32(b, 0xC0, 64);
+    put32(b, 0xC4, 0x82004000);
+    put32(b, 0xC8, 0x40);
+    put32(b, 0xCC, 0x20);
     return b;
 }
 
@@ -116,6 +122,11 @@ int main() {
     assert(imports.imports[0].thunk_address == 0x82001000);
     assert(imports.default_stack_size == 0x00100000);
     assert(imports.default_heap_size == 0x02000000);
+    assert(imports.tls_info.has_value());
+    assert(imports.tls_info->slot_count == 64);
+    assert(imports.tls_info->raw_data_address == 0x82004000);
+    assert(imports.tls_info->data_size == 0x40);
+    assert(imports.tls_info->raw_data_size == 0x20);
     auto invalid_xex = xex;
     invalid_xex[0] = 'N';
     assert(!toohuman::runtime::parse_xex2_imports(invalid_xex, import_image));
@@ -124,18 +135,22 @@ int main() {
     assert(!toohuman::runtime::parse_xex2_imports(mismatched_base, import_image));
     auto security_base = xex;
     put32(security_base, 0x10, 0x100);
-    put32(security_base, 0x14, 4);
+    put32(security_base, 0x14, 5);
     put32(security_base, 0x20, 0x00010100);
     put32(security_base, 0x24, 0x82001000);
     put32(security_base, 0x28, 0x00020200);
     put32(security_base, 0x2C, 0x00100000);
     put32(security_base, 0x30, 0x00020401);
     put32(security_base, 0x34, 0x02000000);
+    put32(security_base, 0x38, 0x00020104);
+    put32(security_base, 0x3C, 0xC0);
     put32(security_base, 0x210, 0x82000000);
     const auto security_base_result = toohuman::runtime::parse_xex2_imports(security_base, import_image);
     assert(security_base_result);
     assert(security_base_result.default_stack_size == 0x00100000);
     assert(security_base_result.default_heap_size == 0x02000000);
+    assert(security_base_result.tls_info.has_value());
+    assert(security_base_result.tls_info->raw_data_address == 0x82004000);
 
     std::string address_space_error;
     auto address_space = toohuman::runtime::GuestAddressSpace::reserve(&address_space_error);
