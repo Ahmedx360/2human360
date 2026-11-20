@@ -58,11 +58,15 @@ std::vector<std::uint8_t> make_pe() {
 }
 
 std::vector<std::uint8_t> make_xex_imports() {
-    std::vector<std::uint8_t> b(0x100, 0);
+    std::vector<std::uint8_t> b(0x300, 0);
     put32(b, 0, 0x58455832); // XEX2
-    put32(b, 0x14, 1);       // One optional header.
+    put32(b, 0x14, 3);       // Import, image-base and entry-point optional headers.
     put32(b, 0x18, 0x000103FF);
     put32(b, 0x1C, 0x40);    // Import header file offset.
+    put32(b, 0x20, 0x00010201);
+    put32(b, 0x24, 0x82000000);
+    put32(b, 0x28, 0x00010100);
+    put32(b, 0x2C, 0x82001000);
     put32(b, 0x40, 0x50);    // Header size.
     put32(b, 0x44, 16);      // Padded library-name table.
     put32(b, 0x48, 1);       // One import library.
@@ -109,6 +113,9 @@ int main() {
     auto invalid_xex = xex;
     invalid_xex[0] = 'N';
     assert(!toohuman::runtime::parse_xex2_imports(invalid_xex, import_image));
+    auto mismatched_base = xex;
+    put32(mismatched_base, 0x24, 0x83000000);
+    assert(!toohuman::runtime::parse_xex2_imports(mismatched_base, import_image));
 
     std::string address_space_error;
     auto address_space = toohuman::runtime::GuestAddressSpace::reserve(&address_space_error);
