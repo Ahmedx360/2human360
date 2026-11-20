@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Normalize two known XenonRecomp code-generation defects in legacy PPC output."""
+"""Normalize known XenonRecomp code-generation defects in legacy PPC output."""
 
 from __future__ import annotations
 
@@ -8,10 +8,51 @@ from pathlib import Path
 
 
 def normalize_cpp_source(source: str) -> str:
-    """Return source with scalar PPCRegister scratch fields emitted correctly."""
+    """Return source with legacy XenonRecomp output repaired non-destructively."""
     source = source.replace("temp.f32[0]", "temp.f32")
     source = source.replace("temp.u8[0]", "temp.u8")
     source = source.replace("* 1f;", "* 1.0f;")
+
+    # bctr forms its destination from CTR[0:29] followed by two zero bits.
+    # Two historical switch entries retained nonzero low bits; restore the
+    # actual instruction boundaries and place labels where execution lands.
+    source = source.replace("goto loc_8281405E;", "goto loc_8281405C;")
+    source = source.replace("goto loc_82814C67;", "goto loc_82814C64;")
+
+    if "goto loc_8281405C;" in source and "loc_8281405C:" not in source:
+        anchor = (
+            "loc_82814058:\n"
+            "\t// lwz r10,8(r31)\n"
+            "\tctx.r10.u64 = PPC_LOAD_U32(ctx.r31.u32 + 8);\n"
+            "\t// cmpwi cr6,r10,0"
+        )
+        replacement = (
+            "loc_82814058:\n"
+            "\t// lwz r10,8(r31)\n"
+            "\tctx.r10.u64 = PPC_LOAD_U32(ctx.r31.u32 + 8);\n"
+            "loc_8281405C:\n"
+            "\t// cmpwi cr6,r10,0"
+        )
+        if anchor not in source:
+            raise ValueError("Cannot locate insertion point for legacy PPC label loc_8281405C")
+        source = source.replace(anchor, replacement, 1)
+
+    if "goto loc_82814C64;" in source and "loc_82814C64:" not in source:
+        anchor = (
+            "\t// sthx r9,r10,r31\n"
+            "\tPPC_STORE_U16(ctx.r10.u32 + ctx.r31.u32, ctx.r9.u16);\n"
+            "\t// lwz r10,104(r31)"
+        )
+        replacement = (
+            "\t// sthx r9,r10,r31\n"
+            "\tPPC_STORE_U16(ctx.r10.u32 + ctx.r31.u32, ctx.r9.u16);\n"
+            "loc_82814C64:\n"
+            "\t// lwz r10,104(r31)"
+        )
+        if anchor not in source:
+            raise ValueError("Cannot locate insertion point for legacy PPC label loc_82814C64")
+        source = source.replace(anchor, replacement, 1)
+
     return source
 
 
