@@ -77,7 +77,7 @@ cmake --build --preset validate-only --parallel
 ctest --preset validate
 ~~~
 
-The validation configuration also builds and tests the independent host-side runtime core, including synthetic PE and XEX import fixtures. The full Clang build additionally compiles the PPC function-table/import adapters against the generated library. Run the adapter test after building with `ctest --test-dir build/clang-release -R TooHumanPpcImportRegistryTests --output-on-failure`. To build only that runtime foundation (without the generated PPC library or XenonRecomp submodule):
+The validation configuration also builds and tests the independent host-side runtime core, including synthetic PE and XEX import fixtures, and builds `TooHumanXexImportAudit`. The full Clang build additionally compiles the PPC function-table/import adapters against the generated library. Run the adapter test after building with `ctest --test-dir build/clang-release -R TooHumanPpcImportRegistryTests --output-on-failure`. To build only that runtime foundation (without the generated PPC library or XenonRecomp submodule):
 
 ~~~sh
 cmake -S . -B build/runtime -DTH_BUILD_RECOMP_LIB=OFF -DTH_BUILD_RUNTIME_CORE=ON -DBUILD_TESTING=ON
@@ -85,7 +85,7 @@ cmake --build build/runtime --parallel
 ctest --test-dir build/runtime --output-on-failure
 ~~~
 
-See [docs/runtime-foundation.md](docs/runtime-foundation.md) for its current scope and limitations. The PE loader parses sections into compact image-relative storage; the runtime now maps that image at its guest virtual addresses inside a reserved 4 GiB host address range, matching generated PPC pointer calculations. It still does not boot the game.
+To inspect the real Too Human import list once you have both original `default.xex` and matching extracted `default.exe`, run `./build/runtime/TooHumanXexImportAudit private/default.xex private/default.exe`. This prints every imported library, ordinal, thunk address and type without guessing implementations. See [docs/runtime-foundation.md](docs/runtime-foundation.md) for the runtime scope and limitations. The PE loader parses sections into compact image-relative storage; the runtime now maps that image at its guest virtual addresses inside a reserved 4 GiB host address range, matching generated PPC pointer calculations. It still does not boot the game.
 
 On Windows, use a Developer Command Prompt with LLVM's clang-cl and Ninja available, and configure the compiler explicitly when needed:
 
