@@ -57,7 +57,7 @@ private:
 
     std::unordered_map<std::uint32_t, ImportBinding> imports_by_thunk_;
     std::unordered_map<std::string, PPCFunc*> handlers_;
-    std::unique_ptr<GuestHeap> variable_heap_;
+    std::unique_ptr<GuestHeap> guest_heap_;
     std::jthread timestamp_thread_;
     bool variables_prepared_{};
     bool installed_{};
