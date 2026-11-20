@@ -7,6 +7,8 @@ namespace toohuman::runtime {
 namespace {
 
 constexpr std::uint32_t kXex2Magic = 0x58455832;
+constexpr std::uint32_t kEntryPointKey = 0x00010100;
+constexpr std::uint32_t kImageBaseKey = 0x00010201;
 constexpr std::uint32_t kImportLibrariesKey = 0x000103FF;
 constexpr std::size_t kFixedHeaderSize = 0x18;
 constexpr std::size_t kOptionalHeaderSize = 8;
@@ -50,6 +52,8 @@ XexImportResult parse_xex2_imports(std::span<const std::uint8_t> xex_file,
 
     std::size_t import_offset = 0;
     bool found_import_header = false;
+    std::uint32_t xex_image_base = 0;
+    std::uint32_t xex_entry_point = 0;
     for (std::size_t i = 0; i < optional_count; ++i) {
         const auto offset = kFixedHeaderSize + i * kOptionalHeaderSize;
         const auto key = read_be32(xex_file, offset);
@@ -57,11 +61,28 @@ XexImportResult parse_xex2_imports(std::span<const std::uint8_t> xex_file,
         if (key == kImportLibrariesKey) {
             import_offset = value;
             found_import_header = true;
-            break;
+        } else if (key == kImageBaseKey) {
+            xex_image_base = value;
+        } else if (key == kEntryPointKey) {
+            xex_entry_point = value;
         }
     }
     if (!found_import_header) {
         return fail("XEX2 has no import-libraries optional header");
+    }
+    const auto security_offset = read_be32(xex_file, 0x10);
+    if (security_offset != 0) {
+        if (!fits(security_offset, 0x114, xex_file.size())) {
+            return fail("XEX2 security header is truncated");
+        }
+        if (xex_image_base == 0) xex_image_base = read_be32(xex_file, security_offset + 0x110);
+    }
+    if (xex_image_base == 0) xex_image_base = image.image_base;
+    if (xex_image_base != image.image_base) {
+        return fail("XEX2 image base does not match the extracted PE image base");
+    }
+    if (xex_entry_point != 0 && xex_entry_point != image.entry_point) {
+        return fail("XEX2 entry point does not match the extracted PE image entry point");
     }
     const auto optional_table_end = kFixedHeaderSize +
                                     static_cast<std::size_t>(optional_count) * kOptionalHeaderSize;
