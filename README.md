@@ -85,7 +85,13 @@ cmake --build build/runtime --parallel
 ctest --test-dir build/runtime --output-on-failure
 ~~~
 
-To inspect the real Too Human import list once you have both original `default.xex` and matching extracted `default.exe`, run `./build/runtime/TooHumanXexImportAudit private/default.xex private/default.exe`. This prints every imported library, ordinal, thunk address and type without guessing implementations. To link the generated PPC library and exercise the full memory/function-table/import initialization path, configure with `-DTH_BUILD_RUNTIME_PROBE=ON`, build `TooHumanRuntimeProbe`, then run `./build/probe/TooHumanRuntimeProbe private/default.xex private/default.exe`. The probe deliberately does not invoke the game entry point. See [docs/runtime-foundation.md](docs/runtime-foundation.md) for the runtime scope and limitations. The PE loader parses sections into compact image-relative storage; the runtime now maps that image at its guest virtual addresses inside a reserved 4 GiB host address range, matching generated PPC pointer calculations. It still does not boot the game.
+To inspect the real Too Human import list once you have both original `default.xex` and matching extracted `default.exe`, run `./build/runtime/TooHumanXexImportAudit private/default.xex private/default.exe`. This prints every imported library, ordinal, thunk address and type without guessing implementations. To link the generated PPC library and exercise the full memory/function-table/import initialization path, configure with `-DTH_BUILD_RUNTIME_PROBE=ON`, build `TooHumanRuntimeProbe`, then run `./build/probe/TooHumanRuntimeProbe private/default.xex private/default.exe`. The probe deliberately does not invoke the game entry point. To build it explicitly (with the XenonRecomp checkout and generated PPC sources available):
+
+~~~sh
+cmake -S . -B build/probe -DTH_BUILD_RECOMP_LIB=ON -DTH_BUILD_RUNTIME_CORE=ON -DTH_BUILD_RUNTIME_PROBE=ON -DBUILD_TESTING=OFF
+cmake --build build/probe --target TooHumanRuntimeProbe --parallel
+./build/probe/TooHumanRuntimeProbe private/default.xex private/default.exe
+~~~ See [docs/runtime-foundation.md](docs/runtime-foundation.md) for the runtime scope and limitations. The PE loader parses sections into compact image-relative storage; the runtime now maps that image at its guest virtual addresses inside a reserved 4 GiB host address range, matching generated PPC pointer calculations. It still does not boot the game.
 
 On Windows, use a Developer Command Prompt with LLVM's clang-cl and Ninja available, and configure the compiler explicitly when needed:
 
