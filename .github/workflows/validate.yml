@@ -23,6 +23,9 @@ jobs:
       - name: Configure validation build
         run: cmake -S . -B build/validate -DTH_BUILD_RECOMP_LIB=OFF -DBUILD_TESTING=ON
 
+      - name: Build validation targets
+        run: cmake --build build/validate --parallel
+
       - name: Validate generated PowerPC artifacts
         run: ctest --test-dir build/validate --output-on-failure
 

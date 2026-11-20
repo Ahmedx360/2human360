@@ -72,6 +72,7 @@ To run the artifact and Python regression checks without compiling the very larg
 
 ~~~sh
 cmake --preset validate-only
+cmake --build --preset validate-only --parallel
 ctest --preset validate
 ~~~
 

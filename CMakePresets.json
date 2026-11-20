@@ -31,6 +31,10 @@
       "name": "clang-release",
       "configurePreset": "clang-release",
       "targets": [ "TooHumanRecompLib" ]
+    },
+    {
+      "name": "validate-only",
+      "configurePreset": "validate-only"
     }
   ],
   "testPresets": [
