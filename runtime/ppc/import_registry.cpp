@@ -59,7 +59,7 @@ bool PpcImportRegistry::register_handler(const std::string& library,
         set_error(error, "Import handler requires a library name and non-null PPC function");
         return false;
     }
-    const auto [it, inserted] = handlers_.emplace(make_key(library, ordinal), handler);
+    const bool inserted = handlers_.emplace(make_key(library, ordinal), handler).second;
     if (!inserted) {
         set_error(error, "Duplicate handler registered for an import library/ordinal pair");
         return false;
@@ -84,7 +84,7 @@ bool PpcImportRegistry::install(GuestAddressSpace& memory,
         return false;
     }
 
-    std::unordered_map<std::uint32_t, XexImport> pending;
+    std::unordered_map<std::uint32_t, ImportBinding> pending;
     for (const auto& import : imports) {
         if (import.type == 0) continue; // Variable imports are not callable thunks.
         if (import.type != 1) {
