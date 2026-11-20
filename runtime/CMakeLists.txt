@@ -38,6 +38,12 @@ if(TH_BUILD_RECOMP_LIB)
 endif()
 
 
+if(TH_BUILD_RUNTIME_PROBE)
+    add_executable(TooHumanRuntimeProbe ../tools/runtime_probe.cpp)
+    target_link_libraries(TooHumanRuntimeProbe PRIVATE TooHumanPpcRuntime)
+    target_compile_features(TooHumanRuntimeProbe PRIVATE cxx_std_20)
+endif()
+
 if(BUILD_TESTING AND TH_BUILD_RECOMP_LIB)
     add_executable(TooHumanPpcImportRegistryTests
         tests/ppc_import_registry_tests.cpp
