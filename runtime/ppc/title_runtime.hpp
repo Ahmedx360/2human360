@@ -21,10 +21,10 @@ struct TitleRuntimeInitReport {
     std::optional<XexTlsInfo> tls_info;
 };
 
-// Initializes the memory, generated PPC lookup table and XEX import thunks
-// for a matching extracted PE + original XEX pair. Register known HLE handlers
-// on imports before calling this function. It deliberately does not invent
-// startup registers, stack layout, TLS or kernel service semantics.
+// Initializes the memory, generated PPC lookup table, XEX IATs and kernel
+// variable backing from a LoadedPeImage (either direct XEX reconstruction or
+// extracted PE) plus its matching original XEX. Register custom HLE handlers
+// before calling. It does not invent startup registers, stack layout or TLS.
 [[nodiscard]] bool initialize_title_runtime(
     GuestAddressSpace& memory,
     const LoadedPeImage& image,
