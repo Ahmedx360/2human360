@@ -247,6 +247,9 @@ XexImportResult parse_xex2_imports(std::span<const std::uint8_t> xex_file,
         library_cursor += record_size;
     }
 
+    if (library_cursor != import_offset + declared_import_header_size) {
+        return fail("XEX2 import-library records do not fill the declared import block");
+    }
     return result;
 }
 
