@@ -3,6 +3,7 @@
 #include "ppc/title_import_manifest.hpp"
 #include <ppc_config.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstring>
@@ -316,8 +317,15 @@ bool PpcImportRegistry::install(GuestAddressSpace& memory,
         return false;
     }
     if (!variables_prepared_) {
-        set_error(error, "Prepare the XEX variable exports before installing function imports");
-        return false;
+        const bool has_unbound_variables = std::any_of(
+            imports.begin(), imports.end(), [](const XexImport& item) {
+                return item.type == 0 && item.paired_thunk_address == 0;
+            });
+        if (has_unbound_variables) {
+            set_error(error, "Prepare the XEX variable exports before installing function imports");
+            return false;
+        }
+        variables_prepared_ = true;
     }
     if (g_active_registry.load(std::memory_order_acquire) != nullptr) {
         set_error(error, "Another PPC import registry is already active in this process");
