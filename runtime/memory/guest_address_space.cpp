@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <utility>
+#include <vector>
 
 #if defined(_WIN32)
 #ifndef NOMINMAX
@@ -32,6 +33,22 @@ std::size_t host_page_size() noexcept {
 
 void set_error(std::string* error, const char* message) {
     if (error) *error = message;
+}
+
+bool protect_page(void* address, std::size_t size, std::uint8_t flags) noexcept {
+#if defined(_WIN32)
+    DWORD protection = PAGE_NOACCESS;
+    if ((flags & 2u) != 0) protection = PAGE_READWRITE;
+    else if ((flags & 1u) != 0) protection = PAGE_READONLY;
+    DWORD old_protection = 0;
+    return VirtualProtect(address, static_cast<SIZE_T>(size),
+                          protection, &old_protection) != 0;
+#else
+    int protection = PROT_NONE;
+    if ((flags & 2u) != 0) protection = PROT_READ | PROT_WRITE;
+    else if ((flags & 1u) != 0) protection = PROT_READ;
+    return mprotect(address, size, protection) == 0;
+#endif
 }
 
 } // namespace
@@ -155,9 +172,62 @@ bool GuestAddressSpace::map_image(const LoadedPeImage& image, std::string* error
                                static_cast<std::uintptr_t>(image.image_base);
     std::memcpy(reinterpret_cast<void*>(image_address), image.bytes.data(),
                 image.bytes.size());
+    if (!apply_image_permissions(image, error)) return false;
     image_base_ = image.image_base;
     image_size_ = image.image_size;
     image_mapped_ = true;
+    return true;
+}
+
+bool GuestAddressSpace::apply_image_permissions(const LoadedPeImage& image,
+                                                std::string* error) {
+    const auto page_size = host_page_size();
+    if (page_size == 0 || (page_size & (page_size - 1)) != 0) {
+        set_error(error, "Host page size is invalid while protecting PE sections");
+        return false;
+    }
+
+    const auto page_mask = static_cast<std::uint64_t>(page_size) - 1;
+    const auto image_start = static_cast<std::uint64_t>(image.image_base);
+    const auto image_end = image_start + image.image_size;
+    const auto page_base = image_start & ~page_mask;
+    const auto page_end = (image_end + page_mask) & ~page_mask;
+    const auto page_count = static_cast<std::size_t>((page_end - page_base) / page_size);
+    std::vector<std::uint8_t> page_flags(page_count, 0);
+
+    const auto mark_range = [&](std::uint64_t start, std::uint64_t size,
+                                bool writable) {
+        if (size == 0) return;
+        const auto end = start + size;
+        const auto first_page = start & ~page_mask;
+        const auto last_page = (end + page_mask) & ~page_mask;
+        for (auto page = first_page; page < last_page; page += page_size) {
+            const auto index = static_cast<std::size_t>((page - page_base) / page_size);
+            if (index >= page_flags.size()) continue;
+            page_flags[index] |= 1u;
+            if (writable) page_flags[index] |= 2u;
+        }
+    };
+
+    mark_range(image_start, std::min<std::uint64_t>(image.headers_size, image.image_size),
+               false);
+    for (const auto& section : image.sections) {
+        const auto section_size = section.virtual_size != 0
+            ? section.virtual_size : section.raw_size;
+        const auto section_start = image_start + section.virtual_address;
+        const bool writable = (section.characteristics & 0x80000000u) != 0;
+        mark_range(section_start, section_size, writable);
+    }
+
+    const auto reservation_address = reinterpret_cast<std::uintptr_t>(reservation_);
+    for (std::size_t i = 0; i < page_flags.size(); ++i) {
+        const auto guest_page = page_base + static_cast<std::uint64_t>(i) * page_size;
+        const auto host_page = reservation_address + static_cast<std::uintptr_t>(guest_page);
+        if (!protect_page(reinterpret_cast<void*>(host_page), page_size, page_flags[i])) {
+            set_error(error, "Could not apply PE section page permissions");
+            return false;
+        }
+    }
     return true;
 }
 
