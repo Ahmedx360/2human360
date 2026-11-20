@@ -1,0 +1,59 @@
+ppc/ppc_recomp.372.cpp:55109:9: error: subscripted value is not an array, pointer, or vector
+ 55109 |         temp.u8[0] = ctx.v12.u8[0] & 0xF;
+       |         ~~~~~~~^~
+ppc/ppc_recomp.372.cpp:55110:53: error: subscripted value is not an array, pointer, or vector
+ 55110 |         ctx.v8.u16[0] = uint16_t((ctx.v12.u16[0] << temp.u8[0]) | (ctx.v12.u16[0] >> ((16 - temp.u8[0]) & 0xF)));
+       |                                                     ~~~~~~~^~
+ppc/ppc_recomp.372.cpp:55110:93: error: subscripted value is not an array, pointer, or vector
+ 55110 |         ctx.v8.u16[0] = uint16_t((ctx.v12.u16[0] << temp.u8[0]) | (ctx.v12.u16[0] >> ((16 - temp.u8[0]) & 0xF)));
+       |                                                                                             ~~~~~~~^~
+ppc/ppc_recomp.372.cpp:55111:9: error: subscripted value is not an array, pointer, or vector
+ 55111 |         temp.u8[0] = ctx.v12.u8[2] & 0xF;
+       |         ~~~~~~~^~
+ppc/ppc_recomp.372.cpp:55112:53: error: subscripted value is not an array, pointer, or vector
+ 55112 |         ctx.v8.u16[1] = uint16_t((ctx.v12.u16[1] << temp.u8[0]) | (ctx.v12.u16[1] >> ((16 - temp.u8[0]) & 0xF)));
+       |                                                     ~~~~~~~^~
+ppc/ppc_recomp.372.cpp:55112:93: error: subscripted value is not an array, pointer, or vector
+ 55112 |         ctx.v8.u16[1] = uint16_t((ctx.v12.u16[1] << temp.u8[0]) | (ctx.v12.u16[1] >> ((16 - temp.u8[0]) & 0xF)));
+       |                                                                                             ~~~~~~~^~
+ppc/ppc_recomp.372.cpp:55113:9: error: subscripted value is not an array, pointer, or vector
+ 55113 |         temp.u8[0] = ctx.v12.u8[4] & 0xF;
+       |         ~~~~~~~^~
+ppc/ppc_recomp.372.cpp:55114:53: error: subscripted value is not an array, pointer, or vector
+ 55114 |         ctx.v8.u16[2] = uint16_t((ctx.v12.u16[2] << temp.u8[0]) | (ctx.v12.u16[2] >> ((16 - temp.u8[0]) & 0xF)));
+       |                                                     ~~~~~~~^~
+ppc/ppc_recomp.372.cpp:55114:93: error: subscripted value is not an array, pointer, or vector
+ 55114 |         ctx.v8.u16[2] = uint16_t((ctx.v12.u16[2] << temp.u8[0]) | (ctx.v12.u16[2] >> ((16 - temp.u8[0]) & 0xF)));
+       |                                                                                             ~~~~~~~^~
+ppc/ppc_recomp.372.cpp:55115:9: error: subscripted value is not an array, pointer, or vector
+ 55115 |         temp.u8[0] = ctx.v12.u8[6] & 0xF;
+       |         ~~~~~~~^~
+ppc/ppc_recomp.372.cpp:55116:53: error: subscripted value is not an array, pointer, or vector
+ 55116 |         ctx.v8.u16[3] = uint16_t((ctx.v12.u16[3] << temp.u8[0]) | (ctx.v12.u16[3] >> ((16 - temp.u8[0]) & 0xF)));
+       |                                                     ~~~~~~~^~
+ppc/ppc_recomp.372.cpp:55116:93: error: subscripted value is not an array, pointer, or vector
+ 55116 |         ctx.v8.u16[3] = uint16_t((ctx.v12.u16[3] << temp.u8[0]) | (ctx.v12.u16[3] >> ((16 - temp.u8[0]) & 0xF)));
+       |                                                                                             ~~~~~~~^~
+ppc/ppc_recomp.372.cpp:55117:9: error: subscripted value is not an array, pointer, or vector
+ 55117 |         temp.u8[0] = ctx.v12.u8[8] & 0xF;
+       |         ~~~~~~~^~
+ppc/ppc_recomp.372.cpp:55118:53: error: subscripted value is not an array, pointer, or vector
+ 55118 |         ctx.v8.u16[4] = uint16_t((ctx.v12.u16[4] << temp.u8[0]) | (ctx.v12.u16[4] >> ((16 - temp.u8[0]) & 0xF)));
+       |                                                     ~~~~~~~^~
+ppc/ppc_recomp.372.cpp:55118:93: error: subscripted value is not an array, pointer, or vector
+ 55118 |         ctx.v8.u16[4] = uint16_t((ctx.v12.u16[4] << temp.u8[0]) | (ctx.v12.u16[4] >> ((16 - temp.u8[0]) & 0xF)));
+       |                                                                                             ~~~~~~~^~
+ppc/ppc_recomp.372.cpp:55119:9: error: subscripted value is not an array, pointer, or vector
+ 55119 |         temp.u8[0] = ctx.v12.u8[10] & 0xF;
+       |         ~~~~~~~^~
+ppc/ppc_recomp.372.cpp:55120:53: error: subscripted value is not an array, pointer, or vector
+ 55120 |         ctx.v8.u16[5] = uint16_t((ctx.v12.u16[5] << temp.u8[0]) | (ctx.v12.u16[5] >> ((16 - temp.u8[0]) & 0xF)));
+       |                                                     ~~~~~~~^~
+ppc/ppc_recomp.372.cpp:55120:93: error: subscripted value is not an array, pointer, or vector
+ 55120 |         ctx.v8.u16[5] = uint16_t((ctx.v12.u16[5] << temp.u8[0]) | (ctx.v12.u16[5] >> ((16 - temp.u8[0]) & 0xF)));
+       |                                                                                             ~~~~~~~^~
+ppc/ppc_recomp.372.cpp:55121:9: error: subscripted value is not an array, pointer, or vector
+ 55121 |         temp.u8[0] = ctx.v12.u8[12] & 0xF;
+       |         ~~~~~~~^~
+fatal error: too many errors emitted, stopping now [-ferror-limit=]
+20 errors generated.
