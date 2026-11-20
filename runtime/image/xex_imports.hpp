@@ -16,6 +16,17 @@ struct XexImport {
     std::uint8_t hint{};
     std::uint8_t type{};
     std::uint32_t thunk_address{};
+    // Non-zero on a type-0 IAT slot paired with the following type-1 code thunk.
+    std::uint32_t paired_thunk_address{};
+};
+
+struct XexImportLibraryInfo {
+    std::string name;
+    std::uint32_t library_id{};
+    std::uint32_t version{};
+    std::uint32_t minimum_version{};
+    std::uint16_t name_index{};
+    std::uint16_t descriptor_count{};
 };
 
 struct XexTlsInfo {
@@ -27,6 +38,7 @@ struct XexTlsInfo {
 
 struct XexImportResult {
     std::vector<XexImport> imports;
+    std::vector<XexImportLibraryInfo> libraries;
     std::uint32_t default_stack_size{};
     std::uint32_t default_heap_size{};
     std::optional<XexTlsInfo> tls_info;
