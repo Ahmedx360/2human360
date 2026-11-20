@@ -77,7 +77,7 @@ cmake --build --preset validate-only --parallel
 ctest --preset validate
 ~~~
 
-The validation configuration also builds and tests the independent host-side runtime core, including guest-heap allocation/coalescing, synthetic PE loading and XEX import/TLS fixtures, and builds `TooHumanXexImportAudit`. The full Clang CI build also links `TooHumanRuntimeProbe` against the complete generated library, checking the mapping table and runtime adapter link together. Run the adapter test after building with `ctest --test-dir build/clang-release -R TooHumanPpcImportRegistryTests --output-on-failure`. To build only that runtime foundation (without the generated PPC library or XenonRecomp submodule):
+The validation configuration also builds and tests the independent host-side runtime core, including guest-heap allocation/coalescing, synthetic PE loading, basic-compressed XEX image loading, and XEX import/IAT-pair fixtures. It builds `TooHumanXexImportAudit`. The full Clang CI build also links `TooHumanRuntimeProbe` against the complete generated library, checking the mapping table and runtime adapter link together. Run the adapter test after building with `ctest --test-dir build/clang-release -R TooHumanPpcImportRegistryTests --output-on-failure`. To build only that runtime foundation (without the generated PPC library or XenonRecomp submodule):
 
 ~~~sh
 cmake -S . -B build/runtime -DTH_BUILD_RECOMP_LIB=OFF -DTH_BUILD_RUNTIME_CORE=ON -DBUILD_TESTING=ON
@@ -85,15 +85,15 @@ cmake --build build/runtime --parallel
 ctest --test-dir build/runtime --output-on-failure
 ~~~
 
-To inspect the real Too Human import list once you have both original `default.xex` and matching extracted `default.exe`, run `./build/runtime/TooHumanXexImportAudit private/default.xex private/default.exe`. This prints every imported library, ordinal, thunk address and type without guessing implementations. To link the generated PPC library and exercise the full memory/function-table/import initialization path, configure with `-DTH_BUILD_RUNTIME_PROBE=ON`, build `TooHumanRuntimeProbe`, then run `./build/probe/TooHumanRuntimeProbe private/default.xex private/default.exe`. The probe deliberately does not invoke the game entry point. To build it explicitly (with the XenonRecomp checkout and generated PPC sources available):
+To inspect the real Too Human imports directly from the original decrypted `default.xex`, run `./build/runtime/TooHumanXexImportAudit private/default.xex`. The XEX loader handles the title's unencrypted basic-compressed payload, reconstructs its guest-RVA image, and reports library IDs/versions, import ordinals, paired function IAT slots, true variable imports, stack size and TLS metadata. The older two-file form with a matching extracted `default.exe` remains available. To link the generated PPC library and exercise the full memory/function-table/import initialization path using only the XEX, configure with `-DTH_BUILD_RUNTIME_PROBE=ON`, build `TooHumanRuntimeProbe`, then run `./build/probe/TooHumanRuntimeProbe private/default.xex`. The probe deliberately does not invoke the game entry point. To build it explicitly (with the XenonRecomp checkout and generated PPC sources available):
 
 ~~~sh
 cmake -S . -B build/probe -DTH_BUILD_RECOMP_LIB=ON -DTH_BUILD_RUNTIME_CORE=ON -DTH_BUILD_RUNTIME_PROBE=ON -DBUILD_TESTING=OFF
 cmake --build build/probe --target TooHumanRuntimeProbe --parallel
-./build/probe/TooHumanRuntimeProbe private/default.xex private/default.exe
+./build/probe/TooHumanRuntimeProbe private/default.xex
 ~~~
 
-See [docs/runtime-foundation.md](docs/runtime-foundation.md) for the runtime scope and limitations. The PE loader parses sections into compact image-relative storage; the runtime now maps that image at its guest virtual addresses inside a reserved 4 GiB host address range, matching generated PPC pointer calculations. It still does not boot the game.
+See [docs/runtime-foundation.md](docs/runtime-foundation.md) for the runtime scope and limitations. The standalone PE loader parses raw PE sections into compact image-relative storage. The XEX loader instead decompresses the console's already RVA-laid-out payload and preserves those guest offsets directly. Both paths map the image at guest virtual addresses inside a reserved 4 GiB host address range, matching generated PPC pointer calculations. It still does not boot the game.
 
 On Windows, use a Developer Command Prompt with LLVM's clang-cl and Ninja available, and configure the compiler explicitly when needed:
 
@@ -129,7 +129,7 @@ The checked-in XenonRecomp patch corrects the known scalar-scratch code-emission
 
 The analyzed executable is a bare PE rather than an XEX2 container. XenonRecomp's normal XEX2/ELF loading path does not directly handle this PE, so the patch adds an Xbox 360 PowerPC PE loader and accounts for the observed section-address delta in this image.
 
-A bare PE does not preserve the XEX2 import metadata. The matching original `default.xex` is required to populate the import registry with the title's actual library/ordinal/thunk records. The registry is ready to route those records, but actual kernel/XAM service handlers still need to be implemented and tested.
+A bare PE does not preserve the XEX2 import metadata. The matching original `default.xex` is required to recover the title's actual library/ordinal/thunk records. The supplied Too Human XEX is unencrypted and uses basic compression, which the new XEX-only loader handles directly. The registry is ready to route those records, but actual kernel/XAM service handlers still need to be implemented and tested.
 
 ## Architecture and next runtime milestones
 
