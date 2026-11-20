@@ -1,3 +1,52 @@
+diff --git a/XenonAnalyse/function.cpp b/XenonAnalyse/function.cpp
+index 34add40..8768b47 100644
+--- a/XenonAnalyse/function.cpp
++++ b/XenonAnalyse/function.cpp
+@@ -4,6 +4,7 @@
+ #include <bit>
+ #include <algorithm>
+ #include <cassert>
++#include <cstdio>
+ #include <byteswap.h>
+ 
+ size_t Function::SearchBlock(size_t address) const
+@@ -62,8 +63,15 @@ Function Function::Analyze(const void* code, size_t size, size_t base)
+     #define RESTORE_DATA() if (!blockStack.empty()) data = (dataStart + ((blocks[blockStack.back()].base + blocks[blockStack.back()].size) / sizeof(*data))) - 1; // continue adds one
+ 
+     // TODO: Branch fallthrough
++    size_t iterations = 0;
+     for (; data <= dataEnd ; ++data)
+     {
++        if (++iterations > 400000) // safeguard: runaway block chase (seen in Too Human)
++        {
++            fprintf(stderr, "[analyse] iteration cap hit for function at 0x%zX, truncating\n", base);
++            break;
++        }
++
+         const size_t addr = base + ((data - dataStart) * sizeof(*data));
+         if (blockStack.empty())
+         {
+diff --git a/XenonRecomp/recompiler.cpp b/XenonRecomp/recompiler.cpp
+index fa91527..69c520b 100644
+--- a/XenonRecomp/recompiler.cpp
++++ b/XenonRecomp/recompiler.cpp
+@@ -243,7 +243,16 @@ void Recompiler::Analyse()
+             else
+             {
+                 auto& fn = functions.emplace_back(Function::Analyze(data, dataEnd - data, base));
++                if (fn.size == 0)
++                {
++                    fmt::println(stderr, "[analyse] zero-size function at 0x{:X} (word 0x{:08X}), skipping 4 bytes", base, ByteSwap(*(uint32_t*)data));
++                    functions.pop_back();
++                    base += 4;
++                    data += 4;
++                    continue;
++                }
+                 image.symbols.emplace(fmt::format("sub_{:X}", fn.base), fn.base, fn.size, Symbol_Function);
++                if ((base & 0xFFFFF) < fn.size) fmt::println(stderr, "[analyse] at 0x{:X}", base);
+ 
+                 base += fn.size;
+                 data += fn.size;
 diff --git a/XenonUtils/image.cpp b/XenonUtils/image.cpp
 index 39afe92..1260f24 100644
 --- a/XenonUtils/image.cpp

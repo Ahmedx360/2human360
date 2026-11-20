@@ -28,3 +28,8 @@ savevmx_64_address   = 0x82EC99D4
 # setjmp/longjmp: not located yet (needs RtlUnwind import name) - TODO
 # longjmp_address = 0x........
 # setjmp_address  = 0x........
+
+# Zero padding (e.g. first 0x5000 bytes of .text) must be skipped or analysis never advances
+invalid_instructions = [
+    { data = 0x00000000, size = 4 }, # Padding
+]
