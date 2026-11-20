@@ -93,7 +93,7 @@ cmake --build build/probe --target TooHumanRuntimeProbe --parallel
 ./build/probe/TooHumanRuntimeProbe private/default.xex
 ~~~
 
-See [docs/runtime-foundation.md](docs/runtime-foundation.md) for the runtime scope and limitations. The standalone PE loader parses raw PE sections into compact image-relative storage. The XEX loader instead decompresses the console's already RVA-laid-out payload and preserves those guest offsets directly. Both paths map the image at guest virtual addresses inside a reserved 4 GiB host address range, matching generated PPC pointer calculations. It still does not boot the game.
+See [docs/runtime-foundation.md](docs/runtime-foundation.md) for runtime scope and limitations, and [docs/too-human-xex-imports.md](docs/too-human-xex-imports.md) for the real executable's import inventory. The standalone PE loader parses raw PE sections into compact image-relative storage. The XEX loader instead decompresses the console's already RVA-laid-out payload and preserves those guest offsets directly. Both paths map the image at guest virtual addresses inside a reserved 4 GiB host address range, matching generated PPC pointer calculations. It still does not boot the game.
 
 On Windows, use a Developer Command Prompt with LLVM's clang-cl and Ninja available, and configure the compiler explicitly when needed:
 
