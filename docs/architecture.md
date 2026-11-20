@@ -15,10 +15,10 @@ The runtime core is an incremental foundation, not a complete emulator. A host e
 |---|---|---|
 | TooHumanRecompLib | Static library containing generated PowerPC functions and dispatch map | Generated sources and build target exist |
 | runtime/memory | Bounded PPC big-endian access, 4 GiB guest VA reservation and heap allocation | Reservation, PE mapping/protections and synchronized first-fit guest heap implemented; MMIO/aliases pending |
-| runtime/image | Extracted Xbox 360 PE parsing and XEX2 import metadata | PE32/PPCBE loader and XEX2 import parser implemented and synthetic-fixture tested |
-| runtime/ppc | Populate XenonRecomp's indirect-call table, invoke known functions and route XEX imports | Generated map registration, unresolved-target trap, caller-context invocation and ordinal-keyed import registry implemented; game startup state/HLE handlers are missing |
+| runtime/image | Standalone PE and direct XEX2 loading, import metadata | PE32/PPCBE loader, unencrypted none/basic XEX decompression, embedded PE validation, import library metadata and function-IAT pairing implemented and synthetic-fixture tested |
+| runtime/ppc | Populate XenonRecomp's indirect-call table, invoke known functions and route XEX imports | Generated map registration, unresolved-target trap, caller-context invocation, function IAT patching and a verified 253-entry title import-name manifest implemented; HLE handlers and variable storage are missing |
 | TooHumanRecomp (future) | Host executable, startup, window, configuration, logging and game-data discovery | Not implemented |
-| kernel (future) | Verified Xbox kernel/XAM imports, handles, virtual files, events and synchronization | XEX2 metadata parsing and ordinal-keyed thunk dispatch exist; no HLE handlers yet |
+| kernel (future) | Verified Xbox kernel/XAM imports, handles, virtual files, events and synchronization | Actual Too Human import inventory is decoded and named; function thunk dispatch exists but all HLE handlers and 11 variable-export bindings remain to be implemented |
 | cpu / os (future) | PPC context lifecycle, guest-thread scheduling, TLS, exceptions and host/guest call bridges | Generated PPC context exists; runtime lifecycle not implemented |
 | gpu (future) | Xenos command processor, register/MMIO handling, EDRAM and host graphics backend | Not implemented |
 | apu (future) | XMA stream decoding, guest audio callbacks, mixing and host output | Not implemented |
@@ -31,7 +31,7 @@ Keep title-specific patches and constants separate from generic execution servic
 
 ### 1. Guest address space and PPC dispatch
 
-The generated code accesses guest memory through a 32-bit guest address space and a host base pointer. TooHumanRecomp::RuntimeCore provides a bounded, non-owning contiguous memory view with big-endian scalar reads/writes, plus a checked loader for the extracted Too Human PE. See runtime-foundation.md. The PE loader returns compact image-relative storage; `GuestAddressSpace` now reserves 4 GiB and maps those bytes at `base + guest_virtual_address`, matching generated PPC pointer calculations. The image is currently committed read/write as one range; section-level protection and MMIO remain unimplemented.
+The generated code accesses guest memory through a 32-bit guest address space and a host base pointer. TooHumanRecomp::RuntimeCore provides a bounded memory view, a checked standalone PE loader, and a direct XEX2 loader for unencrypted images using none/basic compression. The XEX payload is already arranged at guest RVA offsets, so the XEX loader preserves that layout and pads to PE `SizeOfImage`; it does not reinterpret `PointerToRawData`. `GuestAddressSpace` reserves 4 GiB, maps at `base + guest_virtual_address`, and applies header/section page protections. A synchronized first-fit guest heap exists; sparse mappings, aliases and MMIO remain unimplemented.
 
 Before invoking the game entry point, the runtime still must:
 
@@ -45,9 +45,9 @@ Do not infer that the PPC code range is the entire guest image. Data sections, r
 
 ### 2. Kernel and XAM imports
 
-The XEX2 import metadata parser and ordinal-keyed thunk registry are implemented. The registry accepts explicit handlers and fails fast with the library, ordinal, thunk, LR and argument registers when no handler exists. It currently skips variable imports and supports one active registry per process. Add real imports only from the matching `default.xex` metadata or a verified export table. Each registered import needs a documented calling convention and argument/return contract, plus tests for ownership, wait semantics, memory bounds and error codes.
+The supplied XEX's import table is decoded: 82 XAM functions, 160 kernel functions, 242 paired function IAT slots and 11 kernel data exports. Export names are resolved against the pinned XenonRecomp/Xenia tables and stored in `runtime/ppc/title_import_manifest.cpp`. The loader patches paired function IATs before applying page protections; the registry routes type-1 thunks and fails fast when a function has no handler. The 11 variable exports are identified but not yet backed by guest storage. Each HLE implementation still needs a documented calling convention and argument/return contract, plus tests for ownership, wait semantics, memory bounds and error codes.
 
-The current bare PE does not contain original XEX2 import-name tables. Do not guess names from ordinals. First inspect matching XEX2 metadata or build a verified Too Human-specific ordinal map. Then implement imports in observed dependency order: memory and synchronization, thread creation/waits, file I/O, timers, notifications and title/XAM services.
+The original XEX2 is now available and its imports are catalogued in `docs/too-human-xex-imports.md`. Continue from this inventory rather than guessing. The first implementation priorities are variable-export storage, memory allocation/protection, synchronization/events, thread creation/waits, file I/O, timers, graphics setup and XAM title services.
 
 ### 3. File system and content
 
@@ -76,10 +76,10 @@ Map a host gamepad API into the XInput/HID structures expected by the game. Keep
 ## Milestone order
 
 1. Build correctness — generated sources compile into TooHumanRecompLib; keep generator and artifact checks reproducible.
-2. Guest memory and image loader — apply per-section permissions to the validated PE image and define explicit MMIO ranges.
-3. Game startup — establish the title's verified stack, TLS, initial PPCContext and thread lifecycle before invoking the entry point.
-4. Game startup — initialize the verified guest stack, TLS, initial PPCContext and thread lifecycle.
-5. Boot-critical kernel — implement only imports proven to be called during startup, with documented semantics and tests.
+2. Guest memory and image loader — validate the direct XEX reconstruction and per-section permissions; define explicit MMIO ranges.
+3. Variable exports — allocate and initialize the 11 imported Xbox kernel data objects, patch their IAT slots and provide a live KeTimeStampBundle.
+4. Startup context — establish the verified 256 KiB guest stack, 64-slot TLS template, initial PPCContext and thread lifecycle before invoking the entry point.
+5. Boot-critical HLE — implement only imports proven to be called during startup, with documented semantics and tests.
 6. File I/O and threading — support asset reads, synchronization and guest thread scheduling.
 7. GPU bring-up — capture/decode command streams, then render the earliest deterministic scene.
 8. Audio and input — add XMA playback and controller support independently.
