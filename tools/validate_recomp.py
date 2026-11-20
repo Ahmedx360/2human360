@@ -138,8 +138,8 @@ def main() -> int:
         if remaining:
             errors.append(f"Unfixed scratch/literal emission in {source_path.name}: {remaining.group(0)}")
 
-        label_definitions = set(re.findall(r"^\\s*(loc_[0-9A-Fa-f]+):", normalized, re.MULTILINE))
-        label_references = set(re.findall(r"\\bgoto\\s+(loc_[0-9A-Fa-f]+)\\s*;", normalized))
+        label_definitions = set(re.findall(r"^\s*(loc_[0-9A-Fa-f]+):", normalized, re.MULTILINE))
+        label_references = set(re.findall(r"\bgoto\s+(loc_[0-9A-Fa-f]+)\s*;", normalized))
         unresolved_labels = sorted(label_references - label_definitions)
         if unresolved_labels:
             errors.append(
