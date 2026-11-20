@@ -1,5 +1,6 @@
 add_library(TooHumanRuntimeCore STATIC
     memory/guest_memory.cpp
+    image/xbox360_pe.cpp
 )
 add_library(TooHumanRecomp::RuntimeCore ALIAS TooHumanRuntimeCore)
 
@@ -17,12 +18,18 @@ if(BUILD_TESTING)
     add_executable(TooHumanGuestMemoryTests
         tests/guest_memory_tests.cpp
     )
-    target_link_libraries(TooHumanGuestMemoryTests PRIVATE TooHumanRuntimeCore)
-    target_compile_features(TooHumanGuestMemoryTests PRIVATE cxx_std_20)
-    if(MSVC)
-        target_compile_options(TooHumanGuestMemoryTests PRIVATE /UNDEBUG)
-    else()
-        target_compile_options(TooHumanGuestMemoryTests PRIVATE -UNDEBUG)
-    endif()
+    add_executable(TooHumanXbox360PeTests
+        tests/xbox360_pe_tests.cpp
+    )
+    foreach(test_target IN ITEMS TooHumanGuestMemoryTests TooHumanXbox360PeTests)
+        target_link_libraries(${test_target} PRIVATE TooHumanRuntimeCore)
+        target_compile_features(${test_target} PRIVATE cxx_std_20)
+        if(MSVC)
+            target_compile_options(${test_target} PRIVATE /UNDEBUG)
+        else()
+            target_compile_options(${test_target} PRIVATE -UNDEBUG)
+        endif()
+    endforeach()
     add_test(NAME TooHumanGuestMemoryTests COMMAND TooHumanGuestMemoryTests)
+    add_test(NAME TooHumanXbox360PeTests COMMAND TooHumanXbox360PeTests)
 endif()
