@@ -26,8 +26,9 @@ bool initialize_title_runtime(GuestAddressSpace& memory,
         return false;
     }
 
-    // XEX payloads contain encoded type-0 IAT words. Patch the function slots
-    // in a private image copy before map_image applies read-only section flags.
+    // Patch all data pointers in a private image copy before mapping applies
+    // read-only section permissions. Function IATs point to guest code thunks;
+    // variable IATs point to stable kernel-export storage in the runtime heap.
     LoadedPeImage mapped_image = image;
     std::size_t function_iat_count = 0;
     if (!patch_xex_function_iat_slots(
@@ -36,10 +37,10 @@ bool initialize_title_runtime(GuestAddressSpace& memory,
     }
 
     std::size_t variable_import_count = 0;
-    for (const auto& item : import_result.imports) {
-        if (item.type == 0 && item.paired_thunk_address == 0) {
-            ++variable_import_count;
-        }
+    if (!imports.prepare_variable_imports(
+            memory, mapped_image, xex_file, import_result.imports,
+            &variable_import_count, error)) {
+        return false;
     }
 
     if (!memory.map_image(mapped_image, error)) return false;
