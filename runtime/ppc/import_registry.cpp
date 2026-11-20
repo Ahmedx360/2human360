@@ -400,11 +400,6 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) const 
             context.r3.u32 = 0;
             return;
         }
-        if (import.library == "xboxkrnl.exe" && import.ordinal == 0x00BA) {
-            const auto allocation = guest_heap_->allocate(context.r4.u32, 0x1000);
-            context.r3.u32 = allocation.value_or(0);
-            return;
-        }
         if (import.library == "xam.xex" && import.ordinal == 0x01EA) {
             const auto allocation = guest_heap_->allocate(context.r3.u32, 16);
             context.r3.u32 = allocation.value_or(0);
