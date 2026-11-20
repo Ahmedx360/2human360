@@ -53,6 +53,22 @@ void store_be64(std::uint8_t* p, std::uint64_t value) {
     store_be32(p + 4, static_cast<std::uint32_t>(value));
 }
 
+bool guest_range_valid(std::uint32_t address, std::uint64_t length) noexcept {
+    return length == 0 ||
+           (address != 0 && static_cast<std::uint64_t>(address) + length <=
+                                (std::uint64_t{1} << 32));
+}
+
+[[noreturn]] void invalid_guest_memory_call(const char* name,
+                                            std::uint32_t address,
+                                            std::uint32_t length) {
+    std::fprintf(stderr,
+                 "[TooHuman] %s received invalid guest range 0x%08X + 0x%08X\\n",
+                 name, static_cast<unsigned>(address), static_cast<unsigned>(length));
+    std::fflush(stderr);
+    std::abort();
+}
+
 struct KernelVariableSpec {
     std::uint16_t ordinal;
     std::uint32_t size;
@@ -98,7 +114,10 @@ void update_timestamp_bundle(std::uint8_t* base, std::uint32_t address,
 } // namespace
 
 PpcImportRegistry::~PpcImportRegistry() {
+    // Join before releasing registry-owned state. The worker holds a raw
+    // pointer into GuestAddressSpace, whose lifetime is managed by the caller.
     timestamp_thread_.request_stop();
+    if (timestamp_thread_.joinable()) timestamp_thread_.join();
     if (installed_) {
         auto* expected = this;
         g_active_registry.compare_exchange_strong(
@@ -412,6 +431,50 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) const 
             return;
         }
     }
+    if (binding.handler == nullptr && import.library == "xboxkrnl.exe") {
+        // These byte-oriented RTL helpers are safe to implement without
+        // emulating scheduler, object-manager, or device state. Xbox PPC
+        // ULONG values are big-endian in guest memory.
+        if (import.ordinal == 0x011B) { // RtlCompareMemoryUlong
+            const auto address = context.r3.u32;
+            const auto length = context.r4.u32;
+            const auto pattern = context.r5.u32;
+            const auto word_count = length / 4;
+            const auto compared_size = static_cast<std::uint64_t>(word_count) * 4;
+            if (!guest_range_valid(address, compared_size))
+                invalid_guest_memory_call("RtlCompareMemoryUlong", address, length);
+            const auto* source = base + address;
+            std::uint32_t matched = 0;
+            for (; matched < word_count; ++matched) {
+                const auto* word = source + static_cast<std::size_t>(matched) * 4;
+                const auto value = (static_cast<std::uint32_t>(word[0]) << 24) |
+                                   (static_cast<std::uint32_t>(word[1]) << 16) |
+                                   (static_cast<std::uint32_t>(word[2]) << 8) |
+                                   static_cast<std::uint32_t>(word[3]);
+                if (value != pattern) break;
+            }
+            // NT returns the matching prefix length in bytes, not a boolean
+            // and not the number of ULONGs.
+            context.r3.u32 = matched * 4;
+            return;
+        }
+        if (import.ordinal == 0x0126) { // RtlFillMemoryUlong
+            const auto address = context.r3.u32;
+            const auto length = context.r4.u32;
+            const auto pattern = context.r5.u32;
+            const auto word_count = length / 4;
+            const auto fill_size = static_cast<std::uint64_t>(word_count) * 4;
+            if (!guest_range_valid(address, fill_size))
+                invalid_guest_memory_call("RtlFillMemoryUlong", address, length);
+            auto* destination = base + address;
+            for (std::uint32_t i = 0; i < word_count; ++i) {
+                auto* word = destination + static_cast<std::size_t>(i) * 4;
+                store_be32(word, pattern);
+            }
+            return;
+        }
+    }
+
     if (binding.handler == nullptr) {
         const auto resolved_name = lookup_title_export_name(import.library, import.ordinal);
         const auto export_name = resolved_name.empty()
