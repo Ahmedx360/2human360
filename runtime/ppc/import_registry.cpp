@@ -35,8 +35,8 @@ void set_error(std::string* error, const char* message) {
     if (error) *error = message;
 }
 
-constexpr std::uint32_t kKernelVariableHeapBase = 0x86000000u;
-constexpr std::uint32_t kKernelVariableHeapSize = 0x01000000u;
+constexpr std::uint32_t kGuestHeapBase = 0x86000000u;
+constexpr std::uint32_t kGuestHeapSize = 0x08000000u;
 
 void store_be32(std::uint8_t* p, std::uint32_t value) {
     p[0] = static_cast<std::uint8_t>(value >> 24);
@@ -163,8 +163,8 @@ bool PpcImportRegistry::prepare_variable_imports(
 
     const auto image_end = static_cast<std::uint64_t>(image.image_base) + image.image_size;
     const auto function_table_end = image_end + 2ull * PPC_CODE_SIZE;
-    const auto heap_start = static_cast<std::uint64_t>(kKernelVariableHeapBase);
-    const auto heap_end = heap_start + kKernelVariableHeapSize;
+    const auto heap_start = static_cast<std::uint64_t>(kGuestHeapBase);
+    const auto heap_end = heap_start + kGuestHeapSize;
     if (heap_start < function_table_end || heap_start < image_end ||
         heap_end > (std::uint64_t{1} << 32)) {
         set_error(error, "Reserved kernel variable heap overlaps the image/function table or exceeds guest VA");
@@ -187,10 +187,10 @@ bool PpcImportRegistry::prepare_variable_imports(
         return true;
     }
 
-    variable_heap_ = std::make_unique<GuestHeap>(
-        memory, kKernelVariableHeapBase, kKernelVariableHeapSize);
-    if (!variable_heap_->initialize(error)) {
-        variable_heap_.reset();
+    guest_heap_ = std::make_unique<GuestHeap>(
+        memory, kGuestHeapBase, kGuestHeapSize);
+    if (!guest_heap_->initialize(error)) {
+        guest_heap_.reset();
         return false;
     }
 
@@ -201,12 +201,12 @@ bool PpcImportRegistry::prepare_variable_imports(
         static_cast<std::uint32_t>(xex_file[11]));
     if (xex_header_size == 0 || xex_header_size > xex_file.size()) {
         set_error(error, "XEX header size is invalid while creating XexExecutableModuleHandle");
-        variable_heap_.reset();
+        guest_heap_.reset();
         return false;
     }
 
     const auto allocate = [&](std::size_t size) -> std::optional<std::uint32_t> {
-        const auto address = variable_heap_->allocate(size, 16);
+        const auto address = guest_heap_->allocate(size, 16);
         if (address) std::memset(memory.base() + *address, 0, size);
         return address;
     };
@@ -217,14 +217,14 @@ bool PpcImportRegistry::prepare_variable_imports(
         const auto* spec = find_kernel_variable(item->ordinal);
         if (!spec) {
             set_error(error, "Kernel variable export is missing a size descriptor");
-            variable_heap_.reset();
+            guest_heap_.reset();
             return false;
         }
 
         auto storage = allocate(spec->size);
         if (!storage) {
             set_error(error, "Guest heap could not allocate a kernel variable export");
-            variable_heap_.reset();
+            guest_heap_.reset();
             return false;
         }
         auto* bytes = memory.base() + *storage;
@@ -248,7 +248,7 @@ bool PpcImportRegistry::prepare_variable_imports(
             auto header_copy = allocate(xex_header_size);
             if (!module_record || !header_copy) {
                 set_error(error, "Could not allocate XEX loader record/header backing");
-                variable_heap_.reset();
+                guest_heap_.reset();
                 return false;
             }
             std::memcpy(memory.base() + *header_copy, xex_file.data(), xex_header_size);
@@ -277,7 +277,7 @@ bool PpcImportRegistry::prepare_variable_imports(
             sizeof(std::uint32_t) > image.bytes.size() -
                 static_cast<std::size_t>(slot_offset)) {
             set_error(error, "Kernel variable IAT slot lies outside the loaded image");
-            variable_heap_.reset();
+            guest_heap_.reset();
             return false;
         }
         store_be32(image.bytes.data() + static_cast<std::size_t>(slot_offset), *storage);
@@ -389,6 +389,33 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) const 
 
     const auto& binding = import_it->second;
     const auto& import = binding.import;
+    if (binding.handler == nullptr && guest_heap_) {
+        if (import.library == "xboxkrnl.exe" && import.ordinal == 0x000B) {
+            const auto allocation = guest_heap_->allocate(context.r4.u32, 16);
+            context.r3.u32 = allocation.value_or(0);
+            return;
+        }
+        if (import.library == "xboxkrnl.exe" && import.ordinal == 0x000F) {
+            (void)guest_heap_->deallocate(context.r3.u32);
+            context.r3.u32 = 0;
+            return;
+        }
+        if (import.library == "xboxkrnl.exe" && import.ordinal == 0x00BA) {
+            const auto allocation = guest_heap_->allocate(context.r4.u32, 0x1000);
+            context.r3.u32 = allocation.value_or(0);
+            return;
+        }
+        if (import.library == "xam.xex" && import.ordinal == 0x01EA) {
+            const auto allocation = guest_heap_->allocate(context.r3.u32, 16);
+            context.r3.u32 = allocation.value_or(0);
+            return;
+        }
+        if (import.library == "xam.xex" && import.ordinal == 0x01EC) {
+            (void)guest_heap_->deallocate(context.r3.u32);
+            context.r3.u32 = 0;
+            return;
+        }
+    }
     if (binding.handler == nullptr) {
         const auto resolved_name = lookup_title_export_name(import.library, import.ordinal);
         const auto export_name = resolved_name.empty()
