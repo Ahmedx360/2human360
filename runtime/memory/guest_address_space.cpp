@@ -1,5 +1,6 @@
 #include "memory/guest_address_space.hpp"
 
+#include <algorithm>
 #include <cstring>
 #include <utility>
 #include <vector>
@@ -141,6 +142,12 @@ bool GuestAddressSpace::commit_range(std::uint64_t address, std::size_t size,
     if (!VirtualAlloc(target, static_cast<SIZE_T>(commit_size),
                       MEM_COMMIT, PAGE_READWRITE)) {
         set_error(error, "VirtualAlloc could not commit the requested guest pages");
+        return false;
+    }
+    DWORD old_protection = 0;
+    if (!VirtualProtect(target, static_cast<SIZE_T>(commit_size),
+                        PAGE_READWRITE, &old_protection)) {
+        set_error(error, "VirtualProtect could not make committed guest pages writable");
         return false;
     }
 #else
