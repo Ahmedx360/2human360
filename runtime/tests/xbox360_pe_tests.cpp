@@ -80,7 +80,7 @@ int main() {
     assert(!load_xbox360_pe(bad_entry));
 
     auto bad_section = file;
-    put32(bad_section, 0x98 + 0xE0 + 12, 0xF800);
+    put32(bad_section, 0x98 + 0xE0 + 40 + 12, 0xF800);
     assert(!load_xbox360_pe(bad_section));
     return 0;
 }
