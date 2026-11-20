@@ -87,6 +87,10 @@ int main() {
     truncated.resize(0x2100);
     assert(!load_xbox360_pe(truncated));
 
+    auto oversized_image = file;
+    put32(oversized_image, 0x98 + 56, 0x30000000);
+    assert(!load_xbox360_pe(oversized_image));
+
     auto bad_entry = file;
     put32(bad_entry, 0x98 + 16, 0x10000);
     assert(!load_xbox360_pe(bad_entry));
