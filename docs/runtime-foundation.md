@@ -4,7 +4,7 @@
 
 TooHumanRecompLib remains the generated PowerPC game-code library. The runtime is a separate host-side layer: it owns guest memory, import dispatch, threads, files, graphics, audio, input and diagnostics. Do not include game-specific behavior in generic runtime primitives.
 
-This runtime foundation now includes a bounded guest-memory view and a tested loader for the extracted Xbox 360 PowerPC PE used by this project. It still does **not** invoke the generated entry point, emulate MMIO, resolve kernel imports, or claim bootability. The bare PE does not contain the original XEX2 import tables.
+This runtime foundation now includes a bounded guest-memory view and a tested loader for the extracted Xbox 360 PowerPC PE used by this project. It still does **not** invoke the generated entry point, emulate MMIO, implement kernel/XAM services, or claim bootability. The bare PE does not contain the original XEX2 import tables.
 
 ## Implemented: guest address-space reservation and PE image loading
 
@@ -44,10 +44,9 @@ The PE-only workflow cannot provide this metadata. Use the optional XEX TOML con
 ## Next implementation sequence
 
 1. Add per-section page permissions and guard unmapped ranges; the current loader commits the complete PE image range read/write. Keep MMIO outside ordinary RAM.
-2. Register and implement the imports proven to be called during Too Human startup, beginning with memory, synchronization and thread creation. Keep unknown ordinals fail-fast.
-3. Implement synchronization and thread primitives only after their ABI and observed call sites are documented.
-4. Establish Too Human's real startup stack, TLS, register state and guest-thread lifecycle from XEX metadata and observed call sites.
-5. Add virtual file access and save-data isolation.
-6. Add GPU command capture/decoding before attempting a renderer; then add XMA and controller services.
+2. Implement only the imports proven to be called during Too Human startup, beginning with memory, synchronization and thread creation. Keep unknown ordinals fail-fast and document each ABI.
+3. Establish Too Human's real startup stack, TLS, register state and guest-thread lifecycle from XEX metadata and observed call sites.
+4. Add virtual file access and save-data isolation.
+5. Add GPU command capture/decoding before attempting a renderer; then add XMA and controller services.
 
 Every step should have game-free tests and diagnostics before integration with the title.
