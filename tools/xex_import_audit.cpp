@@ -1,5 +1,6 @@
 #include "image/xbox360_pe.hpp"
 #include "image/xex_image.hpp"
+#include "ppc/title_import_manifest.hpp"
 #include "image/xex_imports.hpp"
 
 #include <cstdint>
