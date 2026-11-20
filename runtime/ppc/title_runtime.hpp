@@ -4,6 +4,7 @@
 #include "ppc/import_registry.hpp"
 
 #include <cstddef>
+#include <optional>
 #include <cstdint>
 #include <span>
 #include <string>
@@ -16,6 +17,7 @@ struct TitleRuntimeInitReport {
     std::size_t variable_imports{};
     std::uint32_t default_stack_size{};
     std::uint32_t default_heap_size{};
+    std::optional<XexTlsInfo> tls_info;
 };
 
 // Initializes the memory, generated PPC lookup table and XEX import thunks
