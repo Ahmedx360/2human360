@@ -30,7 +30,7 @@
     {
       "name": "clang-release",
       "configurePreset": "clang-release",
-      "targets": [ "TooHumanRecompLib" ]
+      "targets": [ "TooHumanPpcRuntime" ]
     },
     {
       "name": "validate-only",
