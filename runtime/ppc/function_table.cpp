@@ -60,4 +60,17 @@ bool initialize_recompiled_function_table(GuestAddressSpace& memory,
     return true;
 }
 
+bool invoke_recompiled_function(GuestAddressSpace& memory,
+                                std::uint32_t guest_address,
+                                PPCContext& context,
+                                std::string* error) {
+    const auto function = memory.get_function<PPCFunc*>(guest_address);
+    if (function == nullptr || function == &toohuman_unresolved_indirect_call) {
+        if (error) *error = "Guest address has no generated PPC function mapping";
+        return false;
+    }
+    function(context, memory.base());
+    return true;
+}
+
 } // namespace toohuman::runtime
