@@ -20,6 +20,7 @@ PPC_FUNC_IMPL(test_default_handler) {
 }
 
 int main() {
+    std::string error;
     {
     toohuman::runtime::LoadedPeImage image;
     image.image_base = 0x82000000u;
@@ -27,7 +28,6 @@ int main() {
     image.entry_point = 0x82001000u;
     image.bytes.resize(image.image_size);
 
-    std::string error;
     auto memory = toohuman::runtime::GuestAddressSpace::reserve(&error);
     assert(memory.valid());
     assert(memory.map_image(image, &error));
