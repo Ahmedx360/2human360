@@ -155,6 +155,7 @@ bool PpcImportRegistry::prepare_variable_imports(
         return false;
     }
     if (image.image_base != PPC_IMAGE_BASE || image.image_size != PPC_IMAGE_SIZE ||
+        image.bytes.size() != image.image_size ||
         static_cast<std::uint64_t>(image.image_base) + image.image_size >
             (std::uint64_t{1} << 32)) {
         set_error(error, "Kernel variable allocator requires the generated Too Human image range");
