@@ -9,6 +9,9 @@
 
 using toohuman::runtime::load_xbox360_pe;
 
+namespace { void test_guest_function() {} }
+using TestGuestFunction = void (*)();
+
 namespace {
 void put16(std::vector<std::uint8_t>& b, std::size_t o, std::uint16_t v) {
     b[o] = static_cast<std::uint8_t>(v);
@@ -74,6 +77,11 @@ int main() {
     assert(address_space.valid());
     assert(address_space.map_image(image, &address_space_error));
     assert(address_space.image_mapped());
+    assert(address_space.initialize_function_table(0x82001000, 0x1000, &address_space_error));
+    assert(address_space.set_function(0x82001100, &test_guest_function));
+    assert(address_space.get_function<TestGuestFunction>(0x82001100) == &test_guest_function);
+    assert(address_space.get_function<TestGuestFunction>(0x82001104) == nullptr);
+    assert(!address_space.set_function(0x82002000, &test_guest_function));
     const auto guest_entry = reinterpret_cast<const std::uint8_t*>(
         reinterpret_cast<std::uintptr_t>(address_space.base()) + image.entry_point);
     assert(*guest_entry == 0xA5);
