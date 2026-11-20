@@ -36,7 +36,9 @@ std::uint32_t read_be32(std::span<const std::uint8_t> data, std::size_t offset) 
 }
 
 XexImportResult fail(const char* message) {
-    return {{}, 0, 0, std::nullopt, message};
+    XexImportResult result;
+    result.error = message;
+    return result;
 }
 
 } // namespace
@@ -180,17 +182,28 @@ XexImportResult parse_xex2_imports(std::span<const std::uint8_t> xex_file,
         if (!fits(library_cursor, kImportLibrarySize, xex_file.size())) {
             return fail("XEX2 import library header is truncated");
         }
-        // XenonRecomp pairs library records with the string table in order;
-        // the 16-bit name field is not needed for that established layout.
+        const auto declared_record_size = read_be32(xex_file, library_cursor);
+        const auto library_id = read_be32(xex_file, library_cursor + 0x18);
+        const auto library_version = read_be32(xex_file, library_cursor + 0x1C);
+        const auto minimum_version = read_be32(xex_file, library_cursor + 0x20);
+        const auto name_index = read_be16(xex_file, library_cursor + 0x24);
         const auto import_count = read_be16(xex_file, library_cursor + 0x26);
 
         const auto descriptors_size =
             static_cast<std::size_t>(import_count) * kImportDescriptorSize;
         const auto record_size = kImportLibrarySize + descriptors_size;
-        if (!fits(library_cursor, record_size, xex_file.size())) {
-            return fail("XEX2 import descriptors exceed their library record");
+        if (declared_record_size != record_size ||
+            !fits(library_cursor, record_size, xex_file.size()) ||
+            name_index >= library_names.size()) {
+            return fail("XEX2 import library record size or name index is invalid");
         }
 
+        const auto library_name = library_names[name_index];
+        result.libraries.push_back({
+            library_name, library_id, library_version, minimum_version,
+            name_index, import_count
+        });
+        const auto first_import_index = result.imports.size();
         const auto descriptors_offset = library_cursor + kImportLibrarySize;
         for (std::size_t descriptor_index = 0;
              descriptor_index < import_count; ++descriptor_index) {
@@ -213,12 +226,23 @@ XexImportResult parse_xex2_imports(std::span<const std::uint8_t> xex_file,
                 (static_cast<std::uint32_t>(image.bytes[thunk_offset + 2]) << 8) |
                 static_cast<std::uint32_t>(image.bytes[thunk_offset + 3]);
             result.imports.push_back({
-                library_names[library_index],
+                library_name,
                 static_cast<std::uint16_t>(thunk_value & 0xFFFFu),
                 static_cast<std::uint8_t>((thunk_value >> 16) & 0xFFu),
                 static_cast<std::uint8_t>((thunk_value >> 24) & 0xFFu),
-                thunk_address
+                thunk_address,
+                0
             });
+        }
+
+        for (std::size_t i = 0; i < import_count; ++i) {
+            auto& item = result.imports[first_import_index + i];
+            if (item.type != 0 || i + 1 >= import_count) continue;
+            const auto& next = result.imports[first_import_index + i + 1];
+            if (next.type == 1 && next.ordinal == item.ordinal &&
+                next.hint == item.hint) {
+                item.paired_thunk_address = next.thunk_address;
+            }
         }
         library_cursor += record_size;
     }
