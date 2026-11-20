@@ -1,6 +1,7 @@
 #include "image/xbox360_pe.hpp"
 #include "image/xex_imports.hpp"
 #include "memory/guest_address_space.hpp"
+#include "memory/guest_heap.hpp"
 
 #include <array>
 #include <cassert>
@@ -167,6 +168,9 @@ int main() {
     assert(stack_probe[0] == 0xCC);
     assert(address_space.image_mapped());
     assert(address_space.initialize_function_table(0x82001000, 0x1000, &address_space_error));
+    toohuman::runtime::GuestHeap overlapping_heap(
+        address_space, image.image_base + image.image_size, 0x1000);
+    assert(!overlapping_heap.initialize(&address_space_error));
     assert(address_space.fill_function_table(&test_guest_function));
     assert(address_space.get_function<TestGuestFunction>(0x82001004) == &test_guest_function);
     assert(address_space.set_function(0x82001100, &test_guest_function));
