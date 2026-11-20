@@ -1,0 +1,90 @@
+# Too Human (Xbox 360) - XenonRecomp configuration
+# Image: PE, base 0x82000000, entry 0x82A46B18 (RVA 0xA46B18)
+[main]
+file_path = "../../private/default.xex"
+out_directory_path = "../ppc"
+switch_table_file_path = "switch_tables.toml"
+
+# Leave all optimizations OFF until a working build exists.
+skip_lr = false
+skip_msr = false
+ctr_as_local = false
+xer_as_local = false
+reserved_as_local = false
+cr_as_local = false
+non_argument_as_local = false
+non_volatile_as_local = false
+
+# Compiler save/restore helpers (found via XenonRecomp README byte patterns)
+restgprlr_14_address = 0x82A4EA20
+savegprlr_14_address = 0x82A4E9D0
+restfpr_14_address   = 0x82A6175C
+savefpr_14_address   = 0x82A61710
+restvmx_14_address   = 0x82EC4BD8
+savevmx_14_address   = 0x82EC4940
+restvmx_64_address   = 0x82EC4C6C
+savevmx_64_address   = 0x82EC49D4
+
+# setjmp/longjmp: not located yet (needs RtlUnwind import name) - TODO
+# longjmp_address = 0x........
+# setjmp_address  = 0x........
+
+# Zero padding (e.g. first 0x5000 bytes of .text) must be skipped or analysis never advances
+invalid_instructions = [
+    { data = 0x00000000, size = 4 }, # Padding
+]
+
+# >>> auto functions (fix_switch_functions.py)
+functions = [
+    { address = 0x8245DBA8, size = 0xCC },
+    { address = 0x8245E068, size = 0x1A0 },
+    { address = 0x8245E318, size = 0xC8 },
+    { address = 0x8245F4A0, size = 0x1354 },
+    { address = 0x824B3E50, size = 0x1A8 },
+    { address = 0x825D45E0, size = 0x90 },
+    { address = 0x826843F8, size = 0x148 },
+    { address = 0x826DF6F0, size = 0xA0 },
+    { address = 0x829815A8, size = 0xA4 },
+    { address = 0x8299E300, size = 0x98 },
+    { address = 0x82A44178, size = 0x890 },
+    { address = 0x82AA3340, size = 0x118 },
+    { address = 0x82AF24E8, size = 0x110 },
+    { address = 0x82B3DAC8, size = 0x80 },
+    { address = 0x82BD9B68, size = 0x78 },
+    { address = 0x82C21B30, size = 0x68 },
+    { address = 0x82C21B98, size = 0x68 },
+    { address = 0x82C21C00, size = 0x60 },
+    { address = 0x82C21C60, size = 0x198 },
+    { address = 0x82C21DF8, size = 0x170 },
+    { address = 0x82C3ECB0, size = 0x118 },
+    { address = 0x82C3EF10, size = 0xC8 },
+    { address = 0x82C3EFE0, size = 0x4D8 },
+    { address = 0x82C3F39C, size = 0x11C },
+    { address = 0x82C3F560, size = 0x368 },
+    { address = 0x82C66960, size = 0x228 },
+    { address = 0x82C77A68, size = 0xC8 },
+    { address = 0x82D58AA0, size = 0x90 },
+    { address = 0x82D5A088, size = 0x88 },
+    { address = 0x82D87530, size = 0x160 },
+    { address = 0x82D9C658, size = 0x210 },
+    { address = 0x82D9C868, size = 0x1B0 },
+    { address = 0x82DDD930, size = 0x158 },
+    { address = 0x82DE2230, size = 0x3F0 },
+    { address = 0x82DFB388, size = 0x58 },
+    { address = 0x82DFB3E0, size = 0x74 },
+    { address = 0x82E00EC8, size = 0x3E8 },
+    { address = 0x82E03710, size = 0x1A0 },
+    { address = 0x82E16FF0, size = 0x1E8 },
+    { address = 0x82E3C000, size = 0x240 },
+    { address = 0x82E71630, size = 0xA0 },
+    { address = 0x82EB5490, size = 0x84 },
+    { address = 0x82EBFE00, size = 0x40 },
+    { address = 0x82ED7528, size = 0x12C },
+    { address = 0x82EE63D0, size = 0x2C0 },
+    { address = 0x82EEAC10, size = 0x2D8 },
+    { address = 0x82EEE6D0, size = 0x314 },
+    { address = 0x82EF2AB0, size = 0x3C4 },
+    { address = 0x82EF34F8, size = 0x234 },
+    { address = 0x83181C1C, size = 0x480 },
+]
+# <<< auto functions
