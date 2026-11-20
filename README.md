@@ -5,16 +5,16 @@ following the layout of [LostOdysseyRecomp](https://github.com/freefrank/LostOdy
 You must supply your own legally obtained game files. No game data is included here.
 
 ## Image facts (`default.exe`, PE, big-endian PowerPC)
-- Base `0x82000000`, entry `0x82A46B18`, `.text` RVA `0x330000` size `0xDFF2AC`, `.pdata` 0x8E200 bytes
+- Base `0x82000000`, entry `0x82A46B18`, `.text` real RVA `0x32B000` (header says 0x330000) size `0xDFF2AC`, `.pdata` 0x8E200 bytes
 - 396 jump tables found by XenonAnalyse (`TooHumanRecompLib/config/switch_tables.toml`)
 
 ## Save/restore helpers
 | symbol | address |
 |-|-|
-| `__restgprlr_14` / `__savegprlr_14` | 0x82A53A20 / 0x82A539D0 |
-| `__restfpr_14` / `__savefpr_14` | 0x82A6675C / 0x82A66710 |
-| `__restvmx_14` / `__savevmx_14` | 0x82EC9BD8 / 0x82EC9940 |
-| `__restvmx_64` / `__savevmx_64` | 0x82EC9C6C / 0x82EC99D4 |
+| `__restgprlr_14` / `__savegprlr_14` | 0x82A4EA20 / 0x82A4E9D0 |
+| `__restfpr_14` / `__savefpr_14` | 0x82A6175C / 0x82A61710 |
+| `__restvmx_14` / `__savevmx_14` | 0x82EC4BD8 / 0x82EC4940 |
+| `__restvmx_64` / `__savevmx_64` | 0x82EC4C6C / 0x82EC49D4 |
 
 ## Reproduce
 1. Clone XenonRecomp (recursive), apply `tools/patches/xenonrecomp-pe-loader.patch` (adds a PE loader; stock XenonRecomp only reads XEX2/ELF).
@@ -22,21 +22,17 @@ You must supply your own legally obtained game files. No game data is included h
 3. `XenonAnalyse private/default.exe TooHumanRecompLib/config/switch_tables.toml`
 4. `XenonRecomp TooHumanRecompLib/config/TooHumanRecomp.toml <XenonRecomp>/XenonUtils/ppc_context.h`
 
-## Status (honest)
-Code generation has **not** completed yet; `ppc/` is not in this repo because XenonRecomp never finished.
-What works: PE loading, XenonAnalyse (396 jump tables), helper-function discovery, config.
-What fails: `XenonRecomp` function-boundary analysis. This binary's `.pdata` is fragmented:
-29,897 of 72,768 entries are followed by an uncovered gap (see `tools/pdata_gaps.py`), e.g. fn 0x824BF8A8
-ends at 0x824BF8DC but its code continues into the next entry at 0x824BF8E0 (one orphan instruction between).
-Pass 2 of `Recompiler::Analyse()` then starts mid-function, follows backward `bc` branches before the
-function base, and runs away (>6 GB RAM, OOM-killed). The patch adds an iteration cap + zero-size guard
-so it no longer hangs, but results are not trustworthy until boundaries are fixed.
+## Status
+**Root cause of the earlier failures (fixed):** the PE's section VAs are shifted by +0x5000 for `.text`/`.embsec_`
+(code, `.pdata` and jump tables all use RVA == raw file offset; `.data` keeps its header VA). With the
+corrected loader, 72,029/72,768 `.pdata` entries start with `mflr r12`, jump tables have real labels, and
+XenonRecomp completes (no runaway functions, ~380 C++ files).
 
-### Next steps
-1. Merge adjacent `.pdata` fragments (treat gap + following entry as one function when the previous
-   fragment does not end in blr/b) before the bl-target / sweep passes; guard `bc` targets below function base.
-2. Recover import names (need original XEX2 or ordinal->name mapping; IAT at RVA 0x600 holds ordinals, library index in bits 16+).
-3. Locate setjmp/longjmp; then a runtime (kernel/GPU/audio/input).
+Remaining recompiler diagnostics (see `docs/recomp-diagnostics.md`): ~1.2k "switch case outside function"
+(functions with jump tables need manual `functions = [...]` boundaries), ~480 undecodable words,
+and unimplemented VMX int16 ops (vslh, vsubshs, vsrah, vaddsws, vspltish, vmaxsh, ...) plus eqv/cror/crorc.
+
+Generated `ppc/*.cpp` is not committed (derived from the game binary; ~250 MB). Regenerate it locally.
 
 ## Known blockers / TODO
 - **Imports:** a bare PE has no XEX2 import tables, so kernel/xam import names are not recovered. The original `default.xex` (XEX2 header intact) is needed for named imports; otherwise imports must be reconstructed from ordinals.

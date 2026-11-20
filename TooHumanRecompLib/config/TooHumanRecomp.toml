@@ -16,14 +16,14 @@ non_argument_as_local = false
 non_volatile_as_local = false
 
 # Compiler save/restore helpers (found via XenonRecomp README byte patterns)
-restgprlr_14_address = 0x82A53A20
-savegprlr_14_address = 0x82A539D0
-restfpr_14_address   = 0x82A6675C
-savefpr_14_address   = 0x82A66710
-restvmx_14_address   = 0x82EC9BD8
-savevmx_14_address   = 0x82EC9940
-restvmx_64_address   = 0x82EC9C6C
-savevmx_64_address   = 0x82EC99D4
+restgprlr_14_address = 0x82A4EA20
+savegprlr_14_address = 0x82A4E9D0
+restfpr_14_address   = 0x82A6175C
+savefpr_14_address   = 0x82A61710
+restvmx_14_address   = 0x82EC4BD8
+savevmx_14_address   = 0x82EC4940
+restvmx_64_address   = 0x82EC4C6C
+savevmx_64_address   = 0x82EC49D4
 
 # setjmp/longjmp: not located yet (needs RtlUnwind import name) - TODO
 # longjmp_address = 0x........

@@ -1,5 +1,5 @@
 diff --git a/XenonAnalyse/function.cpp b/XenonAnalyse/function.cpp
-index 34add40..8768b47 100644
+index 34add40..ecec8df 100644
 --- a/XenonAnalyse/function.cpp
 +++ b/XenonAnalyse/function.cpp
 @@ -4,6 +4,7 @@
@@ -26,11 +26,29 @@ index 34add40..8768b47 100644
          const size_t addr = base + ((data - dataStart) * sizeof(*data));
          if (blockStack.empty())
          {
+@@ -117,7 +125,7 @@ Function Function::Analyze(const void* code, size_t size, size_t base)
+ 
+             if (lBlock == -1)
+             {
+-                blocks.emplace_back(lBase, 0).projectedSize = rBase - lBase;
++                blocks.emplace_back(lBase, 0).projectedSize = (branchDest < base) ? (size_t)-1 : rBase - lBase;
+                 lBlock = blocks.size() - 1;
+ 
+                 // push this first, this gets overriden by the true case as it'd be further away
+@@ -126,7 +134,7 @@ Function Function::Analyze(const void* code, size_t size, size_t base)
+             }
+ 
+             size_t rBlock = fn.SearchBlock(base + rBase);
+-            if (rBlock == -1)
++            if (rBlock == -1 && branchDest >= base) // branches before the function base are tail calls
+             {
+                 blocks.emplace_back(branchDest - base, 0);
+                 rBlock = blocks.size() - 1;
 diff --git a/XenonRecomp/recompiler.cpp b/XenonRecomp/recompiler.cpp
-index fa91527..69c520b 100644
+index fa91527..a18dfda 100644
 --- a/XenonRecomp/recompiler.cpp
 +++ b/XenonRecomp/recompiler.cpp
-@@ -243,7 +243,16 @@ void Recompiler::Analyse()
+@@ -243,6 +243,14 @@ void Recompiler::Analyse()
              else
              {
                  auto& fn = functions.emplace_back(Function::Analyze(data, dataEnd - data, base));
@@ -43,12 +61,10 @@ index fa91527..69c520b 100644
 +                    continue;
 +                }
                  image.symbols.emplace(fmt::format("sub_{:X}", fn.base), fn.base, fn.size, Symbol_Function);
-+                if ((base & 0xFFFFF) < fn.size) fmt::println(stderr, "[analyse] at 0x{:X}", base);
  
                  base += fn.size;
-                 data += fn.size;
 diff --git a/XenonUtils/image.cpp b/XenonUtils/image.cpp
-index 39afe92..1260f24 100644
+index 39afe92..36c5d09 100644
 --- a/XenonUtils/image.cpp
 +++ b/XenonUtils/image.cpp
 @@ -3,6 +3,7 @@
@@ -59,7 +75,7 @@ index 39afe92..1260f24 100644
  
  void Image::Map(const std::string_view& name, size_t base, uint32_t size, uint8_t flags, uint8_t* data)
  {
-@@ -29,6 +30,76 @@ const Section* Image::Find(const std::string_view& name) const
+@@ -29,6 +30,94 @@ const Section* Image::Find(const std::string_view& name) const
      return nullptr;
  }
  
@@ -103,6 +119,22 @@ index 39afe92..1260f24 100644
 +    memcpy(image.data.get(), data, std::min<size_t>(sizeOfHeaders, std::min<size_t>(size, sizeOfImage)));
 +
 +    const size_t secTable = opt + optSize;
++
++    // The PE produced by the converter lists section VAs shifted relative to the real image layout:
++    // for .text/.embsec_ the header VA is (raw offset + delta), while code, .pdata and jump tables all
++    // use RVA == raw offset. Detect delta from the first code section and undo it for every section
++    // that carries the same delta. (Too Human: delta = 0x5000; .data keeps its header VA.)
++    int64_t delta = 0;
++    for (size_t i = 0; i < numSections; i++)
++    {
++        const size_t sh = secTable + i * 40;
++        if (rd32(sh + 36) & 0x20) // first code section
++        {
++            delta = (int64_t)rd32(sh + 12) - (int64_t)rd32(sh + 20);
++            break;
++        }
++    }
++
 +    for (size_t i = 0; i < numSections; i++)
 +    {
 +        const size_t sh = secTable + i * 40;
@@ -110,9 +142,11 @@ index 39afe92..1260f24 100644
 +        memcpy(name, data + sh, 8);
 +
 +        const uint32_t virtualSize = rd32(sh + 8);
-+        const uint32_t virtualAddress = rd32(sh + 12);
 +        const uint32_t rawSize = rd32(sh + 16);
 +        const uint32_t rawPtr = rd32(sh + 20);
++        uint32_t virtualAddress = rd32(sh + 12);
++        if (delta != 0 && (int64_t)virtualAddress - (int64_t)rawPtr == delta)
++            virtualAddress = rawPtr; // undo converter shift
 +        const uint32_t characteristics = rd32(sh + 36);
 +
 +        if (virtualAddress >= sizeOfImage || rawPtr >= size)
@@ -136,7 +170,7 @@ index 39afe92..1260f24 100644
  Image Image::ParseImage(const uint8_t* data, size_t size)
  {
      if (data[0] == ELFMAG0 && data[1] == ELFMAG1 && data[2] == ELFMAG2 && data[3] == ELFMAG3)
-@@ -39,6 +110,10 @@ Image Image::ParseImage(const uint8_t* data, size_t size)
+@@ -39,6 +128,10 @@ Image Image::ParseImage(const uint8_t* data, size_t size)
      {
          return Xex2LoadImage(data, size);
      }
