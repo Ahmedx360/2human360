@@ -225,6 +225,10 @@ XexImportResult parse_xex2_imports(std::span<const std::uint8_t> xex_file,
                 (static_cast<std::uint32_t>(image.bytes[thunk_offset + 1]) << 16) |
                 (static_cast<std::uint32_t>(image.bytes[thunk_offset + 2]) << 8) |
                 static_cast<std::uint32_t>(image.bytes[thunk_offset + 3]);
+            const auto thunk_type = static_cast<std::uint8_t>((thunk_value >> 24) & 0xFFu);
+            if (thunk_type > 1) {
+                return fail("XEX import descriptor contains an unsupported thunk type");
+            }
             result.imports.push_back({
                 library_name,
                 static_cast<std::uint16_t>(thunk_value & 0xFFFFu),
