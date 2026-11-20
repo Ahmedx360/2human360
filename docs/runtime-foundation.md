@@ -6,9 +6,9 @@ TooHumanRecompLib remains the generated PowerPC game-code library. The runtime i
 
 This runtime foundation now includes a bounded guest-memory view and a tested loader for the extracted Xbox 360 PowerPC PE used by this project. It still does **not** invoke the generated entry point, emulate MMIO, resolve kernel imports, or claim bootability. The bare PE does not contain the original XEX2 import tables.
 
-## Implemented: guest address-space view
+## Implemented: guest address-space reservation and PE image loading
 
-`TooHumanRecomp::RuntimeCore` currently provides a non-owning `GuestMemory` view over a caller-owned byte span. It:
+`TooHumanRecomp::RuntimeCore` provides two complementary memory layers. `GuestMemory` is a non-owning bounded view over a caller-owned byte span. `GuestAddressSpace` reserves the full 4 GiB guest virtual address range in a 64-bit host process and commits the loaded image at `base + guest_virtual_address`, matching the addressing model emitted into translated PPC code. The image mapper currently uses read/write pages for the complete image range; section-specific permissions are not yet applied. The memory view:
 
 - maps a contiguous span to an explicit 32-bit guest base;
 - validates the complete range using 64-bit arithmetic, including the 4 GiB boundary;
@@ -17,7 +17,7 @@ This runtime foundation now includes a bounded guest-memory view and a tested lo
 - reads and writes unsigned PPC scalar values in big-endian order;
 - avoids alignment assumptions by operating on bytes.
 
-The owner remains responsible for allocating, initializing and retaining the backing storage. This is not yet a complete virtual memory manager: page permissions, sparse mappings, guard pages, aliases and MMIO dispatch are future work.
+The owner remains responsible for retaining the `GuestMemory` backing storage. The address-space reservation is owned by `GuestAddressSpace` and released with it. Sparse mappings, per-section permissions, aliases and MMIO dispatch are future work.
 
 ## Build and test
 
@@ -29,16 +29,15 @@ cmake --build build/runtime --parallel
 ctest --test-dir build/runtime --output-on-failure
 ~~~
 
-The guest-memory tests cover big-endian scalar access, boundary checks, unaligned access, const views and the upper end of the 32-bit address space. The PE tests use a synthetic Xbox 360 PE to verify machine/type checks, entry-point validation, zero-fill behavior, section copying, the observed 0x5000 section-RVA correction, and malformed/truncated input rejection.
+The guest-memory tests cover big-endian scalar access, boundary checks, unaligned access, const views and the upper end of the 32-bit address space. The PE tests use a synthetic Xbox 360 PE to verify machine/type checks, entry-point validation, zero-fill behavior, section copying, the observed 0x5000 section-RVA correction, malformed/truncated input rejection, and mapping at the correct guest virtual address inside the 4 GiB reservation.
 
 ## Next implementation sequence
 
-1. Build a 4 GiB guest address-space reservation so generated PPC loads using `base + guest_virtual_address` have the exact addressing model they were compiled for. The current PE loader returns a compact image-relative byte vector and must not be passed directly as the generated-code `base` pointer.
-2. Add per-section page permissions and guard unmapped ranges; keep MMIO outside ordinary RAM.
-3. Add a PPC dispatcher adapter around the generated function map, with validated guest entry points and a tested return/trap mechanism.
-4. Build an import registry keyed by verified library/ordinal identities. Unknown imports must report the guest PC and arguments; never guess ordinal names.
-5. Implement synchronization and thread primitives only after their ABI and observed call sites are documented.
-6. Add virtual file access and save-data isolation.
-7. Add GPU command capture/decoding before attempting a renderer; then add XMA and controller services.
+1. Add per-section page permissions and guard unmapped ranges; the current loader commits the complete PE image range read/write. Keep MMIO outside ordinary RAM.
+2. Add a PPC dispatcher adapter around the generated function map, with validated guest entry points and a tested return/trap mechanism.
+3. Build an import registry keyed by verified library/ordinal identities. Unknown imports must report the guest PC and arguments; never guess ordinal names.
+4. Implement synchronization and thread primitives only after their ABI and observed call sites are documented.
+5. Add virtual file access and save-data isolation.
+6. Add GPU command capture/decoding before attempting a renderer; then add XMA and controller services.
 
 Every step should have game-free tests and diagnostics before integration with the title.
