@@ -15,7 +15,7 @@ You must provide your own legally obtained game files. No game executable, asset
 | Generated-code library | CMake static-library target added; requires Clang and SIMDe |
 | Kernel/XAM HLE | Not implemented; import names are not resolved |
 | Guest memory / image loader | Bounded big-endian memory view, checked Xbox 360 PE32/PPCBE loader, and 4 GiB guest address-space reservation/image mapping implemented and unit-tested; per-section permissions, MMIO, threads and synchronization remain future work |
-| PPC indirect calls | Generated function map is registered into the expected guest lookup table; unresolved targets reach a diagnostic trap. Host entry/return bridge and imports remain future work |
+| PPC indirect calls | Generated function map is registered into the expected guest lookup table; unresolved targets reach a diagnostic trap. A caller-context function invocation bridge exists; game startup and imports remain future work |
 | Xenos graphics / EDRAM | Runtime implementation still required |
 | XMA audio | Runtime implementation still required |
 | Controller/input | Runtime implementation still required |
@@ -110,7 +110,7 @@ cmake --build build --target TooHumanPpcRuntime --parallel
    XenonAnalyse private/default.exe TooHumanRecompLib/config/switch_tables.toml
    ~~~
 
-5. Run XenonRecomp with TooHumanRecompLib/config/TooHumanRecomp.toml and the PPC context header from the XenonRecomp checkout. **Paths inside the TOML are relative to the TOML file's directory**, not the shell's current directory.
+5. Run XenonRecomp with TooHumanRecompLib/config/TooHumanRecomp.toml and the PPC context header from the XenonRecomp checkout. **Paths inside the TOML are relative to the TOML file's directory**, not the shell's current directory. If you have the original matching `default.xex`, prefer `TooHumanRecompLib/config/TooHumanRecomp.XEX.toml` and re-run analysis/recompilation from that XEX so its import metadata is retained.
 6. Run the artifact checks and build commands above.
 
 The configuration points to ../../private/default.exe, ../ppc, and switch_tables.toml relative to TooHumanRecompLib/config/.
