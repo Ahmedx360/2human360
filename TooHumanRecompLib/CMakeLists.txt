@@ -22,12 +22,12 @@ if(NOT TH_PPC_INPUTS)
     message(FATAL_ERROR "No ppc_recomp.*.cpp files found in TooHumanRecompLib/ppc.")
 endif()
 
-# Normalize two historical emitter defects in build-directory copies only.
+# Normalize historical emitter defects in build-directory copies only.
 set(TH_PPC_SOURCES)
 set(TH_PREPARED_DIR "${CMAKE_CURRENT_BINARY_DIR}/prepared_ppc")
 foreach(TH_SOURCE IN LISTS TH_PPC_INPUTS)
     get_filename_component(TH_NAME "${TH_SOURCE}" NAME)
-    if(TH_NAME STREQUAL "ppc_recomp.191.cpp" OR TH_NAME STREQUAL "ppc_recomp.372.cpp")
+    if(TH_NAME STREQUAL "ppc_recomp.125.cpp" OR TH_NAME STREQUAL "ppc_recomp.191.cpp" OR TH_NAME STREQUAL "ppc_recomp.372.cpp")
         set(TH_PREPARED_SOURCE "${TH_PREPARED_DIR}/${TH_NAME}")
         add_custom_command(
             OUTPUT "${TH_PREPARED_SOURCE}"
