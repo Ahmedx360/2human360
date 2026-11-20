@@ -132,7 +132,10 @@ int main() {
     put32(security_base, 0x30, 0x00020401);
     put32(security_base, 0x34, 0x02000000);
     put32(security_base, 0x210, 0x82000000);
-    assert(toohuman::runtime::parse_xex2_imports(security_base, import_image));
+    const auto security_base_result = toohuman::runtime::parse_xex2_imports(security_base, import_image);
+    assert(security_base_result);
+    assert(security_base_result.default_stack_size == 0x00100000);
+    assert(security_base_result.default_heap_size == 0x02000000);
 
     std::string address_space_error;
     auto address_space = toohuman::runtime::GuestAddressSpace::reserve(&address_space_error);
