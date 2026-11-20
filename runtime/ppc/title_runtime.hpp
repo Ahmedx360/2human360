@@ -14,6 +14,8 @@ struct TitleRuntimeInitReport {
     std::size_t translated_functions{};
     std::size_t function_imports{};
     std::size_t variable_imports{};
+    std::uint32_t default_stack_size{};
+    std::uint32_t default_heap_size{};
 };
 
 // Initializes the memory, generated PPC lookup table and XEX import thunks
