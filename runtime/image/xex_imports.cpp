@@ -119,7 +119,7 @@ XexImportResult parse_xex2_imports(std::span<const std::uint8_t> xex_file,
             static_cast<std::size_t>(import_count) * kImportDescriptorSize;
         const auto record_size = kImportLibrarySize + descriptors_size;
         if (!fits(library_cursor, record_size, xex_file.size()) ||
-            (declared_library_size != 0 && declared_library_size < record_size)) {
+            (declared_library_size != 0 && declared_library_size < kImportLibrarySize)) {
             return fail("XEX2 import descriptors exceed their library record");
         }
 
