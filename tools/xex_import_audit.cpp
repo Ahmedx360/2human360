@@ -115,10 +115,12 @@ int main(int argc, char** argv) {
         functions += item.type == 1;
         variables += item.type == 0 && item.paired_thunk_address == 0;
         function_iat_slots += item.type == 0 && item.paired_thunk_address != 0;
+        const auto export_name =
+            toohuman::runtime::lookup_title_export_name(item.library, item.ordinal);
         std::cout << std::left << std::setw(9) << kind << ' '
-                  << item.library << "!0x"
-                  << std::hex << std::uppercase << std::setw(4) << std::setfill('0')
-                  << item.ordinal << std::setfill(' ')
+                  << item.library << '!' << (export_name.empty() ? "<unknown>" : export_name)
+                  << " (0x" << std::hex << std::uppercase << std::setw(4) << std::setfill('0')
+                  << item.ordinal << std::setfill(' ') << ')'
                   << "  thunk=0x" << std::setw(8) << item.thunk_address
                   << "  hint=0x" << std::setw(2) << static_cast<unsigned>(item.hint)
                   << std::dec << '\n';
