@@ -7,6 +7,7 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -61,7 +62,7 @@ int main(int argc, char** argv) {
         loaded_image = *xex_image.image;
         std::cout << "XEX compression type: " << xex_image.compression_type
                   << "  decompressed image bytes: 0x" << std::hex
-                  << xex_image.decompressed_size << std::dec << '\\n';
+                  << xex_image.decompressed_size << std::dec << '\n';
     } else {
         std::vector<std::uint8_t> pe_bytes;
         if (!read_file(argv[2], pe_bytes)) return 2;
