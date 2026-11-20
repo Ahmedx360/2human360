@@ -1,4 +1,4 @@
-name: Validate recompilation metadata
+name: Validate and build Too Human recompilation
 
 on:
   push:
@@ -9,6 +9,7 @@ permissions:
 
 jobs:
   validate:
+    name: Validate generated artifacts
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -24,3 +25,29 @@ jobs:
 
       - name: Validate generated PowerPC artifacts
         run: ctest --test-dir build/validate --output-on-failure
+
+  build-generated-library:
+    name: Compile generated PPC library with Clang
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out repository and pinned toolchain
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang ninja-build
+
+      - name: Configure Clang build
+        run: >-
+          cmake -S . -B build/clang -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_CXX_COMPILER=clang++
+          -DTH_BUILD_RECOMP_LIB=ON
+          -DBUILD_TESTING=OFF
+
+      - name: Compile the recompiled game-code library
+        run: cmake --build build/clang --target TooHumanRecompLib --parallel 2
