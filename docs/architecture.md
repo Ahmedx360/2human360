@@ -17,6 +17,7 @@ The runtime core is an incremental foundation, not a complete emulator. A host e
 | runtime/memory | Bounded PPC big-endian access and full 4 GiB guest VA reservation | Reservation and PE image mapping implemented; per-section permissions pending |
 | runtime/image | Extracted Xbox 360 PE parsing and image-relative section loading | PE32/PPCBE loader implemented and synthetic-fixture tested; no XEX imports |
 | runtime/ppc | Populate XenonRecomp's indirect-call function table | Generated map registration and unresolved-target trap implemented; not a host entry/return bridge |
+| runtime/ppc | Populate XenonRecomp's indirect-call function table | Generated map registration and unresolved-target trap implemented; not a host entry/return bridge |
 | TooHumanRecomp (future) | Host executable, startup, window, configuration, logging and game-data discovery | Not implemented |
 | kernel (future) | Verified Xbox kernel/XAM imports, handles, virtual files, events and synchronization | Not implemented |
 | cpu / os (future) | PPC context lifecycle, guest-thread scheduling, TLS, exceptions and host/guest call bridges | Generated PPC context exists; runtime lifecycle not implemented |
