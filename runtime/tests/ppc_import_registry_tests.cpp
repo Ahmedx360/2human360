@@ -45,7 +45,9 @@ int main() {
 
     PPCContext context{};
     context.ctr.u32 = 0x82001100u;
-    imports.dispatch(context, memory.base());
+    const auto import_thunk = memory.get_function<PPCFunc*>(0x82001100u);
+    assert(import_thunk != nullptr);
+    import_thunk(context, memory.base());
     assert(context.r3.u32 == 0xBEEF1234u);
     return 0;
 }
