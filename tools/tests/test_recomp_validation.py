@@ -18,6 +18,28 @@ class GeneratedCodeNormalizationTests(unittest.TestCase):
         source = "temp.u8[0] = source.u8[4] & 0xF;"
         self.assertEqual(normalize_cpp_source(source), "temp.u8 = source.u8[4] & 0xF;")
 
+    def test_nop_padded_bctr_targets_are_aligned_and_labelled(self):
+        source = (
+            "switch (index) {\n"
+            "    case 32: goto loc_8281405E;\n"
+            "    case 33: goto loc_82814C67;\n"
+            "}\n"
+            "loc_82814058:\n"
+            "\t// lwz r10,8(r31)\n"
+            "\tctx.r10.u64 = PPC_LOAD_U32(ctx.r31.u32 + 8);\n"
+            "\t// cmpwi cr6,r10,0\n"
+            "\tctx.cr6.compare<int32_t>(ctx.r10.s32, 0, ctx.xer);\n"
+            "\t// sthx r9,r10,r31\n"
+            "\tPPC_STORE_U16(ctx.r10.u32 + ctx.r31.u32, ctx.r9.u16);\n"
+            "\t// lwz r10,104(r31)\n"
+        )
+        fixed = normalize_cpp_source(source)
+        self.assertIn("goto loc_8281405C;", fixed)
+        self.assertIn("goto loc_82814C64;", fixed)
+        self.assertIn("loc_8281405C:\n", fixed)
+        self.assertIn("loc_82814C64:\n", fixed)
+        self.assertNotRegex(fixed, r"goto loc_8281405E|goto loc_82814C67")
+
     def test_unrelated_source_is_unchanged(self):
         source = "ctx.v8.u16[0] = uint16_t(ctx.v9.u16[0]);"
         self.assertEqual(normalize_cpp_source(source), source)
