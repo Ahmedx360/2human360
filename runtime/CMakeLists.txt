@@ -1,5 +1,6 @@
 add_library(TooHumanRuntimeCore STATIC
     memory/guest_memory.cpp
+    memory/guest_address_space.cpp
     image/xbox360_pe.cpp
 )
 add_library(TooHumanRecomp::RuntimeCore ALIAS TooHumanRuntimeCore)
