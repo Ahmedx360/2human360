@@ -51,9 +51,10 @@ jobs:
           -DCMAKE_CXX_COMPILER=clang++
           -DTH_BUILD_RECOMP_LIB=ON
           -DTH_BUILD_RUNTIME_CORE=ON
+          -DTH_BUILD_RUNTIME_PROBE=ON
           -DBUILD_TESTING=ON
 
       - name: Compile the recompiled game-code library
-        run: cmake --build build/clang --target TooHumanPpcRuntime TooHumanPpcImportRegistryTests --parallel 2
+        run: cmake --build build/clang --target TooHumanRuntimeProbe TooHumanPpcImportRegistryTests --parallel 2
       - name: Test XEX import dispatch
         run: ctest --test-dir build/clang -R TooHumanPpcImportRegistryTests --output-on-failure
