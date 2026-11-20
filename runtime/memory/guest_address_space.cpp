@@ -36,7 +36,7 @@ void set_error(std::string* error, const char* message) {
     if (error) *error = message;
 }
 
-bool protect_page(void* address, std::size_t size, std::uint8_t flags) noexcept {
+bool protect_pages(void* address, std::size_t size, std::uint8_t flags) noexcept {
 #if defined(_WIN32)
     DWORD protection = PAGE_NOACCESS;
     if ((flags & 2u) != 0) protection = PAGE_READWRITE;
@@ -227,13 +227,17 @@ bool GuestAddressSpace::apply_image_permissions(const LoadedPeImage& image,
     }
 
     const auto reservation_address = reinterpret_cast<std::uintptr_t>(reservation_);
-    for (std::size_t i = 0; i < page_flags.size(); ++i) {
-        const auto guest_page = page_base + static_cast<std::uint64_t>(i) * page_size;
+    for (std::size_t first = 0; first < page_flags.size();) {
+        std::size_t last = first + 1;
+        while (last < page_flags.size() && page_flags[last] == page_flags[first]) ++last;
+        const auto guest_page = page_base + static_cast<std::uint64_t>(first) * page_size;
         const auto host_page = reservation_address + static_cast<std::uintptr_t>(guest_page);
-        if (!protect_page(reinterpret_cast<void*>(host_page), page_size, page_flags[i])) {
+        const auto run_size = (last - first) * page_size;
+        if (!protect_pages(reinterpret_cast<void*>(host_page), run_size, page_flags[first])) {
             set_error(error, "Could not apply PE section page permissions");
             return false;
         }
+        first = last;
     }
     return true;
 }
