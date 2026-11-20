@@ -103,6 +103,9 @@ public:
     [[nodiscard]] const std::uint8_t* base() const noexcept;
     [[nodiscard]] bool valid() const noexcept;
     [[nodiscard]] bool image_mapped() const noexcept;
+    [[nodiscard]] bool function_table_ready() const noexcept;
+    [[nodiscard]] std::uint64_t function_table_base() const noexcept;
+    [[nodiscard]] std::uint64_t function_table_size() const noexcept;
 
 private:
     explicit GuestAddressSpace(void* reservation) noexcept;
