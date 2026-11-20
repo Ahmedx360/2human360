@@ -30,7 +30,7 @@ jobs:
         run: ctest --test-dir build/validate --output-on-failure
 
   build-generated-library:
-    name: Compile generated PPC library with Clang
+    name: Compile generated PPC library and runtime adapter with Clang
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -53,4 +53,4 @@ jobs:
           -DBUILD_TESTING=OFF
 
       - name: Compile the recompiled game-code library
-        run: cmake --build build/clang --target TooHumanRecompLib --parallel 2
+        run: cmake --build build/clang --target TooHumanPpcRuntime --parallel 2
