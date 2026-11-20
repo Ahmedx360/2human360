@@ -1,5 +1,6 @@
 #include "image/xbox360_pe.hpp"
 #include "image/xex_imports.hpp"
+#include "ppc/title_import_manifest.hpp"
 #include "memory/guest_address_space.hpp"
 #include "memory/guest_heap.hpp"
 
