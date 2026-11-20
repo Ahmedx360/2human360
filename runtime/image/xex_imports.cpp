@@ -10,6 +10,8 @@ constexpr std::uint32_t kXex2Magic = 0x58455832;
 constexpr std::uint32_t kEntryPointKey = 0x00010100;
 constexpr std::uint32_t kImageBaseKey = 0x00010201;
 constexpr std::uint32_t kImportLibrariesKey = 0x000103FF;
+constexpr std::uint32_t kDefaultStackSizeKey = 0x00020200;
+constexpr std::uint32_t kDefaultHeapSizeKey = 0x00020401;
 constexpr std::size_t kFixedHeaderSize = 0x18;
 constexpr std::size_t kOptionalHeaderSize = 8;
 constexpr std::size_t kImportHeaderSize = 12;
@@ -54,6 +56,8 @@ XexImportResult parse_xex2_imports(std::span<const std::uint8_t> xex_file,
     bool found_import_header = false;
     std::uint32_t xex_image_base = 0;
     std::uint32_t xex_entry_point = 0;
+    std::uint32_t default_stack_size = 0;
+    std::uint32_t default_heap_size = 0;
     for (std::size_t i = 0; i < optional_count; ++i) {
         const auto offset = kFixedHeaderSize + i * kOptionalHeaderSize;
         const auto key = read_be32(xex_file, offset);
@@ -65,6 +69,10 @@ XexImportResult parse_xex2_imports(std::span<const std::uint8_t> xex_file,
             xex_image_base = value;
         } else if (key == kEntryPointKey) {
             xex_entry_point = value;
+        } else if (key == kDefaultStackSizeKey) {
+            default_stack_size = value;
+        } else if (key == kDefaultHeapSizeKey) {
+            default_heap_size = value;
         }
     }
     if (!found_import_header) {
@@ -138,6 +146,8 @@ XexImportResult parse_xex2_imports(std::span<const std::uint8_t> xex_file,
 
     std::size_t library_cursor = string_end;
     XexImportResult result;
+    result.default_stack_size = default_stack_size;
+    result.default_heap_size = default_heap_size;
     for (std::size_t library_index = 0; library_index < library_count; ++library_index) {
         if (!fits(library_cursor, kImportLibrarySize, xex_file.size())) {
             return fail("XEX2 import library header is truncated");
