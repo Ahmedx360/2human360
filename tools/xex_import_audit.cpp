@@ -8,6 +8,7 @@
 #include <iostream>
 #include <iterator>
 #include <limits>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -82,8 +83,8 @@ int main(int argc, char** argv) {
     }
 
     std::cout << "Image base: 0x" << std::hex << std::uppercase
-              << pe.image->image_base << "  size: 0x" << pe.image->image_size
-              << "  entry: 0x" << pe.image->entry_point << std::dec << '\n';
+              << loaded_image->image_base << "  size: 0x" << loaded_image->image_size
+              << "  entry: 0x" << loaded_image->entry_point << std::dec << '\n';
     std::cout << "Default stack size: 0x" << std::hex << imports.default_stack_size
               << "  default heap size: 0x" << imports.default_heap_size
               << std::dec << "\n";
@@ -94,14 +95,14 @@ int main(int argc, char** argv) {
                   << "  raw size: 0x" << imports.tls_info->raw_data_size
                   << std::dec << '\n';
     }
-    std::cout << "Import libraries:\\n";
+    std::cout << "Import libraries:\n";
     for (const auto& library : imports.libraries) {
         std::cout << "  " << library.name << " id=0x" << std::hex << library.library_id
                   << " version=0x" << library.version << " min=0x"
                   << library.minimum_version << std::dec
-                  << " descriptors=" << library.descriptor_count << '\\n';
+                  << " descriptors=" << library.descriptor_count << '\n';
     }
-    std::cout << "Imported thunk records: " << imports.imports.size() << "\\n\\n";
+    std::cout << "Imported thunk records: " << imports.imports.size() << "\n\n";
 
     std::size_t functions = 0;
     std::size_t variables = 0;
