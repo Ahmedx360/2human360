@@ -13,9 +13,9 @@ You must provide your own legally obtained game files. No game executable, asset
 | Jump-table recovery | 396 initial tables, plus manually recovered NOP-padded tables |
 | Recompiler fixes | Title-specific PE loader, switch-boundary and VMX/codegen fixes |
 | Generated-code library | CMake static-library target added; requires Clang and SIMDe |
-| Kernel/XAM HLE | Not implemented; import names are not resolved |
+| Kernel/XAM HLE | XEX2 import parser and exact library/ordinal dispatch registry implemented; actual kernel/XAM handlers are not implemented yet |
 | Guest memory / image loader | Bounded big-endian memory view, checked Xbox 360 PE32/PPCBE loader, and 4 GiB guest address-space reservation/image mapping implemented and unit-tested; per-section permissions, MMIO, threads and synchronization remain future work |
-| PPC indirect calls | Generated function map is registered into the expected guest lookup table; unresolved targets reach a diagnostic trap. A caller-context function invocation bridge exists; game startup and imports remain future work |
+| PPC indirect calls | Generated function map, diagnostic unresolved-target trap, and caller-context invocation bridge implemented; XEX function-import thunks can be routed by library/ordinal |
 | Xenos graphics / EDRAM | Runtime implementation still required |
 | XMA audio | Runtime implementation still required |
 | Controller/input | Runtime implementation still required |
@@ -77,7 +77,7 @@ cmake --build --preset validate-only --parallel
 ctest --preset validate
 ~~~
 
-The validation configuration also builds and tests the independent host-side runtime core. The full Clang build additionally compiles the PPC function-table adapter against the generated library. To build only that runtime foundation (without the generated PPC library or XenonRecomp submodule):
+The validation configuration also builds and tests the independent host-side runtime core, including synthetic PE and XEX import fixtures. The full Clang build additionally compiles the PPC function-table/import adapters against the generated library and runs the import-dispatch test. To build only that runtime foundation (without the generated PPC library or XenonRecomp submodule):
 
 ~~~sh
 cmake -S . -B build/runtime -DTH_BUILD_RECOMP_LIB=OFF -DTH_BUILD_RUNTIME_CORE=ON -DBUILD_TESTING=ON
