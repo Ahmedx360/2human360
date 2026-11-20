@@ -25,18 +25,42 @@ bool initialize_title_runtime(GuestAddressSpace& memory,
         if (error) *error = "Reserve the 4 GiB guest address space before title initialization";
         return false;
     }
-    if (!memory.map_image(image, error)) return false;
+    LoadedPeImage mapped_image = image;
+    std::size_t function_iat_count = 0;
+    std::size_t variable_import_count = 0;
+    std::size_t function_import_count = 0;
+    for (const auto& item : import_result.imports) {
+        if (item.type == 1) {
+            ++function_import_count;
+        } else if (item.type == 0 && item.paired_thunk_address != 0) {
+            const auto slot_offset = static_cast<std::uint64_t>(item.thunk_address) -
+                                     mapped_image.image_base;
+            if (slot_offset > mapped_image.bytes.size() ||
+                sizeof(std::uint32_t) > mapped_image.bytes.size() -
+                    static_cast<std::size_t>(slot_offset) ||
+                item.paired_thunk_address < mapped_image.image_base ||
+                static_cast<std::uint64_t>(item.paired_thunk_address) -
+                    mapped_image.image_base >= mapped_image.bytes.size()) {
+                if (error) *error = "XEX function IAT pairing points outside the mapped image";
+                return false;
+            }
+            const auto value = item.paired_thunk_address;
+            const auto offset = static_cast<std::size_t>(slot_offset);
+            mapped_image.bytes[offset] = static_cast<std::uint8_t>(value >> 24);
+            mapped_image.bytes[offset + 1] = static_cast<std::uint8_t>(value >> 16);
+            mapped_image.bytes[offset + 2] = static_cast<std::uint8_t>(value >> 8);
+            mapped_image.bytes[offset + 3] = static_cast<std::uint8_t>(value);
+            ++function_iat_count;
+        } else if (item.type == 0) {
+            ++variable_import_count;
+        }
+    }
+
+    if (!memory.map_image(mapped_image, error)) return false;
 
     std::size_t translated_count = 0;
     if (!initialize_recompiled_function_table(memory, &translated_count, error)) {
         return false;
-    }
-
-    std::size_t function_import_count = 0;
-    std::size_t variable_import_count = 0;
-    for (const auto& item : import_result.imports) {
-        if (item.type == 1) ++function_import_count;
-        else if (item.type == 0) ++variable_import_count;
     }
 
     std::size_t registered_count = 0;
@@ -47,6 +71,7 @@ bool initialize_title_runtime(GuestAddressSpace& memory,
     if (report) {
         report->translated_functions = translated_count;
         report->function_imports = registered_count;
+        report->function_iat_slots = function_iat_count;
         report->variable_imports = variable_import_count;
         report->default_stack_size = import_result.default_stack_size;
         report->default_heap_size = import_result.default_heap_size;
