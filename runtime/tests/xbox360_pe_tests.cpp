@@ -60,19 +60,23 @@ std::vector<std::uint8_t> make_pe() {
 std::vector<std::uint8_t> make_xex_imports() {
     std::vector<std::uint8_t> b(0x300, 0);
     put32(b, 0, 0x58455832); // XEX2
-    put32(b, 0x14, 3);       // Import, image-base and entry-point optional headers.
+    put32(b, 0x14, 5);       // Import, image-base, entry, stack and heap headers.
     put32(b, 0x18, 0x000103FF);
-    put32(b, 0x1C, 0x40);    // Import header file offset.
+    put32(b, 0x1C, 0x50);    // Import header file offset.
     put32(b, 0x20, 0x00010201);
     put32(b, 0x24, 0x82000000);
     put32(b, 0x28, 0x00010100);
     put32(b, 0x2C, 0x82001000);
-    put32(b, 0x40, 0x50);    // Header size.
-    put32(b, 0x44, 16);      // Padded library-name table.
-    put32(b, 0x48, 1);       // One import library.
+    put32(b, 0x30, 0x00020200);
+    put32(b, 0x34, 0x00100000);
+    put32(b, 0x38, 0x00020401);
+    put32(b, 0x3C, 0x02000000);
+    put32(b, 0x50, 0x50);    // Header size.
+    put32(b, 0x54, 16);      // Padded library-name table.
+    put32(b, 0x58, 1);       // One import library.
     const char name[] = "xboxkrnl.exe";
-    for (std::size_t i = 0; i < sizeof(name); ++i) b[0x4C + i] = name[i];
-    const std::size_t library = 0x5C;
+    for (std::size_t i = 0; i < sizeof(name); ++i) b[0x5C + i] = name[i];
+    const std::size_t library = 0x6C;
     put32(b, library, 0x2C);
     put16(b, library + 0x24, 0);
     put16(b, library + 0x26, 1);
@@ -110,6 +114,8 @@ int main() {
     assert(imports.imports[0].type == 1);
     assert(imports.imports[0].hint == 0);
     assert(imports.imports[0].thunk_address == 0x82001000);
+    assert(imports.default_stack_size == 0x00100000);
+    assert(imports.default_heap_size == 0x02000000);
     auto invalid_xex = xex;
     invalid_xex[0] = 'N';
     assert(!toohuman::runtime::parse_xex2_imports(invalid_xex, import_image));
@@ -118,10 +124,13 @@ int main() {
     assert(!toohuman::runtime::parse_xex2_imports(mismatched_base, import_image));
     auto security_base = xex;
     put32(security_base, 0x10, 0x100);
-    put32(security_base, 0x14, 2);
+    put32(security_base, 0x14, 4);
     put32(security_base, 0x20, 0x00010100);
     put32(security_base, 0x24, 0x82001000);
-    put32(security_base, 0x28, 0);
+    put32(security_base, 0x28, 0x00020200);
+    put32(security_base, 0x2C, 0x00100000);
+    put32(security_base, 0x30, 0x00020401);
+    put32(security_base, 0x34, 0x02000000);
     put32(security_base, 0x210, 0x82000000);
     assert(toohuman::runtime::parse_xex2_imports(security_base, import_image));
 
