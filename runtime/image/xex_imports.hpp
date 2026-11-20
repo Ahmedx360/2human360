@@ -56,4 +56,12 @@ struct XexImportResult {
     std::span<const std::uint8_t> xex_file,
     const LoadedPeImage& image);
 
+// Rewrites paired type-0 function IAT slots to their corresponding type-1
+// guest thunk addresses before image pages receive their final protections.
+[[nodiscard]] bool patch_xex_function_iat_slots(
+    LoadedPeImage& image,
+    std::span<const XexImport> imports,
+    std::size_t* patched_count = nullptr,
+    std::string* error = nullptr);
+
 } // namespace toohuman::runtime
