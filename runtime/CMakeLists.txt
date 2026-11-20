@@ -24,6 +24,7 @@ if(TH_BUILD_RECOMP_LIB)
     add_library(TooHumanPpcRuntime STATIC
         ppc/function_table.cpp
         ppc/import_registry.cpp
+        ppc/title_runtime.cpp
     )
     target_link_libraries(TooHumanPpcRuntime
         PUBLIC TooHumanRuntimeCore TooHumanRecompLib
