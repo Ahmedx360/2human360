@@ -14,7 +14,7 @@ You must provide your own legally obtained game files. No game executable, asset
 | Recompiler fixes | Title-specific PE loader, switch-boundary and VMX/codegen fixes |
 | Generated-code library | CMake static-library target added; requires Clang and SIMDe |
 | Kernel/XAM HLE | Actual XEX import inventory/name map, function-IAT patching and backing storage for 11 kernel data exports implemented; callable kernel/XAM handlers remain missing |
-| Guest memory / image loader | Bounded big-endian memory view, standalone PE loader, direct unencrypted/basic-compressed XEX loader, section protections, 4 GiB guest address space and synchronized first-fit heap implemented; MMIO, aliases and guest threads remain future work |
+| Guest memory / image loader | Bounded big-endian memory view, standalone PE loader, direct unencrypted/basic-compressed XEX loader, section protections, 4 GiB guest address space and 128 MiB synchronized guest pool heap implemented; MMIO, aliases and guest threads remain future work |
 | PPC indirect calls | Generated function map, diagnostic unresolved-target trap, caller-context invocation, function IAT patching and exact library/ordinal trampoline dispatch implemented |
 | Xenos graphics / EDRAM | Runtime implementation still required |
 | XMA audio | Runtime implementation still required |
@@ -89,7 +89,7 @@ cmake --build build/runtime --parallel
 ctest --test-dir build/runtime --output-on-failure
 ~~~
 
-To inspect the real Too Human imports directly from the original decrypted `default.xex`, run `./build/runtime/TooHumanXexImportAudit private/default.xex`. The XEX loader handles the title's unencrypted basic-compressed payload, reconstructs its guest-RVA image, and reports library IDs/versions, import ordinals, paired function IAT slots, true variable imports, stack size and TLS metadata. The older two-file form with a matching extracted `default.exe` remains available. To link the generated PPC library and exercise memory/function-table/function-IAT/kernel-variable initialization using only the XEX, configure with `-DTH_BUILD_RUNTIME_PROBE=ON`, build `TooHumanRuntimeProbe`, then run `./build/probe/TooHumanRuntimeProbe private/default.xex`. The probe deliberately does not invoke the game entry point. To build it explicitly (with the XenonRecomp checkout and generated PPC sources available):
+To inspect the real Too Human imports directly from the original decrypted `default.xex`, run `./build/runtime/TooHumanXexImportAudit private/default.xex`. The XEX loader handles the title's unencrypted basic-compressed payload, reconstructs its guest-RVA image, and reports library IDs/versions, import ordinals, paired function IAT slots, true variable imports, stack size and TLS metadata. The older two-file form with a matching extracted `default.exe` remains available. To link the generated PPC library and exercise memory/function-table/function-IAT/kernel-variable and basic pool-allocation initialization using only the XEX, configure with `-DTH_BUILD_RUNTIME_PROBE=ON`, build `TooHumanRuntimeProbe`, then run `./build/probe/TooHumanRuntimeProbe private/default.xex`. The probe deliberately does not invoke the game entry point. To build it explicitly (with the XenonRecomp checkout and generated PPC sources available):
 
 ~~~sh
 cmake -S . -B build/probe -DTH_BUILD_RECOMP_LIB=ON -DTH_BUILD_RUNTIME_CORE=ON -DTH_BUILD_RUNTIME_PROBE=ON -DBUILD_TESTING=OFF
