@@ -34,6 +34,8 @@ public:
     // protections are deliberately deferred until code/data access is audited.
     [[nodiscard]] bool map_image(const LoadedPeImage& image,
                                  std::string* error = nullptr);
+    [[nodiscard]] bool commit_region(std::uint32_t guest_address, std::size_t size,
+                                     std::string* error = nullptr);
     [[nodiscard]] bool initialize_function_table(std::uint32_t code_base,
                                                  std::uint32_t code_size,
                                                  std::string* error = nullptr);
