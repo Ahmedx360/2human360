@@ -121,20 +121,14 @@ XexImportResult parse_xex2_imports(std::span<const std::uint8_t> xex_file,
         if (!fits(library_cursor, kImportLibrarySize, xex_file.size())) {
             return fail("XEX2 import library header is truncated");
         }
-        const auto declared_library_size = read_be32(xex_file, library_cursor);
-        const auto name_index = read_be16(xex_file, library_cursor + 0x24);
+        // XenonRecomp pairs library records with the string table in order;
+        // the 16-bit name field is not needed for that established layout.
         const auto import_count = read_be16(xex_file, library_cursor + 0x26);
-        if (name_index >= library_names.size()) {
-            return fail("XEX2 import library references an invalid string-table index");
-        }
 
         const auto descriptors_size =
             static_cast<std::size_t>(import_count) * kImportDescriptorSize;
         const auto record_size = kImportLibrarySize + descriptors_size;
-        if (!fits(library_cursor, record_size, xex_file.size()) ||
-            (declared_library_size != 0 &&
-             (declared_library_size < kImportLibrarySize ||
-              declared_library_size > xex_file.size() - library_cursor))) {
+        if (!fits(library_cursor, record_size, xex_file.size())) {
             return fail("XEX2 import descriptors exceed their library record");
         }
 
@@ -160,7 +154,7 @@ XexImportResult parse_xex2_imports(std::span<const std::uint8_t> xex_file,
                 (static_cast<std::uint32_t>(image.bytes[thunk_offset + 2]) << 8) |
                 static_cast<std::uint32_t>(image.bytes[thunk_offset + 3]);
             result.imports.push_back({
-                library_names[name_index],
+                library_names[library_index],
                 static_cast<std::uint16_t>(thunk_value & 0xFFFFu),
                 static_cast<std::uint8_t>((thunk_value >> 16) & 0xFFu),
                 static_cast<std::uint8_t>((thunk_value >> 24) & 0xFFu),
