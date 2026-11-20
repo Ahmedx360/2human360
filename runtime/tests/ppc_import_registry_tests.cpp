@@ -1,5 +1,6 @@
 #include "memory/guest_address_space.hpp"
 #include "ppc/import_registry.hpp"
+#include <ppc_config.h>
 
 #include <cassert>
 #include <cstdint>
@@ -19,6 +20,7 @@ PPC_FUNC_IMPL(test_default_handler) {
 }
 
 int main() {
+    {
     toohuman::runtime::LoadedPeImage image;
     image.image_base = 0x82000000u;
     image.image_size = 0x10000u;
@@ -49,6 +51,7 @@ int main() {
     assert(import_thunk != nullptr);
     import_thunk(context, memory.base());
     assert(context.r3.u32 == 0xBEEF1234u);
+    }
 
     // Verify the real title's data exports are backed by guest memory and
     // their IAT slots are patched before the image is mapped/protected.
@@ -95,5 +98,53 @@ int main() {
     assert(header_copy >= 0x86000000u);
     assert(variable_memory.base()[header_copy] == xex_header[0]);
     assert(variable_memory.base()[header_copy + 0x7F] == xex_header[0x7F]);
+
+    assert(variable_memory.map_image(variable_image, &error));
+    assert(variable_memory.initialize_function_table(
+        static_cast<std::uint32_t>(PPC_CODE_BASE),
+        static_cast<std::uint32_t>(PPC_CODE_SIZE), &error));
+    assert(variable_memory.fill_function_table(&test_default_handler));
+
+    const auto thunk_base = static_cast<std::uint32_t>(PPC_CODE_BASE + 0x100);
+    const std::vector<toohuman::runtime::XexImport> pool_imports{
+        {"xboxkrnl.exe", 0x000Bu, 0, 1, thunk_base, 0},
+        {"xboxkrnl.exe", 0x000Fu, 0, 1, thunk_base + 4, 0},
+        {"xam.xex", 0x01EAu, 0, 1, thunk_base + 8, 0},
+        {"xam.xex", 0x01ECu, 0, 1, thunk_base + 12, 0}
+    };
+    std::size_t registered_pool_imports = 0;
+    assert(variable_registry.install(
+        variable_memory, pool_imports, &registered_pool_imports, &error));
+    assert(registered_pool_imports == 4);
+
+    const auto call_import = [&](std::uint32_t thunk, PPCContext& ctx) {
+        ctx.ctr.u32 = thunk;
+        const auto function = variable_memory.get_function<PPCFunc*>(thunk);
+        assert(function != nullptr);
+        function(ctx, variable_memory.base());
+    };
+
+    PPCContext pool_context{};
+    pool_context.r4.u32 = 0x100;
+    call_import(thunk_base, pool_context); // ExAllocatePoolTypeWithTag
+    const auto pool_pointer = pool_context.r3.u32;
+    assert(pool_pointer >= 0x86000000u && pool_pointer < 0x8E000000u);
+    variable_memory.base()[pool_pointer] = 0xA5;
+
+    pool_context = {};
+    pool_context.r3.u32 = pool_pointer;
+    call_import(thunk_base + 4, pool_context); // ExFreePool
+    assert(pool_context.r3.u32 == 0);
+
+    pool_context = {};
+    pool_context.r3.u32 = 0x80;
+    call_import(thunk_base + 8, pool_context); // XamAlloc
+    const auto xam_pointer = pool_context.r3.u32;
+    assert(xam_pointer >= 0x86000000u && xam_pointer < 0x8E000000u);
+
+    pool_context = {};
+    pool_context.r3.u32 = xam_pointer;
+    call_import(thunk_base + 12, pool_context); // XamFree
+    assert(pool_context.r3.u32 == 0);
     return 0;
 }
