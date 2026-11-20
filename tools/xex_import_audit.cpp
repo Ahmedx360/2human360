@@ -74,9 +74,9 @@ int main(int argc, char** argv) {
                   << "  template: 0x" << std::hex << imports.tls_info->raw_data_address
                   << "  data size: 0x" << imports.tls_info->data_size
                   << "  raw size: 0x" << imports.tls_info->raw_data_size
-                  << std::dec << '\\n';
+                  << std::dec << '\n';
     }
-    std::cout << "Imported thunk records: " << imports.imports.size() << "\\n\\n";
+    std::cout << "Imported thunk records: " << imports.imports.size() << "\n\n";
 
     std::size_t functions = 0;
     std::size_t variables = 0;
