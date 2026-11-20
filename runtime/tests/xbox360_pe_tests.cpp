@@ -78,6 +78,8 @@ int main() {
     assert(address_space.map_image(image, &address_space_error));
     assert(address_space.image_mapped());
     assert(address_space.initialize_function_table(0x82001000, 0x1000, &address_space_error));
+    assert(address_space.fill_function_table(&test_guest_function));
+    assert(address_space.get_function<TestGuestFunction>(0x82001004) == &test_guest_function);
     assert(address_space.set_function(0x82001100, &test_guest_function));
     assert(address_space.get_function<TestGuestFunction>(0x82001100) == &test_guest_function);
     assert(address_space.get_function<TestGuestFunction>(0x82001104) == nullptr);
