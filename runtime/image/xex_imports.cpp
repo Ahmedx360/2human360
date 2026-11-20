@@ -63,8 +63,21 @@ XexImportResult parse_xex2_imports(std::span<const std::uint8_t> xex_file,
     if (!found_import_header) {
         return fail("XEX2 has no import-libraries optional header");
     }
-    if (!fits(import_offset, kImportHeaderSize, xex_file.size())) {
+    const auto optional_table_end = kFixedHeaderSize +
+                                    static_cast<std::size_t>(optional_count) * kOptionalHeaderSize;
+    if (import_offset < optional_table_end ||
+        !fits(import_offset, kImportHeaderSize, xex_file.size())) {
         return fail("XEX2 import header points outside the file");
+    }
+
+    const auto declared_import_header_size = read_be32(xex_file, import_offset);
+    if (declared_import_header_size < kImportHeaderSize ||
+        !fits(import_offset, declared_import_header_size, xex_file.size())) {
+        return fail("XEX2 import header declares an invalid size");
+    }
+    if (image.image_size == 0 || image.bytes.size() != image.image_size ||
+        static_cast<std::uint64_t>(image.image_base) + image.image_size > (std::uint64_t{1} << 32)) {
+        return fail("The extracted PE image has an invalid guest address range");
     }
 
     const auto string_table_size = read_be32(xex_file, import_offset + 4);
@@ -119,7 +132,9 @@ XexImportResult parse_xex2_imports(std::span<const std::uint8_t> xex_file,
             static_cast<std::size_t>(import_count) * kImportDescriptorSize;
         const auto record_size = kImportLibrarySize + descriptors_size;
         if (!fits(library_cursor, record_size, xex_file.size()) ||
-            (declared_library_size != 0 && declared_library_size < kImportLibrarySize)) {
+            (declared_library_size != 0 &&
+             (declared_library_size < kImportLibrarySize ||
+              declared_library_size > xex_file.size() - library_cursor))) {
             return fail("XEX2 import descriptors exceed their library record");
         }
 
@@ -129,7 +144,7 @@ XexImportResult parse_xex2_imports(std::span<const std::uint8_t> xex_file,
             const auto descriptor_offset =
                 descriptors_offset + descriptor_index * kImportDescriptorSize;
             const auto thunk_address = read_be32(xex_file, descriptor_offset);
-            if (thunk_address < image.image_base) {
+            if (thunk_address < image.image_base || (thunk_address & 3u) != 0) {
                 return fail("XEX2 import thunk address precedes the loaded PE image");
             }
             const auto thunk_offset =
