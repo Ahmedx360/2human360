@@ -39,7 +39,12 @@ private:
     [[nodiscard]] static std::string make_key(const std::string& library,
                                               std::uint16_t ordinal);
 
-    std::unordered_map<std::uint32_t, XexImport> imports_by_thunk_;
+    struct ImportBinding {
+        XexImport import;
+        PPCFunc* handler{};
+    };
+
+    std::unordered_map<std::uint32_t, ImportBinding> imports_by_thunk_;
     std::unordered_map<std::string, PPCFunc*> handlers_;
     bool installed_{};
 };
