@@ -63,7 +63,7 @@ bool guest_range_valid(std::uint32_t address, std::uint64_t length) noexcept {
                                             std::uint32_t address,
                                             std::uint32_t length) {
     std::fprintf(stderr,
-                 "[TooHuman] %s received invalid guest range 0x%08X + 0x%08X\\n",
+                 "[TooHuman] %s received invalid guest range 0x%08X + 0x%08X\n",
                  name, static_cast<unsigned>(address), static_cast<unsigned>(length));
     std::fflush(stderr);
     std::abort();
