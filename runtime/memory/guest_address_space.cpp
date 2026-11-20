@@ -319,6 +319,18 @@ bool GuestAddressSpace::image_mapped() const noexcept {
     return image_mapped_;
 }
 
+bool GuestAddressSpace::function_table_ready() const noexcept {
+    return function_table_ready_;
+}
+
+std::uint64_t GuestAddressSpace::function_table_base() const noexcept {
+    return function_table_base_;
+}
+
+std::uint64_t GuestAddressSpace::function_table_size() const noexcept {
+    return function_table_size_;
+}
+
 void GuestAddressSpace::release() noexcept {
     if (!reservation_) return;
 #if defined(_WIN32)
