@@ -96,7 +96,9 @@ bool PpcImportRegistry::install(GuestAddressSpace& memory,
             set_error(error, "XEX function-import thunk is outside the configured PPC function table");
             return false;
         }
-        if (!pending.emplace(import.thunk_address, import).second) {
+        const auto handler_it = handlers_.find(make_key(import.library, import.ordinal));
+        auto* handler = handler_it == handlers_.end() ? nullptr : handler_it->second;
+        if (!pending.emplace(import.thunk_address, ImportBinding{import, handler}).second) {
             set_error(error, "XEX import metadata contains a duplicate function thunk address");
             return false;
         }
@@ -110,8 +112,8 @@ bool PpcImportRegistry::install(GuestAddressSpace& memory,
     }
 
     imports_by_thunk_ = std::move(pending);
-    for (const auto& [address, import] : imports_by_thunk_) {
-        (void)import;
+    for (const auto& [address, binding] : imports_by_thunk_) {
+        (void)binding;
         if (!memory.set_function(address, &toohuman_import_trampoline)) {
             g_active_registry.store(nullptr, std::memory_order_release);
             imports_by_thunk_.clear();
@@ -137,9 +139,9 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) const 
         std::abort();
     }
 
-    const auto& import = import_it->second;
-    const auto handler_it = handlers_.find(make_key(import.library, import.ordinal));
-    if (handler_it == handlers_.end()) {
+    const auto& binding = import_it->second;
+    const auto& import = binding.import;
+    if (binding.handler == nullptr) {
         std::fprintf(stderr,
                      "[TooHuman] Unimplemented import %s ordinal 0x%04X "
                      "(thunk=0x%08X, LR=0x%016llX, r3=0x%08X, r4=0x%08X, "
@@ -156,7 +158,7 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) const 
         std::abort();
     }
 
-    handler_it->second(context, base);
+    binding.handler(context, base);
 }
 
 } // namespace toohuman::runtime
