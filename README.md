@@ -14,7 +14,7 @@ You must provide your own legally obtained game files. No game executable, asset
 | Recompiler fixes | Title-specific PE loader, switch-boundary and VMX/codegen fixes |
 | Generated-code library | CMake static-library target added; requires Clang and SIMDe |
 | Kernel/XAM HLE | XEX2 import parser and exact library/ordinal dispatch registry implemented; actual kernel/XAM handlers are not implemented yet |
-| Guest memory / image loader | Bounded big-endian memory view, checked Xbox 360 PE32/PPCBE loader, and 4 GiB guest address-space reservation/image mapping implemented and unit-tested; per-section permissions, MMIO, threads and synchronization remain future work |
+| Guest memory / image loader | Bounded big-endian memory view, checked Xbox 360 PE32/PPCBE loader, and 4 GiB guest address-space reservation/image mapping implemented and unit-tested; MMIO, aliases, threads and synchronization remain future work |
 | PPC indirect calls | Generated function map, diagnostic unresolved-target trap, and caller-context invocation bridge implemented; XEX function-import thunks can be routed by library/ordinal |
 | Xenos graphics / EDRAM | Runtime implementation still required |
 | XMA audio | Runtime implementation still required |
