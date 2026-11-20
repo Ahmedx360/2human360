@@ -14,7 +14,7 @@ The runtime core is an incremental foundation, not a complete emulator. A host e
 | Component | Responsibility | Current state |
 |---|---|---|
 | TooHumanRecompLib | Static library containing generated PowerPC functions and dispatch map | Generated sources and build target exist |
-| runtime/memory | Bounded PPC big-endian access and full 4 GiB guest VA reservation | Reservation and PE image mapping implemented; per-section permissions pending |
+| runtime/memory | Bounded PPC big-endian access and full 4 GiB guest VA reservation | Reservation, PE image mapping and section-based page protections implemented; MMIO/aliases pending |
 | runtime/image | Extracted Xbox 360 PE parsing and XEX2 import metadata | PE32/PPCBE loader and XEX2 import parser implemented and synthetic-fixture tested |
 | runtime/ppc | Populate XenonRecomp's indirect-call table, invoke known functions and route XEX imports | Generated map registration, unresolved-target trap, caller-context invocation and ordinal-keyed import registry implemented; game startup state/HLE handlers are missing |
 | TooHumanRecomp (future) | Host executable, startup, window, configuration, logging and game-data discovery | Not implemented |
@@ -35,7 +35,7 @@ The generated code accesses guest memory through a 32-bit guest address space an
 
 Before invoking the game entry point, the runtime still must:
 
-- apply per-section permissions and reserve/handle MMIO ranges;
+- reserve and handle explicit MMIO ranges and aliases;
 - ensure image base and PPC code base agree with ppc_config.h;
 - populate the indirect-call table from `PPCFuncMappings` and trap unmapped targets;
 - commit and initialize guest stack/TLS regions and establish per-thread PPC contexts;
