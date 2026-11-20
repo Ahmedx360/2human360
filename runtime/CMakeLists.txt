@@ -1,5 +1,8 @@
+find_package(Threads REQUIRED)
+
 add_library(TooHumanRuntimeCore STATIC
     memory/guest_memory.cpp
+    memory/guest_heap.cpp
     memory/guest_address_space.cpp
     image/xbox360_pe.cpp
     image/xex_imports.cpp
@@ -59,6 +62,16 @@ if(BUILD_TESTING AND TH_BUILD_RECOMP_LIB)
 endif()
 
 if(BUILD_TESTING)
+    add_executable(TooHumanGuestHeapTests tests/guest_heap_tests.cpp)
+    target_link_libraries(TooHumanGuestHeapTests PRIVATE TooHumanRuntimeCore)
+    target_compile_features(TooHumanGuestHeapTests PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(TooHumanGuestHeapTests PRIVATE /UNDEBUG)
+    else()
+        target_compile_options(TooHumanGuestHeapTests PRIVATE -UNDEBUG)
+    endif()
+    add_test(NAME TooHumanGuestHeapTests COMMAND TooHumanGuestHeapTests)
+
     add_executable(TooHumanGuestMemoryTests
         tests/guest_memory_tests.cpp
     )
