@@ -19,10 +19,6 @@
 
 namespace toohuman::runtime {
 
-void set_executable_module_handle(std::uint32_t handle) noexcept {
-    g_executable_module_handle.store(handle, std::memory_order_release);
-}
-
 namespace {
 
 constexpr std::uint32_t kStatusSuccess = 0;
@@ -233,6 +229,10 @@ void mark_critical_section_acquired(std::uint8_t* base, std::uint32_t address) {
     }
 }
 } // namespace
+
+void set_executable_module_handle(std::uint32_t handle) noexcept {
+    g_executable_module_handle.store(handle, std::memory_order_release);
+}
 
 namespace boot_hle {
 
