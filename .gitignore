@@ -16,3 +16,4 @@ CMakeUserPresets.json
 __pycache__/
 build/
 private/
+build_full.log
