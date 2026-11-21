@@ -3,7 +3,161 @@
 #include "ppc/function_table.hpp"
 #include "ppc/boot_hle.hpp"
 
+#include <chrono>
+#include <cstring>
+#include <limits>
+
 namespace toohuman::runtime {
+namespace {
+
+void store_be16(std::uint8_t* p, std::uint16_t value) {
+    p[0] = static_cast<std::uint8_t>(value >> 8);
+    p[1] = static_cast<std::uint8_t>(value);
+}
+void store_be32(std::uint8_t* p, std::uint32_t value) {
+    p[0] = static_cast<std::uint8_t>(value >> 24);
+    p[1] = static_cast<std::uint8_t>(value >> 16);
+    p[2] = static_cast<std::uint8_t>(value >> 8);
+    p[3] = static_cast<std::uint8_t>(value);
+}
+void store_be64(std::uint8_t* p, std::uint64_t value) {
+    store_be32(p, static_cast<std::uint32_t>(value >> 32));
+    store_be32(p + 4, static_cast<std::uint32_t>(value));
+}
+
+std::uint64_t guest_system_time_100ns() {
+    constexpr std::uint64_t kWindowsEpochOffset100ns = 116444736000000000ull;
+    const auto now = std::chrono::system_clock::now().time_since_epoch();
+    const auto unix_100ns =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(now).count() / 100;
+    return kWindowsEpochOffset100ns + static_cast<std::uint64_t>(unix_100ns);
+}
+
+bool initialize_main_thread(GuestAddressSpace& memory,
+                            const LoadedPeImage& image,
+                            const XexImportResult& xex,
+                            PpcImportRegistry& imports,
+                            GuestMainThreadStartup& state,
+                            std::string* error) {
+    const auto fail = [&](const char* message) {
+        if (error) *error = message;
+        return false;
+    };
+
+    const std::uint32_t stack_size =
+        xex.default_stack_size != 0 ? xex.default_stack_size : 0x40000u;
+    if (stack_size < 0x1000u ||
+        stack_size > std::numeric_limits<std::uint32_t>::max() - 0x2000u) {
+        return fail("XEX default stack size is outside the supported range");
+    }
+
+    const std::uint32_t tls_slots =
+        xex.tls_info && xex.tls_info->slot_count != 0 ? xex.tls_info->slot_count : 1024u;
+    const std::uint32_t tls_data_size = xex.tls_info ? xex.tls_info->data_size : 0u;
+    const std::uint32_t tls_raw_size = xex.tls_info ? xex.tls_info->raw_data_size : 0u;
+    if (tls_slots > 0x10000u ||
+        static_cast<std::uint64_t>(tls_slots) * 4u + tls_data_size >
+            std::numeric_limits<std::uint32_t>::max() ||
+        tls_raw_size > tls_data_size) {
+        return fail("XEX TLS slot count or data size is outside the supported range");
+    }
+    const auto tls_total_size =
+        static_cast<std::uint32_t>(static_cast<std::uint64_t>(tls_slots) * 4u + tls_data_size);
+
+    std::size_t tls_source_offset = 0;
+    if (tls_raw_size != 0) {
+        if (!xex.tls_info || xex.tls_info->raw_data_address < image.image_base) {
+            return fail("XEX TLS raw-data address does not belong to the guest image");
+        }
+        const auto offset = static_cast<std::uint64_t>(
+            xex.tls_info->raw_data_address) - image.image_base;
+        if (offset > image.bytes.size() || tls_raw_size > image.bytes.size() - offset) {
+            return fail("XEX TLS raw-data template exceeds the loaded PE image");
+        }
+        tls_source_offset = static_cast<std::size_t>(offset);
+    }
+
+    const auto allocate = [&](std::size_t size, std::size_t alignment,
+                              std::uint32_t& out) -> bool {
+        const auto address = imports.allocate_runtime_memory(size, alignment);
+        if (!address || *address == 0) return false;
+        out = *address;
+        std::memset(memory.base() + out, 0, size);
+        return true;
+    };
+
+    const auto stack_allocation_size = static_cast<std::size_t>(stack_size) + 0x2000u;
+    if (!allocate(stack_allocation_size, 0x1000, state.stack_allocation_base) ||
+        !allocate(0xAB0, 16, state.kthread_address) ||
+        !allocate(0x2D8, 16, state.pcr_address) ||
+        !allocate(tls_total_size, 16, state.tls_static_address)) {
+        return fail("Runtime virtual heap could not allocate the guest main-thread state");
+    }
+
+    state.stack_allocation_size = static_cast<std::uint32_t>(stack_allocation_size);
+    state.stack_limit = state.stack_allocation_base + 0x1000u;
+    state.stack_base = state.stack_limit + stack_size;
+    state.stack_size = stack_size;
+    state.tls_size = tls_total_size;
+    state.tls_dynamic_address = state.tls_static_address + tls_data_size;
+    state.thread_id = 1;
+
+    // Xenia's layout places the static TLS template at tls_static_address;
+    // the dynamic TLS slot array is based at tls_static_address+data_size.
+    if (tls_raw_size != 0) {
+        std::memcpy(memory.base() + state.tls_static_address,
+                    image.bytes.data() + tls_source_offset, tls_raw_size);
+    }
+
+    auto* pcr = memory.base() + state.pcr_address;
+    store_be32(pcr + 0x00, state.tls_static_address);
+    store_be32(pcr + 0x30, state.pcr_address);
+    store_be32(pcr + 0x70, state.stack_base);
+    store_be32(pcr + 0x74, state.stack_limit);
+    store_be32(pcr + 0x100, state.kthread_address);
+    store_be32(pcr + 0x10C, 0); // First virtual Xenon CPU.
+    store_be32(pcr + 0x150, 0); // Not executing a DPC.
+
+    auto* kthread = memory.base() + state.kthread_address;
+    kthread[0] = 6; // X_DISPATCH_HEADER type: thread.
+    store_be32(kthread + 0x010, state.kthread_address + 0x010);
+    store_be32(kthread + 0x014, state.kthread_address + 0x010);
+    store_be32(kthread + 0x040, state.kthread_address + 0x020);
+    store_be32(kthread + 0x044, state.kthread_address + 0x020);
+    store_be32(kthread + 0x048, state.kthread_address);
+    store_be32(kthread + 0x04C, state.kthread_address + 0x018);
+    store_be16(kthread + 0x054, 0x0102);
+    store_be16(kthread + 0x056, 1);
+    store_be32(kthread + 0x05C, state.stack_base);
+    store_be32(kthread + 0x060, state.stack_limit);
+    store_be32(kthread + 0x068, state.tls_static_address);
+    store_be32(kthread + 0x074, state.kthread_address + 0x074);
+    store_be32(kthread + 0x078, state.kthread_address + 0x074);
+    store_be32(kthread + 0x07C, state.kthread_address + 0x07C);
+    store_be32(kthread + 0x080, state.kthread_address + 0x07C);
+    // +0x084 process-info-block pointer remains null until a process object exists.
+    kthread[0x08B] = 1;
+    store_be32(kthread + 0x09C, 0xFDFFD7FFu);
+    store_be32(kthread + 0x0D0, state.stack_base);
+    store_be64(kthread + 0x130, guest_system_time_100ns());
+    store_be32(kthread + 0x144, state.kthread_address + 0x144);
+    store_be32(kthread + 0x148, state.kthread_address + 0x144);
+    store_be32(kthread + 0x14C, state.thread_id);
+    store_be32(kthread + 0x150, image.entry_point);
+    store_be32(kthread + 0x154, state.kthread_address + 0x154);
+    store_be32(kthread + 0x158, state.kthread_address + 0x154);
+    store_be32(kthread + 0x160, 0);
+    store_be32(kthread + 0x16C, 0);
+    store_be32(kthread + 0x17C, 1);
+
+    state.context = PPCContext{};
+    state.context.r1.u32 = state.stack_base & ~0xFu;
+    state.context.r13.u32 = state.pcr_address;
+    state.context.lr = 0;
+    return true;
+}
+
+} // namespace
 
 bool initialize_title_runtime(GuestAddressSpace& memory,
                               const LoadedPeImage& image,
@@ -57,6 +211,12 @@ bool initialize_title_runtime(GuestAddressSpace& memory,
         return false;
     }
 
+    GuestMainThreadStartup main_thread{};
+    if (!initialize_main_thread(memory, mapped_image, import_result, imports,
+                                main_thread, error)) {
+        return false;
+    }
+
     if (report) {
         report->translated_functions = translated_count;
         report->function_imports = registered_count;
@@ -65,6 +225,7 @@ bool initialize_title_runtime(GuestAddressSpace& memory,
         report->default_stack_size = import_result.default_stack_size;
         report->default_heap_size = import_result.default_heap_size;
         report->tls_info = import_result.tls_info;
+        report->main_thread = main_thread;
     }
     return true;
 }

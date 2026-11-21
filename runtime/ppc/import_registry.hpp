@@ -46,6 +46,10 @@ public:
 
     void dispatch(PPCContext& context, std::uint8_t* base) const;
 
+    // Allocate runtime memory from the committed private guest virtual range.
+    [[nodiscard]] std::optional<std::uint32_t> allocate_runtime_memory(
+        std::size_t bytes, std::size_t alignment = 16);
+
     // Guest LDR_DATA_TABLE_ENTRY address backing XexExecutableModuleHandle.
     [[nodiscard]] std::uint32_t executable_module_handle() const noexcept {
         return executable_module_handle_;

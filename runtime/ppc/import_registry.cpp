@@ -119,6 +119,12 @@ void update_timestamp_bundle(std::uint8_t* base, std::uint32_t address,
 
 } // namespace
 
+std::optional<std::uint32_t> PpcImportRegistry::allocate_runtime_memory(
+    std::size_t bytes, std::size_t alignment) {
+    if (!virtual_heap_) return std::nullopt;
+    return virtual_heap_->allocate(bytes, alignment);
+}
+
 PpcImportRegistry::~PpcImportRegistry() {
     // Join before releasing registry-owned state. The worker holds a raw
     // pointer into GuestAddressSpace, whose lifetime is managed by the caller.
