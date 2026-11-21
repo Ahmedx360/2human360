@@ -13,6 +13,14 @@ bool wait_until(const std::atomic<bool>& value) {
     }
     return value.load(std::memory_order_acquire);
 }
+bool wait_until(const std::atomic<std::uint32_t>& value) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (value.load(std::memory_order_acquire) == 0u &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::yield();
+    }
+    return value.load(std::memory_order_acquire) != 0u;
+}
 }
 #include <cstdint>
 #include <string>
@@ -95,6 +103,7 @@ int main() {
 
     release_worker.store(true, std::memory_order_release);
     assert(wait_until(detached_worker_finished));
+    assert(wait_until(detached_cleanup_calls));
     assert(detached_cleanup_calls.load() == 1u);
 
     // A later manager operation reaps and joins the completed, unreferenced worker.
