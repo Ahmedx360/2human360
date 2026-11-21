@@ -727,7 +727,7 @@ int main() {
         function(ctx, variable_memory.base());
     };
     const auto vm_page_size =
-        static_cast<std::uint32_t>(GuestAddressSpace::page_size());
+        static_cast<std::uint32_t>(toohuman::runtime::GuestAddressSpace::page_size());
 
     PPCContext pool_context{};
     pool_context.r4.u32 = 0x100;
