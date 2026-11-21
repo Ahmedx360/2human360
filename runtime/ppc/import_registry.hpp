@@ -51,6 +51,7 @@ public:
     [[nodiscard]] std::optional<std::uint32_t> allocate_runtime_memory(
         std::size_t bytes, std::size_t alignment = 16);
     [[nodiscard]] GuestHeap* runtime_heap() noexcept { return virtual_heap_.get(); }
+    [[nodiscard]] GuestHeap* stack_heap() noexcept { return stack_heap_.get(); }
 
     // Guest LDR_DATA_TABLE_ENTRY address backing XexExecutableModuleHandle.
     [[nodiscard]] std::uint32_t executable_module_handle() const noexcept {
@@ -70,6 +71,7 @@ private:
     std::unordered_map<std::string, PPCFunc*> handlers_;
     std::unique_ptr<GuestHeap> guest_heap_;
     std::unique_ptr<GuestHeap> virtual_heap_;
+    std::unique_ptr<GuestHeap> stack_heap_;
     std::uint32_t image_base_{};
     std::uint32_t image_size_{};
     std::jthread timestamp_thread_;

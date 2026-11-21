@@ -261,7 +261,7 @@ int main() {
     call_test_import(0x82001168u, boot_context);
     assert(boot_context.r3.u32 == synthetic_xex_header + 0x30u);
 
-    // RtlCompareMemoryUlong returns the number of matching ULONGs.
+    // RtlCompareMemoryUlong returns the matching prefix length in bytes.
     constexpr std::uint32_t compare_source = 0x82014380u;
     set_guest_be32(compare_source + 0, 0x11223344u);
     set_guest_be32(compare_source + 4, 0xAABBCCDDu);
@@ -271,7 +271,21 @@ int main() {
     boot_context.r4.u32 = 12;
     boot_context.r5.u32 = 0x11223344u;
     call_test_import(0x8200116Cu, boot_context);
-    assert(boot_context.r3.u32 == 2u);
+    assert(boot_context.r3.u32 == 4u);
+    set_guest_be32(compare_source + 4, 0x11223344u);
+    boot_context = {};
+    boot_context.r3.u32 = compare_source;
+    boot_context.r4.u32 = 12;
+    boot_context.r5.u32 = 0x11223344u;
+    call_test_import(0x8200116Cu, boot_context);
+    assert(boot_context.r3.u32 == 12u);
+    set_guest_be32(compare_source + 0, 0xAABBCCDDu);
+    boot_context = {};
+    boot_context.r3.u32 = compare_source;
+    boot_context.r4.u32 = 12;
+    boot_context.r5.u32 = 0x11223344u;
+    call_test_import(0x8200116Cu, boot_context);
+    assert(boot_context.r3.u32 == 0u);
     boot_context = {};
     boot_context.r3.u32 = compare_source;
     boot_context.r4.u32 = 10; // Length must be ULONG-aligned.

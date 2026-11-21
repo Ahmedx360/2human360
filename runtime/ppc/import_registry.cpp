@@ -214,6 +214,14 @@ bool PpcImportRegistry::prepare_variable_imports(
         virtual_heap_.reset();
         return false;
     }
+    // Xenia keeps thread stacks in a dedicated guest VA range. Commit only
+    // allocated stack pages rather than the full 240 MiB reservation.
+    stack_heap_ = std::make_unique<GuestHeap>(memory, 0x70000000u, 0x0F000000u);
+    if (!stack_heap_->initialize(error)) {
+        stack_heap_.reset();
+        virtual_heap_.reset();
+        return false;
+    }
 
     std::vector<const XexImport*> variables;
     for (const auto& item : imports) {

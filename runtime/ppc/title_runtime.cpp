@@ -39,6 +39,7 @@ bool initialize_guest_main_thread(GuestAddressSpace& memory,
                                   const LoadedPeImage& image,
                                   const XexImportResult& xex,
                                   GuestHeap& runtime_heap,
+                                  GuestHeap& stack_heap,
                                   GuestMainThreadStartup& state,
                                   std::string* error) {
     if (!memory.valid()) {
@@ -64,14 +65,13 @@ bool initialize_guest_main_thread(GuestAddressSpace& memory,
 
     const std::uint32_t requested_stack_size =
         xex.default_stack_size != 0 ? xex.default_stack_size : 0x40000u;
-    if (requested_stack_size < 0x1000u ||
-        requested_stack_size > std::numeric_limits<std::uint32_t>::max() - 0x2FFFu) {
+    if (requested_stack_size > std::numeric_limits<std::uint32_t>::max() - 0x2FFFu) {
         return fail("XEX default stack size is outside the supported range");
     }
-    // Xenia rounds the guest stack up to the page size and reserves one
-    // page on either side for guard-page support.
+    // Xenia enforces a 16 KiB minimum and rounds each stack to page size.
+    const auto rounded_stack_size = (requested_stack_size + 0xFFFu) & ~0xFFFu;
     const std::uint32_t stack_size =
-        (requested_stack_size + 0xFFFu) & ~0xFFFu;
+        rounded_stack_size < 0x4000u ? 0x4000u : rounded_stack_size;
 
     const std::uint32_t tls_slots =
         xex.tls_info && xex.tls_info->slot_count != 0 ? xex.tls_info->slot_count : 1024u;
@@ -109,8 +109,10 @@ bool initialize_guest_main_thread(GuestAddressSpace& memory,
     };
 
     const auto stack_allocation_size = static_cast<std::size_t>(stack_size) + 0x2000u;
-    if (!allocate(stack_allocation_size, 0x1000, state.stack_allocation_base) ||
-        !allocate(0xAB0, 16, state.kthread_address) ||
+    const auto stack_allocation = stack_heap.allocate(stack_allocation_size, 0x1000u);
+    if (!stack_allocation) return fail("Guest stack heap could not allocate the main-thread stack");
+    state.stack_allocation_base = *stack_allocation;
+    if (!allocate(0xAB0, 16, state.kthread_address) ||
         !allocate(0x2D8, 16, state.pcr_address) ||
         !allocate(0x60, 16, state.process_info_block_address) ||
         !allocate(tls_total_size, 16, state.tls_static_address)) {
@@ -259,13 +261,14 @@ bool initialize_title_runtime(GuestAddressSpace& memory,
     }
 
     auto* runtime_heap = imports.runtime_heap();
-    if (runtime_heap == nullptr) {
-        if (error) *error = "Guest runtime heap was not initialized before main-thread startup";
+    auto* stack_heap = imports.stack_heap();
+    if (runtime_heap == nullptr || stack_heap == nullptr) {
+        if (error) *error = "Guest runtime/stack heaps were not initialized before main-thread startup";
         return false;
     }
     GuestMainThreadStartup main_thread{};
     if (!initialize_guest_main_thread(memory, mapped_image, import_result,
-                                      *runtime_heap, main_thread, error)) {
+                                      *runtime_heap, *stack_heap, main_thread, error)) {
         return false;
     }
 

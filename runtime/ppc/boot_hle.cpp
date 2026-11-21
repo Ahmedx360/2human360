@@ -447,16 +447,17 @@ PPC_FUNC(RtlCompareMemoryUlong) {
     const auto source = ctx.r3.u32;
     const auto length = ctx.r4.u32;
     const auto pattern = ctx.r5.u32;
-    if (source == 0 || (source & 3u) != 0 || (length & 3u) != 0) {
+    if (source == 0 || (source & 3u) != 0 || (length & 3u) != 0 ||
+        static_cast<std::uint64_t>(source) + length > (std::uint64_t{1} << 32)) {
         ctx.r3.u32 = 0;
         return;
     }
-
-    std::uint32_t matches = 0;
+    std::uint32_t matched_bytes = 0;
     for (std::uint32_t offset = 0; offset < length; offset += 4) {
-        if (get_be32(at(base, source + offset)) == pattern) ++matches;
+        if (get_be32(at(base, source + offset)) != pattern) break;
+        matched_bytes += 4;
     }
-    ctx.r3.u32 = matches;
+    ctx.r3.u32 = matched_bytes;
 }
 
 PPC_FUNC(RtlRaiseException) {

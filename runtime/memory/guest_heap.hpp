@@ -13,8 +13,8 @@
 namespace toohuman::runtime {
 
 // A small first-fit allocator over a caller-selected guest virtual range.
-// The range is committed read/write by initialize(); its owner must ensure
-// it does not overlap the image, PPC function table, MMIO or another heap.
+// initialize() reserves allocator metadata only; allocate() commits host
+// backing pages on demand. Owners must prevent overlap with other regions.
 class GuestHeap final {
 public:
     GuestHeap(GuestAddressSpace& memory, std::uint32_t guest_base,

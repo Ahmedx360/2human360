@@ -23,7 +23,9 @@ int main() {
     assert(memory.valid());
 
     GuestHeap heap(memory, 0xA0000000u, 0x00100000u);
+    GuestHeap stack_heap(memory, 0x70000000u, 0x00100000u);
     assert(heap.initialize(&error));
+    assert(stack_heap.initialize(&error));
 
     LoadedPeImage image{};
     image.image_base = 0x82000000u;
@@ -39,11 +41,14 @@ int main() {
     xex.tls_info = XexTlsInfo{64u, image.image_base + 0x800u, 0x450u, 0x450u};
 
     GuestMainThreadStartup state{};
-    assert(initialize_guest_main_thread(memory, image, xex, heap, state, &error));
+    assert(initialize_guest_main_thread(memory, image, xex, heap, stack_heap, state, &error));
 
     assert(state.thread_id == 1u);
     assert(state.stack_size == 0x40000u);
+    assert(state.stack_allocation_base == 0x70000000u);
     assert(state.stack_allocation_size == 0x42000u);
+    assert(stack_heap.available_bytes() == 0x00100000u - state.stack_allocation_size);
+    assert(state.kthread_address >= 0xA0000000u);
     assert(state.stack_limit == state.stack_allocation_base + 0x1000u);
     assert(state.stack_base == state.stack_limit + 0x40000u);
     assert(state.context.r1.u32 == state.stack_base);
@@ -51,10 +56,10 @@ int main() {
     assert(state.context.lr == 0);
 
     const auto* bytes = memory.base();
-    // Guard pages can be moved between protections via the guest address-space API.
+    // The initializer has already protected both stack guard pages.
     assert(memory.protect_region(state.stack_allocation_base, 0x1000u,
-                                 GuestMemoryProtection::ReadOnly, &error));
-    assert(memory.protect_region(state.stack_allocation_base, 0x1000u,
+                                 GuestMemoryProtection::NoAccess, &error));
+    assert(memory.protect_region(state.stack_base, 0x1000u,
                                  GuestMemoryProtection::NoAccess, &error));
 
     assert(state.tls_size == 0x550u);
@@ -95,11 +100,11 @@ int main() {
     invalid_xex.tls_info->slot_count = 0x4000u;
     GuestMainThreadStartup invalid_state{};
     assert(!initialize_guest_main_thread(
-        memory, image, invalid_xex, heap, invalid_state, &error));
+        memory, image, invalid_xex, heap, stack_heap, invalid_state, &error));
 
     auto invalid_image = image;
     invalid_image.entry_point = 0x83000000u;
     assert(!initialize_guest_main_thread(
-        memory, invalid_image, xex, heap, invalid_state, &error));
+        memory, invalid_image, xex, heap, stack_heap, invalid_state, &error));
     return 0;
 }

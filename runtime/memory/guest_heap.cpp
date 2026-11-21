@@ -52,7 +52,6 @@ bool GuestHeap::initialize(std::string* error) {
         }
     }
 
-    if (!memory_->commit_region(guest_base_, size_, error)) return false;
     blocks_.push_back({0, size_, true});
     initialized_ = true;
     return true;
@@ -88,6 +87,8 @@ std::optional<std::uint32_t> GuestHeap::allocate(std::size_t bytes,
         const auto prefix = static_cast<std::uint32_t>(aligned_offset - block.offset);
         const auto allocation_size = static_cast<std::uint32_t>(bytes);
         const auto suffix = static_cast<std::uint32_t>(block_end - allocation_end);
+        if (!memory_->commit_region(static_cast<std::uint32_t>(aligned_guest_start),
+                                    allocation_size, nullptr)) return std::nullopt;
 
         std::vector<Block> replacement;
         replacement.reserve(3);
@@ -168,6 +169,8 @@ std::optional<std::uint32_t> GuestHeap::allocate_at(
         const auto prefix = offset - block.offset;
         const auto suffix = static_cast<std::uint32_t>(
             static_cast<std::uint64_t>(block.offset) + block.size - allocation_end);
+        if (!memory_->commit_region(guest_address, allocation_size, nullptr))
+            return std::nullopt;
         std::vector<Block> replacement;
         replacement.reserve(3);
         if (prefix) replacement.push_back({block.offset, prefix, true});
