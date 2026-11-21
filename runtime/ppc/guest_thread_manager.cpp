@@ -1,42 +1,123 @@
 #include "ppc/guest_thread_manager.hpp"
+
 #include <utility>
+
 namespace toohuman::runtime {
 namespace {
+
 void set_error(std::string* error, const char* message) {
     if (error) *error = message;
 }
+
+void run_cleanup(GuestThreadManager::Cleanup cleanup,
+                 GuestThreadStartup& startup) noexcept {
+    if (!cleanup) return;
+    try {
+        cleanup(startup);
+    } catch (...) {
+        // Cleanup is a best-effort, exactly-once release hook. Never allow an
+        // exception to escape a worker thread or a kernel-object close path.
+    }
 }
+
+} // namespace
+
 struct GuestThreadManager::Record final : GuestKernelObject {
-    explicit Record(GuestThreadStartup value, Entry callback, std::uint32_t initial_suspend_count)
-        : startup(std::move(value)), entry(std::move(callback)),
+    explicit Record(GuestThreadStartup value, Entry callback, Cleanup cleanup_callback,
+                    std::uint32_t initial_suspend_count)
+        : startup(std::move(value)),
+          entry(std::move(callback)),
+          cleanup(std::move(cleanup_callback)),
           suspend_count(initial_suspend_count),
           state(initial_suspend_count ? GuestThreadLifecycleState::Suspended
                                       : GuestThreadLifecycleState::Running) {}
+
+    ~Record() override {
+        Cleanup final_cleanup;
+        {
+            std::lock_guard lock(mutex);
+            final_cleanup = std::move(cleanup);
+        }
+        run_cleanup(std::move(final_cleanup), startup);
+    }
+
     [[nodiscard]] GuestKernelObjectType type() const noexcept override {
         return GuestKernelObjectType::Thread;
     }
+
     [[nodiscard]] GuestKernelObjectWaitResult wait(
         std::optional<std::chrono::milliseconds> timeout) override {
-        std::unique_lock lock(mutex);
-        const auto completed = [&] { return state == GuestThreadLifecycleState::Completed; };
-        if (timeout) {
-            if (!condition.wait_for(lock, *timeout, completed))
-                return GuestKernelObjectWaitResult::Timeout;
-        } else condition.wait(lock, completed);
-        return GuestKernelObjectWaitResult::Signaled;
+        Cleanup deferred_cleanup;
+        GuestKernelObjectWaitResult result = GuestKernelObjectWaitResult::Signaled;
+        {
+            std::unique_lock lock(mutex);
+            ++active_waiters;
+            const auto completed = [&] {
+                return state == GuestThreadLifecycleState::Completed;
+            };
+            if (timeout) {
+                if (!condition.wait_for(lock, *timeout, completed))
+                    result = GuestKernelObjectWaitResult::Timeout;
+            } else {
+                condition.wait(lock, completed);
+            }
+
+            --active_waiters;
+            if (handle_closed && active_waiters == 0 &&
+                state == GuestThreadLifecycleState::Completed) {
+                deferred_cleanup = std::move(cleanup);
+            }
+        }
+        run_cleanup(std::move(deferred_cleanup), startup);
+        return result;
     }
+
+    void on_handle_closed() noexcept override {
+        Cleanup deferred_cleanup;
+        {
+            std::lock_guard lock(mutex);
+            handle_closed = true;
+            if (active_waiters == 0 &&
+                state == GuestThreadLifecycleState::Completed) {
+                deferred_cleanup = std::move(cleanup);
+            }
+        }
+        run_cleanup(std::move(deferred_cleanup), startup);
+    }
+
+    void complete(std::uint32_t code) noexcept {
+        Cleanup deferred_cleanup;
+        {
+            std::lock_guard lock(mutex);
+            if (state == GuestThreadLifecycleState::Completed) return;
+            exit_code = code;
+            state = GuestThreadLifecycleState::Completed;
+            if (handle_closed && active_waiters == 0)
+                deferred_cleanup = std::move(cleanup);
+        }
+        run_cleanup(std::move(deferred_cleanup), startup);
+        condition.notify_all();
+    }
+
     GuestThreadStartup startup;
     Entry entry;
+    Cleanup cleanup;
     mutable std::mutex mutex;
     std::condition_variable_any condition;
     std::jthread worker;
     GuestThreadLifecycleState state{GuestThreadLifecycleState::Running};
     std::uint32_t suspend_count{};
     std::uint32_t exit_code{GuestThreadManager::kStillActive};
+    std::uint32_t active_waiters{};
+    bool handle_closed{};
 };
-GuestThreadManager::GuestThreadManager() noexcept : object_table_(&owned_object_table_) {}
+
+GuestThreadManager::GuestThreadManager() noexcept
+    : object_table_(&owned_object_table_) {}
+
 GuestThreadManager::GuestThreadManager(GuestKernelObjectTable& table) noexcept
     : object_table_(&table) {}
+
 GuestThreadManager::~GuestThreadManager() {
     std::vector<std::shared_ptr<Record>> workers;
     std::vector<GuestKernelHandle> handles;
@@ -47,20 +128,26 @@ GuestThreadManager::~GuestThreadManager() {
         workers_.clear();
         handles.swap(owned_handles_);
     }
+
+    // The close callback marks each thread handle as no longer externally
+    // reachable. Running workers keep their guest context until complete().
     for (const auto handle : handles) object_table_->close(handle);
     for (const auto& record : workers) {
         record->worker.request_stop();
         record->condition.notify_all();
     }
-    for (const auto& record : workers)
+    for (const auto& record : workers) {
         if (record->worker.joinable()) record->worker.join();
+    }
 }
+
 std::shared_ptr<GuestThreadManager::Record> GuestThreadManager::find_thread(
     GuestThreadHandle handle) const {
     auto object = object_table_->lookup(handle);
     if (!object || object->type() != GuestKernelObjectType::Thread) return {};
     return std::dynamic_pointer_cast<Record>(std::move(object));
 }
+
 void GuestThreadManager::reap_completed_workers() {
     std::vector<std::shared_ptr<Record>> completed;
     {
@@ -75,31 +162,42 @@ void GuestThreadManager::reap_completed_workers() {
             if (done) {
                 completed.push_back(*it);
                 it = workers_.erase(it);
-            } else ++it;
+            } else {
+                ++it;
+            }
         }
     }
-    for (const auto& record : completed)
+    for (const auto& record : completed) {
         if (record->worker.joinable()) record->worker.join();
+    }
 }
+
 std::optional<GuestThreadHandle> GuestThreadManager::create(
-    GuestThreadStartup startup, Entry entry, bool initially_suspended, std::string* error) {
+    GuestThreadStartup startup, Entry entry, bool initially_suspended,
+    std::string* error, Cleanup cleanup) {
     if (!entry) {
         set_error(error, "Guest thread requires a non-empty executor");
+        run_cleanup(std::move(cleanup), startup);
         return std::nullopt;
     }
+
     reap_completed_workers();
     auto record = std::make_shared<Record>(
-        std::move(startup), std::move(entry), initially_suspended ? 1u : 0u);
+        std::move(startup), std::move(entry), std::move(cleanup),
+        initially_suspended ? 1u : 0u);
+
     std::lock_guard manager_lock(mutex_);
     if (shutting_down_) {
         set_error(error, "Guest thread manager is shutting down");
-        return std::nullopt;
+        return std::nullopt; // Record destructor invokes cleanup.
     }
+
     const auto handle = object_table_->insert(record);
     if (!handle) {
         set_error(error, "Guest kernel object handle space is exhausted");
-        return std::nullopt;
+        return std::nullopt; // Record destructor invokes cleanup.
     }
+
     workers_.push_back(record);
     owned_handles_.push_back(*handle);
     try {
@@ -109,24 +207,21 @@ std::optional<GuestThreadHandle> GuestThreadManager::create(
                 const bool resumed = record->condition.wait(
                     lock, stop, [&] { return record->suspend_count == 0; });
                 if (!resumed || stop.stop_requested()) {
-                    record->exit_code = kStatusThreadIsTerminating;
-                    record->state = GuestThreadLifecycleState::Completed;
                     lock.unlock();
-                    record->condition.notify_all();
+                    record->complete(kStatusThreadIsTerminating);
                     return;
                 }
                 record->state = GuestThreadLifecycleState::Running;
             }
             record->condition.notify_all();
+
             std::uint32_t code = kStatusUnsuccessful;
-            try { code = record->entry(record->startup, stop); }
-            catch (...) { code = kStatusUnsuccessful; }
-            {
-                std::lock_guard lock(record->mutex);
-                record->exit_code = code;
-                record->state = GuestThreadLifecycleState::Completed;
+            try {
+                code = record->entry(record->startup, stop);
+            } catch (...) {
+                code = kStatusUnsuccessful;
             }
-            record->condition.notify_all();
+            record->complete(code);
         });
     } catch (...) {
         owned_handles_.pop_back();
@@ -137,7 +232,9 @@ std::optional<GuestThreadHandle> GuestThreadManager::create(
     }
     return handle;
 }
-bool GuestThreadManager::resume(GuestThreadHandle handle, std::uint32_t* previous_count,
+
+bool GuestThreadManager::resume(GuestThreadHandle handle,
+                                std::uint32_t* previous_count,
                                 std::string* error) {
     reap_completed_workers();
     auto record = find_thread(handle);
@@ -149,18 +246,22 @@ bool GuestThreadManager::resume(GuestThreadHandle handle, std::uint32_t* previou
         std::lock_guard lock(record->mutex);
         if (previous_count) *previous_count = record->suspend_count;
         if (record->state == GuestThreadLifecycleState::Completed) return true;
-        if (record->suspend_count) --record->suspend_count;
+        if (record->suspend_count != 0) --record->suspend_count;
     }
     record->condition.notify_all();
     return true;
 }
+
 GuestThreadWaitResult GuestThreadManager::wait(
-    GuestThreadHandle handle, std::optional<std::chrono::milliseconds> timeout) {
+    GuestThreadHandle handle,
+    std::optional<std::chrono::milliseconds> timeout) {
     auto record = find_thread(handle);
     return record ? record->wait(timeout) : GuestThreadWaitResult::InvalidHandle;
 }
-bool GuestThreadManager::get_state(GuestThreadHandle handle, GuestThreadLifecycleState& state,
-                                   std::uint32_t* suspend_count) const {
+
+bool GuestThreadManager::get_state(
+    GuestThreadHandle handle, GuestThreadLifecycleState& state,
+    std::uint32_t* suspend_count) const {
     auto record = find_thread(handle);
     if (!record) return false;
     std::lock_guard lock(record->mutex);
@@ -168,7 +269,9 @@ bool GuestThreadManager::get_state(GuestThreadHandle handle, GuestThreadLifecycl
     if (suspend_count) *suspend_count = record->suspend_count;
     return true;
 }
-bool GuestThreadManager::get_exit_code(GuestThreadHandle handle, std::uint32_t& exit_code) const {
+
+bool GuestThreadManager::get_exit_code(GuestThreadHandle handle,
+                                       std::uint32_t& exit_code) const {
     auto record = find_thread(handle);
     if (!record) return false;
     std::lock_guard lock(record->mutex);
@@ -176,8 +279,10 @@ bool GuestThreadManager::get_exit_code(GuestThreadHandle handle, std::uint32_t& 
         ? record->exit_code : kStillActive;
     return true;
 }
+
 bool GuestThreadManager::close_handle(GuestThreadHandle handle) {
     if (!find_thread(handle)) return false;
     return object_table_->close(handle);
 }
+
 } // namespace toohuman::runtime

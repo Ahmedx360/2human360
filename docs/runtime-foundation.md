@@ -100,8 +100,9 @@ GuestThreadManager is a separately testable host-side lifecycle primitive. When 
 existing `NtWaitForSingleObjectEx` and `NtClose` handlers can therefore operate on either type. Closing the guest
 handle removes lookup access but does not cancel or destroy a live worker. The manager owns executor workers,
 models initial suspension/resume counts, provides finite/infinite completion waits and exit-code queries, and
-keeps a live worker alive after its public handle is closed. Executors receive a stop token and must cooperate
-with shutdown. The shared handle layer now lets the existing NtWaitForSingleObjectEx and NtClose imports wait on and close
+keeps a live worker alive after its public handle is closed. An optional exactly-once cleanup callback is deferred
+until both the worker has completed and its public handle has closed; in-flight waiters are allowed to finish before
+cleanup runs. Executors receive a stop token and must cooperate with shutdown. The shared handle layer now lets the existing NtWaitForSingleObjectEx and NtClose imports wait on and close
 thread-completion objects when the manager is constructed with process_kernel_objects(). Event-only operations
 continue to reject thread handles. ExCreateThread, NtResumeThread, actual PPC worker execution and the generated PPC
 bridge remain unimplemented; the game's real worker-thread ABI and safe concurrent import dispatch remain outstanding.

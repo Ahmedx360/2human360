@@ -17,6 +17,8 @@ public:
     [[nodiscard]] virtual GuestKernelObjectType type() const noexcept = 0;
     [[nodiscard]] virtual GuestKernelObjectWaitResult wait(
         std::optional<std::chrono::milliseconds> timeout) = 0;
+    // Called after the handle is removed from the table, without its mutex held.
+    virtual void on_handle_closed() noexcept {}
 };
 class GuestEventObject final : public GuestKernelObject {
 public:

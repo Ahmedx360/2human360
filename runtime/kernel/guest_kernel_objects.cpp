@@ -46,8 +46,18 @@ std::shared_ptr<GuestKernelObject> GuestKernelObjectTable::lookup(GuestKernelHan
     return it == objects_.end() ? nullptr : it->second;
 }
 bool GuestKernelObjectTable::close(GuestKernelHandle handle) {
-    std::lock_guard lock(mutex_);
-    return objects_.erase(handle) != 0;
+    std::shared_ptr<GuestKernelObject> object;
+    {
+        std::lock_guard lock(mutex_);
+        const auto it = objects_.find(handle);
+        if (it == objects_.end()) return false;
+        object = std::move(it->second);
+        objects_.erase(it);
+    }
+    // Callbacks may lock object state or free guest allocations. Never call
+    // them while holding the process handle-table mutex.
+    object->on_handle_closed();
+    return true;
 }
 GuestKernelObjectWaitResult GuestKernelObjectTable::wait(
     GuestKernelHandle handle, std::optional<std::chrono::milliseconds> timeout) const {

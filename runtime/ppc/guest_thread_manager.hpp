@@ -19,6 +19,7 @@ enum class GuestThreadLifecycleState { Suspended, Running, Completed };
 class GuestThreadManager final {
 public:
     using Entry = std::function<std::uint32_t(GuestThreadStartup&, std::stop_token)>;
+    using Cleanup = std::function<void(GuestThreadStartup&)>;
     static constexpr std::uint32_t kStillActive = 259u;
     static constexpr std::uint32_t kStatusThreadIsTerminating = 0xC000004Bu;
     static constexpr std::uint32_t kStatusUnsuccessful = 0xC0000001u;
@@ -30,7 +31,7 @@ public:
     GuestThreadManager& operator=(const GuestThreadManager&) = delete;
     [[nodiscard]] std::optional<GuestThreadHandle> create(
         GuestThreadStartup startup, Entry entry, bool initially_suspended = false,
-        std::string* error = nullptr);
+        std::string* error = nullptr, Cleanup cleanup = {});
     [[nodiscard]] bool resume(GuestThreadHandle handle,
                               std::uint32_t* previous_count = nullptr,
                               std::string* error = nullptr);
