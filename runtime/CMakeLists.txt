@@ -1,6 +1,7 @@
 find_package(Threads REQUIRED)
 
 add_library(TooHumanRuntimeCore STATIC
+    kernel/guest_kernel_objects.cpp
     memory/guest_memory.cpp
     memory/guest_heap.cpp
     memory/guest_address_space.cpp
@@ -52,6 +53,18 @@ if(EXISTS "${TH_SIMDE_DIR}/x86/avx.h")
     endif()
 else()
     message(STATUS "SIMDe not found (${TH_SIMDE_DIR}); skipping TooHumanBootHle. Run: git submodule update --init --recursive")
+endif()
+
+if(BUILD_TESTING)
+    add_executable(TooHumanGuestKernelObjectTests tests/guest_kernel_objects_tests.cpp)
+    target_link_libraries(TooHumanGuestKernelObjectTests PRIVATE TooHumanRuntimeCore)
+    target_compile_features(TooHumanGuestKernelObjectTests PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(TooHumanGuestKernelObjectTests PRIVATE /UNDEBUG)
+    else()
+        target_compile_options(TooHumanGuestKernelObjectTests PRIVATE -UNDEBUG)
+    endif()
+    add_test(NAME TooHumanGuestKernelObjectTests COMMAND TooHumanGuestKernelObjectTests)
 endif()
 
 if(TH_BUILD_RECOMP_LIB)
