@@ -96,6 +96,121 @@ void test_critical_sections() {
     assert(be32(address + 0x14) == 0);
 }
 
+void test_tls() {
+    constexpr std::uint32_t slot_count = 2048;
+    constexpr std::uint32_t out_of_indexes = 0xFFFFFFFFu;
+    std::vector<std::uint32_t> allocated;
+    allocated.reserve(slot_count);
+
+    // The kernel TLS bitmap is process-wide and exposes 2,048 indices.
+    PPCContext context{};
+    for (std::uint32_t i = 0; i < slot_count; ++i) {
+        context = {};
+        boot_hle::KeTlsAlloc(context, base());
+        assert(context.r3.u32 == i);
+        allocated.push_back(context.r3.u32);
+    }
+    context = {};
+    boot_hle::KeTlsAlloc(context, base());
+    assert(context.r3.u32 == out_of_indexes);
+
+    const auto slot = slot_count - 1;
+    context = {};
+    context.r3.u32 = slot;
+    context.r4.u32 = 0x12345678u;
+    boot_hle::KeTlsSetValue(context, base());
+    assert(context.r3.u32 == 1);
+
+    context = {};
+    context.r3.u32 = slot;
+    boot_hle::KeTlsGetValue(context, base());
+    assert(context.r3.u32 == 0x12345678u);
+
+    // Each guest thread has an independent value for the same process-wide slot.
+    std::atomic<bool> other_thread_ready{false};
+    std::atomic<bool> release_other_thread{false};
+    std::atomic<std::uint32_t> other_thread_initial{out_of_indexes};
+    std::atomic<std::uint32_t> other_thread_value{0};
+    std::atomic<std::uint32_t> other_thread_after_free{out_of_indexes};
+    std::thread other_thread([&] {
+        PPCContext other{};
+        other.r3.u32 = slot;
+        boot_hle::KeTlsGetValue(other, base());
+        other_thread_initial.store(other.r3.u32, std::memory_order_release);
+
+        other = {};
+        other.r3.u32 = slot;
+        other.r4.u32 = 0xAABBCCDDu;
+        boot_hle::KeTlsSetValue(other, base());
+        assert(other.r3.u32 == 1);
+        other = {};
+        other.r3.u32 = slot;
+        boot_hle::KeTlsGetValue(other, base());
+        other_thread_value.store(other.r3.u32, std::memory_order_release);
+
+        other_thread_ready.store(true, std::memory_order_release);
+        while (!release_other_thread.load(std::memory_order_acquire))
+            std::this_thread::yield();
+
+        other = {};
+        other.r3.u32 = slot;
+        boot_hle::KeTlsGetValue(other, base());
+        other_thread_after_free.store(other.r3.u32, std::memory_order_release);
+    });
+
+    while (!other_thread_ready.load(std::memory_order_acquire))
+        std::this_thread::yield();
+    assert(other_thread_initial.load(std::memory_order_acquire) == 0);
+    assert(other_thread_value.load(std::memory_order_acquire) == 0xAABBCCDDu);
+
+    context = {};
+    context.r3.u32 = slot;
+    boot_hle::KeTlsGetValue(context, base());
+    assert(context.r3.u32 == 0x12345678u);
+
+    // Free invalidates the index in every host thread; reallocation clears this thread's stale value.
+    context = {};
+    context.r3.u32 = slot;
+    boot_hle::KeTlsFree(context, base());
+    assert(context.r3.u32 == 1);
+    release_other_thread.store(true, std::memory_order_release);
+    other_thread.join();
+    assert(other_thread_after_free.load(std::memory_order_acquire) == 0);
+
+    context = {};
+    boot_hle::KeTlsAlloc(context, base());
+    assert(context.r3.u32 == slot);
+    context = {};
+    context.r3.u32 = slot;
+    boot_hle::KeTlsGetValue(context, base());
+    assert(context.r3.u32 == 0);
+    context = {};
+    context.r3.u32 = slot;
+    boot_hle::KeTlsFree(context, base());
+    assert(context.r3.u32 == 1);
+
+    // Release the remaining slots and check invalid-index behavior.
+    for (std::uint32_t i = 0; i < allocated.size() - 1; ++i) {
+        context = {};
+        context.r3.u32 = allocated[i];
+        boot_hle::KeTlsFree(context, base());
+        assert(context.r3.u32 == 1);
+    }
+    context = {};
+    context.r3.u32 = out_of_indexes;
+    boot_hle::KeTlsFree(context, base());
+    assert(context.r3.u32 == 0);
+    context = {};
+    context.r3.u32 = slot_count;
+    boot_hle::KeTlsGetValue(context, base());
+    assert(context.r3.u32 == 0);
+    context = {};
+    context.r3.u32 = slot_count;
+    context.r4.u32 = 1;
+    boot_hle::KeTlsSetValue(context, base());
+    assert(context.r3.u32 == 0);
+}
+
 void test_events() {
     constexpr std::uint32_t output = 0x7000u;
     constexpr std::uint32_t timeout = 0x7200u;
@@ -288,6 +403,7 @@ int main() {
     assert(be32(0x6F04) == 1);
 
     test_critical_sections();
+    test_tls();
     test_events();
 
     return 0;

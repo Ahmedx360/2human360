@@ -56,7 +56,7 @@ jobs:
           -DBUILD_TESTING=ON
 
       - name: Compile the recompiled game-code library
-        run: cmake --build build/clang --target TooHumanRuntimeProbe TooHumanPpcImportRegistryTests --parallel 2
+        run: cmake --build build/clang --target TooHumanRuntimeProbe TooHumanPpcImportRegistryTests TooHumanBootHleTests TooHumanGuestThreadStartupTests --parallel 2
 
       - name: Test XEX import dispatch
-        run: ctest --test-dir build/clang -R TooHumanPpcImportRegistryTests --output-on-failure
+        run: ctest --test-dir build/clang -R "TooHuman(BootHle|PpcImportRegistry|GuestThreadStartup)Tests" --output-on-failure

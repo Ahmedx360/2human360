@@ -171,7 +171,7 @@ bool wait_for_event(const std::shared_ptr<GuestEvent>& event,
     return true;
 }
 
-constexpr std::uint32_t kTlsSlotCount = 256;
+constexpr std::uint32_t kTlsSlotCount = 2048;
 constexpr std::uint32_t kTlsOutOfIndexes = 0xFFFFFFFFu;
 struct GuestTlsValue { std::uint32_t value{}; std::uint32_t generation{}; };
 std::mutex g_tls_mutex;
