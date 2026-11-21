@@ -375,6 +375,8 @@ void test_events() {
     assert(context.r3.u32 == 0xC000000Du); // NULL handle output is invalid
 }
 
+} // namespace
+
 int main() {
     PPCContext ctx{};
 
