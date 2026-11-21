@@ -418,19 +418,19 @@ int main() {
     boot_context = {};
     boot_context.r3.u32 = time_fields_in;
     boot_context.r4.u32 = time_filetime;
-    call_test_import(0x82001180u, boot_context); // RtlTimeFieldsToTime
+    call_test_import(0x82001184u, boot_context); // RtlTimeFieldsToTime (ordinal 0x013F)
     assert(boot_context.r3.u32 == 1u);
     boot_context = {};
     boot_context.r3.u32 = time_filetime;
     boot_context.r4.u32 = time_fields_out;
-    call_test_import(0x82001184u, boot_context); // RtlTimeToTimeFields
+    call_test_import(0x82001180u, boot_context); // RtlTimeToTimeFields (ordinal 0x0140)
     for (std::uint32_t i = 0; i < 8; ++i)
         assert(read_be16_field(time_fields_out + i * 2) == fields_values[i]);
     write_be16_field(time_fields_in + 4, 30); // Invalid 2024-02-30.
     boot_context = {};
     boot_context.r3.u32 = time_fields_in;
     boot_context.r4.u32 = time_filetime;
-    call_test_import(0x82001180u, boot_context);
+    call_test_import(0x82001184u, boot_context); // Invalid TIME_FIELDS must fail.
     assert(boot_context.r3.u32 == 0u);
 
     set_guest_u64(timeout_in, 0);
