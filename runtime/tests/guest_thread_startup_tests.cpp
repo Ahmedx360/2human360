@@ -205,7 +205,7 @@ int main() {
     // KTHREAD/PCR/ProcessInfo allocations have succeeded. Failure must roll
     // back every partial allocation and restore the stack heap.
     GuestHeap constrained_runtime_heap(memory, 0xA0200000u, 0x1000u);
-    GuestHeap constrained_stack_heap(memory, 0x70100000u, 0x50000u);
+    GuestHeap constrained_stack_heap(memory, 0x70100000u, 0x00100000u);
     assert(constrained_runtime_heap.initialize(&error));
     assert(constrained_stack_heap.initialize(&error));
     GuestThreadStartup partial_startup{};
