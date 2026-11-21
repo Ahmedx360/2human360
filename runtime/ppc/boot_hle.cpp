@@ -249,7 +249,7 @@ PPC_FUNC(RtlInitUnicodeString) {
     std::uint16_t length = 0, maximum = 0;
     if (src != 0) {
         std::uint32_t characters = 0;
-        while (characters < 0x7FFFu && get_be16(at(base, src) + characters * 2) != 0)
+        while (characters < 0x7FFEu && get_be16(at(base, src) + characters * 2) != 0)
             ++characters;
         length = static_cast<std::uint16_t>(characters * 2);
         maximum = static_cast<std::uint16_t>((characters + 1) * 2);
@@ -449,12 +449,13 @@ PPC_FUNC(RtlNtStatusToDosError) {
     std::uint32_t error = 317u; // ERROR_MR_MID_NOT_FOUND
     if (status == 0 || (status & 0x20000000u) != 0) {
         error = status;
-    } else if ((status >> 16) == 0x8007u ||
-               (status & 0xF0000000u) == 0xD0000000u ||
-               (status >> 16) == 0xC001u) {
+    } else if ((status >> 16) == 0x8007u || (status >> 16) == 0xC001u) {
         error = status & 0xFFFFu;
     } else {
-        switch (status) {
+        auto normalized = status;
+        if ((normalized & 0xF0000000u) == 0xD0000000u)
+            normalized &= ~0x30000000u;
+        switch (normalized) {
         case 0xC0000008u: error = 6u; break;   // ERROR_INVALID_HANDLE
         case 0xC000000Du: error = 87u; break;  // ERROR_INVALID_PARAMETER
         case 0xC0000017u: error = 8u; break;   // ERROR_NOT_ENOUGH_MEMORY

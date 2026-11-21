@@ -3,10 +3,13 @@
 #include "ppc/boot_hle.hpp"
 #include <ppc_config.h>
 
+#include <atomic>
 #include <cassert>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -148,6 +151,10 @@ int main() {
     boot_context.r3.u32 = 0xC000000Du;
     call_test_import(0x82001148u, boot_context);
     assert(boot_context.r3.u32 == 87u);
+    boot_context = {};
+    boot_context.r3.u32 = 0xD0000008u; // Customer/driver status is normalized before lookup.
+    call_test_import(0x82001148u, boot_context);
+    assert(boot_context.r3.u32 == 6u);
     constexpr std::uint32_t unicode_source = 0x82014000u;
     constexpr std::uint32_t unicode_descriptor = 0x82014020u;
     memory.base()[unicode_source] = 0;
@@ -235,6 +242,25 @@ int main() {
     boot_context.r6.u32 = timeout_in;
     call_test_import(0x82001140u, boot_context); // Auto-reset consumes signal.
     assert(boot_context.r3.u32 == 0x102u);
+
+    // A blocked host waiter is released by NtSetEvent and consumes an auto-reset signal.
+    set_guest_u64(timeout_in, static_cast<std::uint64_t>(-10000000ll)); // 1 second, relative.
+    std::atomic<std::uint32_t> asynchronous_wait_status{0xFFFFFFFFu};
+    std::thread waiter([&] {
+        PPCContext wait_context{};
+        wait_context.r3.u32 = auto_event;
+        wait_context.r6.u32 = timeout_in;
+        call_test_import(0x82001140u, wait_context);
+        asynchronous_wait_status.store(wait_context.r3.u32, std::memory_order_release);
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    boot_context = {};
+    boot_context.r3.u32 = auto_event;
+    call_test_import(0x82001138u, boot_context);
+    waiter.join();
+    assert(asynchronous_wait_status.load(std::memory_order_acquire) == 0u);
+    set_guest_u64(timeout_in, 0);
+
     boot_context = {};
     boot_context.r3.u32 = auto_event;
     call_test_import(0x82001144u, boot_context);
