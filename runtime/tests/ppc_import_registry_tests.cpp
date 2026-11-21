@@ -889,7 +889,7 @@ int main() {
     // Concurrently allocate, query and release independent regions. Each host
     // worker owns its in/out buffers; only the import registry and guest heaps
     // are shared. This exercises the region metadata lock and heap ownership
-    // across overlapping NtAllocate/NtQuery/NtFree calls.
+    // across overlapping NtAllocate/NtProtect/NtQuery/NtFree calls.
     constexpr std::uint32_t kConcurrentVmWorkers = 8;
     constexpr std::uint32_t kConcurrentVmIterations = 64;
     const auto concurrent_scratch = variable_registry.stack_heap()->allocate(
@@ -927,12 +927,43 @@ int main() {
                     return;
                 }
 
+                // Change this allocation to read-only, query the resulting
+                // region metadata, then restore write access before releasing it.
+                write_be(io + 8, address);
+                write_be(io + 12, vm_page_size);
+                write_be(io + 16, 0);
+                PPCContext protect_context{};
+                protect_context.r3.u32 = io + 8;
+                protect_context.r4.u32 = io + 12;
+                protect_context.r5.u32 = 0x02u;
+                protect_context.r6.u32 = io + 16;
+                call_import(thunk_base + 36, protect_context);
+                if (protect_context.r3.u32 != 0 ||
+                    read_guest_be(io + 16) != 0x04u) {
+                    concurrent_vm_failed.store(true, std::memory_order_relaxed);
+                    return;
+                }
+
                 PPCContext query_context{};
                 query_context.r3.u32 = address + 0x20u;
-                query_context.r4.u32 = io + 8;
+                query_context.r4.u32 = io + 20;
                 call_import(thunk_base + 32, query_context);
                 if (query_context.r3.u32 != 0 ||
-                    read_guest_be(io + 28) != 0x04u) {
+                    read_guest_be(io + 40) != 0x02u) {
+                    concurrent_vm_failed.store(true, std::memory_order_relaxed);
+                    return;
+                }
+
+                write_be(io + 8, address);
+                write_be(io + 12, vm_page_size);
+                PPCContext restore_context{};
+                restore_context.r3.u32 = io + 8;
+                restore_context.r4.u32 = io + 12;
+                restore_context.r5.u32 = 0x04u;
+                restore_context.r6.u32 = io + 16;
+                call_import(thunk_base + 36, restore_context);
+                if (restore_context.r3.u32 != 0 ||
+                    read_guest_be(io + 16) != 0x02u) {
                     concurrent_vm_failed.store(true, std::memory_order_relaxed);
                     return;
                 }
