@@ -98,6 +98,13 @@ struct GuestThreadManager::Record final : GuestKernelObject {
         });
     }
 
+    [[nodiscard]] bool can_reap() const {
+        std::lock_guard lock(mutex);
+        return state == GuestThreadLifecycleState::Completed &&
+               handle_closed && active_waiters == 0 &&
+               !cleanup_in_progress && !cleanup;
+    }
+
 private:
     [[nodiscard]] Cleanup take_cleanup_locked() noexcept {
         if (!handle_closed || active_waiters != 0 ||
@@ -182,10 +189,7 @@ void GuestThreadManager::reap_completed_workers() {
         auto it = workers_.begin();
         while (it != workers_.end()) {
             bool done = false;
-            {
-                std::lock_guard record_lock((*it)->mutex);
-                done = (*it)->state == GuestThreadLifecycleState::Completed;
-            }
+            done = (*it)->can_reap();
             if (done) {
                 completed.push_back(*it);
                 it = workers_.erase(it);
@@ -313,7 +317,9 @@ bool GuestThreadManager::get_exit_code(GuestThreadHandle handle,
 
 bool GuestThreadManager::close_handle(GuestThreadHandle handle) {
     if (!find_thread(handle)) return false;
-    return object_table_->close(handle);
+    const bool closed = object_table_->close(handle);
+    if (closed) reap_completed_workers();
+    return closed;
 }
 
 } // namespace toohuman::runtime
