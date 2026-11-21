@@ -13,7 +13,10 @@
 
 using toohuman::runtime::load_xbox360_pe;
 
-namespace { void test_guest_function() {} }
+namespace {
+void test_guest_function() {}
+void test_default_guest_function() {}
+}
 using TestGuestFunction = void (*)();
 
 namespace {
@@ -215,11 +218,11 @@ int main() {
     toohuman::runtime::GuestHeap overlapping_heap(
         address_space, image.image_base + image.image_size, 0x1000);
     assert(!overlapping_heap.initialize(&address_space_error));
-    assert(address_space.fill_function_table(&test_guest_function));
-    assert(address_space.get_function<TestGuestFunction>(0x82001004) == &test_guest_function);
+    assert(address_space.fill_function_table(&test_default_guest_function));
+    assert(address_space.get_function<TestGuestFunction>(0x82001004) == &test_default_guest_function);
     assert(address_space.set_function(0x82001100, &test_guest_function));
     assert(address_space.get_function<TestGuestFunction>(0x82001100) == &test_guest_function);
-    assert(address_space.get_function<TestGuestFunction>(0x82001104) == nullptr);
+    assert(address_space.get_function<TestGuestFunction>(0x82001104) == &test_default_guest_function);
     assert(!address_space.set_function(0x82002000, &test_guest_function));
     const auto guest_entry = reinterpret_cast<const std::uint8_t*>(
         reinterpret_cast<std::uintptr_t>(address_space.base()) + image.entry_point);
