@@ -63,12 +63,9 @@ struct GuestThreadManager::Record final : GuestKernelObject {
             }
 
             --active_waiters;
-            if (handle_closed && active_waiters == 0 &&
-                state == GuestThreadLifecycleState::Completed) {
-                deferred_cleanup = std::move(cleanup);
-            }
+            deferred_cleanup = take_cleanup_locked();
         }
-        run_cleanup(std::move(deferred_cleanup), startup);
+        perform_cleanup(std::move(deferred_cleanup));
         return result;
     }
 
@@ -77,12 +74,9 @@ struct GuestThreadManager::Record final : GuestKernelObject {
         {
             std::lock_guard lock(mutex);
             handle_closed = true;
-            if (active_waiters == 0 &&
-                state == GuestThreadLifecycleState::Completed) {
-                deferred_cleanup = std::move(cleanup);
-            }
+            deferred_cleanup = take_cleanup_locked();
         }
-        run_cleanup(std::move(deferred_cleanup), startup);
+        perform_cleanup(std::move(deferred_cleanup));
     }
 
     void complete(std::uint32_t code) noexcept {
@@ -92,12 +86,40 @@ struct GuestThreadManager::Record final : GuestKernelObject {
             if (state == GuestThreadLifecycleState::Completed) return;
             exit_code = code;
             state = GuestThreadLifecycleState::Completed;
-            if (handle_closed && active_waiters == 0)
-                deferred_cleanup = std::move(cleanup);
+            deferred_cleanup = take_cleanup_locked();
         }
-        run_cleanup(std::move(deferred_cleanup), startup);
+        perform_cleanup(std::move(deferred_cleanup));
+    }
+
+    void wait_for_cleanup_idle() {
+        std::unique_lock lock(mutex);
+        condition.wait(lock, [&] {
+            return active_waiters == 0 && !cleanup_in_progress;
+        });
+    }
+
+private:
+    [[nodiscard]] Cleanup take_cleanup_locked() noexcept {
+        if (!handle_closed || active_waiters != 0 ||
+            state != GuestThreadLifecycleState::Completed || !cleanup) {
+            return {};
+        }
+        cleanup_in_progress = true;
+        return std::move(cleanup);
+    }
+
+    void perform_cleanup(Cleanup callback) noexcept {
+        if (callback) {
+            run_cleanup(std::move(callback), startup);
+            {
+                std::lock_guard lock(mutex);
+                cleanup_in_progress = false;
+            }
+        }
         condition.notify_all();
     }
+
+public:
 
     GuestThreadStartup startup;
     Entry entry;
@@ -110,6 +132,7 @@ struct GuestThreadManager::Record final : GuestKernelObject {
     std::uint32_t exit_code{GuestThreadManager::kStillActive};
     std::uint32_t active_waiters{};
     bool handle_closed{};
+    bool cleanup_in_progress{};
 };
 
 GuestThreadManager::GuestThreadManager() noexcept
@@ -139,6 +162,10 @@ GuestThreadManager::~GuestThreadManager() {
     for (const auto& record : workers) {
         if (record->worker.joinable()) record->worker.join();
     }
+    // A wait that raced handle closure may own the final cleanup callback.
+    // Do not let the manager's caller destroy guest heaps until that callback
+    // has finished using them.
+    for (const auto& record : workers) record->wait_for_cleanup_idle();
 }
 
 std::shared_ptr<GuestThreadManager::Record> GuestThreadManager::find_thread(

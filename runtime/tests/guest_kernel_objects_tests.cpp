@@ -7,6 +7,29 @@
 #include <unordered_set>
 #include <vector>
 using namespace std::chrono_literals;
+namespace {
+class ReentrantCloseObject final : public toohuman::runtime::GuestKernelObject {
+public:
+    explicit ReentrantCloseObject(toohuman::runtime::GuestKernelObjectTable& table)
+        : table_(table) {}
+    [[nodiscard]] toohuman::runtime::GuestKernelObjectType type() const noexcept override {
+        return toohuman::runtime::GuestKernelObjectType::Event;
+    }
+    [[nodiscard]] toohuman::runtime::GuestKernelObjectWaitResult wait(
+        std::optional<std::chrono::milliseconds>) override {
+        return toohuman::runtime::GuestKernelObjectWaitResult::Signaled;
+    }
+    void on_handle_closed() noexcept override {
+        callback_called = true;
+        remaining_handles = table_.size();
+    }
+    bool callback_called{};
+    std::size_t remaining_handles{};
+private:
+    toohuman::runtime::GuestKernelObjectTable& table_;
+};
+} // namespace
+
 int main() {
     using namespace toohuman::runtime;
     GuestKernelObjectTable objects;
@@ -57,6 +80,13 @@ int main() {
     }
     for (auto& worker : workers) worker.join();
     assert(objects.size() == 0);
+
+    auto reentrant = std::make_shared<ReentrantCloseObject>(objects);
+    const auto reentrant_handle = objects.insert(reentrant);
+    assert(reentrant_handle);
+    assert(objects.close(*reentrant_handle));
+    assert(reentrant->callback_called);
+    assert(reentrant->remaining_handles == 0u);
 
     assert(!objects.insert(nullptr));
     return 0;
