@@ -39,6 +39,10 @@ int main() {
     assert(memory.initialize_function_table(0x82001000u, 0x1000u, &error));
     assert(memory.fill_function_table(&test_default_handler));
 
+    // Reserve writable guest scratch pages after the synthetic function table.
+    // The 4 GiB reservation is PROT_NONE until an explicit commit.
+    assert(memory.commit_region(0x82012000u, 0x6000u, &error));
+
     toohuman::runtime::PpcImportRegistry imports;
     assert(imports.register_handler("xboxkrnl.exe", 0x74u,
                                     &test_import_handler, &error));
@@ -217,6 +221,12 @@ int main() {
         for (std::uint32_t i = 0; i < 8; ++i)
             memory.base()[address + i] = static_cast<std::uint8_t>(value >> (56 - i * 8));
     };
+    const auto set_guest_be32 = [&](std::uint32_t address, std::uint32_t value) {
+        memory.base()[address] = static_cast<std::uint8_t>(value >> 24);
+        memory.base()[address + 1] = static_cast<std::uint8_t>(value >> 16);
+        memory.base()[address + 2] = static_cast<std::uint8_t>(value >> 8);
+        memory.base()[address + 3] = static_cast<std::uint8_t>(value);
+    };
     set_guest_u64(timeout_in, 0);
     boot_context = {};
     boot_context.r3.u32 = handle_out;
@@ -319,9 +329,9 @@ int main() {
     call_test_import(0x82001134u, boot_context);
     const auto message_event = guest_be32(message_event_out);
     assert(message_event != 0);
-    write_be(message_overlapped + 0x0C, message_event);
-    write_be(message_stack + 0x54, message_result);
-    write_be(message_stack + 0x5C, message_overlapped);
+    set_guest_be32(message_overlapped + 0x0C, message_event);
+    set_guest_be32(message_stack + 0x54, message_result);
+    set_guest_be32(message_stack + 0x5C, message_overlapped);
     boot_context = {};
     boot_context.r1.u32 = message_stack;
     boot_context.r3.u32 = 0xFF;
@@ -348,7 +358,7 @@ int main() {
     assert(boot_context.r3.u32 == 0);
 
     // RtlFillMemoryUlong writes big-endian ULONGs and ignores a partial tail.
-    constexpr std::uint32_t test_buffer = 0x82011000u;
+    constexpr std::uint32_t test_buffer = 0x82016000u;
     context = {};
     context.ctr.u32 = 0x82001108u;
     context.r3.u32 = test_buffer;

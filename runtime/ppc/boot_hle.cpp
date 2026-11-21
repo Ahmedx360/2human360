@@ -310,8 +310,8 @@ PPC_FUNC(XamGetSystemVersion) {
 }
 
 // xam.xex #0x2DC. The caller passes ten arguments: args 9 and 10 are spilled
-// at caller SP+0x54 and SP+0x5C. Those exact stores are present at 0x82A46860
-// in the generated title code. Complete the overlapped result immediately,
+// at caller SP+0x54 and SP+0x5C. Those exact stack slots are populated by the
+// generated caller (sub_82A467F0) immediately before its XAM import call. Complete the overlapped result immediately,
 // auto-selecting the focused button in this headless runtime.
 PPC_FUNC(XamShowMessageBoxUIEx) {
     constexpr std::uint32_t kErrorIoPending = 997u;
