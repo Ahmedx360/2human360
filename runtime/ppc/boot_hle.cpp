@@ -1,4 +1,5 @@
 #include "ppc/boot_hle.hpp"
+#include "kernel/guest_kernel_objects.hpp"
 
 #include <algorithm>
 #include <array>
@@ -88,48 +89,6 @@ constexpr std::uint32_t kStatusInvalidHandle = 0xC0000008u;
 constexpr std::uint32_t kStatusInvalidParameter = 0xC000000Du;
 constexpr std::uint32_t kStatusTimeout = 0x00000102u;
 
-struct GuestEvent {
-    bool manual_reset{};
-    bool signaled{};
-    std::mutex mutex;
-    std::condition_variable condition;
-};
-std::mutex g_events_mutex;
-std::unordered_map<std::uint32_t, std::shared_ptr<GuestEvent>> g_events;
-std::uint32_t g_next_event_handle = 0x1000u;
-
-std::uint32_t create_event_handle(const std::shared_ptr<GuestEvent>& event) {
-    std::lock_guard lock(g_events_mutex);
-    for (std::uint64_t attempts = 0; attempts < 0x3FFFF000ull; ++attempts) {
-        const auto handle = g_next_event_handle;
-        g_next_event_handle += 4;
-        if (g_next_event_handle < 0x1000u) g_next_event_handle = 0x1000u;
-        if (handle != 0 && g_events.emplace(handle, event).second) return handle;
-    }
-    return 0;
-}
-std::shared_ptr<GuestEvent> lookup_event(std::uint32_t handle) {
-    std::lock_guard lock(g_events_mutex);
-    const auto it = g_events.find(handle);
-    return it == g_events.end() ? nullptr : it->second;
-}
-bool close_event(std::uint32_t handle) {
-    std::lock_guard lock(g_events_mutex);
-    return g_events.erase(handle) != 0;
-}
-
-bool signal_event(const std::shared_ptr<GuestEvent>& event) {
-    bool was_signaled = false;
-    {
-        std::lock_guard lock(event->mutex);
-        was_signaled = event->signaled;
-        event->signaled = true;
-    }
-    if (event->manual_reset) event->condition.notify_all();
-    else event->condition.notify_one();
-    return was_signaled;
-}
-
 std::optional<std::chrono::milliseconds> decode_guest_timeout(
     std::uint8_t* base, std::uint32_t timeout_address) {
     if (timeout_address == 0) return std::nullopt; // Infinite wait.
@@ -154,21 +113,6 @@ std::optional<std::chrono::milliseconds> decode_guest_timeout(
         std::numeric_limits<std::chrono::milliseconds::rep>::max());
     return std::chrono::milliseconds(static_cast<std::chrono::milliseconds::rep>(
         std::min(milliseconds, max_ms)));
-}
-
-bool wait_for_event(const std::shared_ptr<GuestEvent>& event,
-                    const std::optional<std::chrono::milliseconds>& timeout) {
-    std::unique_lock lock(event->mutex);
-    if (!event->signaled) {
-        const auto ready = [&] { return event->signaled; };
-        if (timeout) {
-            if (!event->condition.wait_for(lock, *timeout, ready)) return false;
-        } else {
-            event->condition.wait(lock, ready);
-        }
-    }
-    if (!event->manual_reset) event->signaled = false;
-    return true;
 }
 
 constexpr std::uint32_t kTlsSlotCount = 256;
@@ -512,15 +456,14 @@ PPC_FUNC(XamShowMessageBoxUIEx) {
         return;
     }
 
-    const auto event = lookup_event(event_handle);
-    if (!event) {
+    auto object = process_kernel_objects().lookup(event_handle);
+    if (!object || object->type() != GuestKernelObjectType::Event) {
         put_be32(at(base, overlapped + 0x00), kStatusInvalidHandle);
         put_be32(at(base, overlapped + 0x18), kStatusInvalidHandle);
         ctx.r3.u32 = kStatusInvalidHandle;
         return;
     }
-
-    signal_event(event);
+    std::static_pointer_cast<GuestEventObject>(std::move(object))->set();
     ctx.r3.u32 = kErrorIoPending;
 }
 
@@ -857,51 +800,47 @@ PPC_FUNC(NtCreateEvent) {
         ctx.r3.u32 = kStatusInvalidParameter;
         return;
     }
-    auto event = std::make_shared<GuestEvent>();
-    event->manual_reset = ctx.r5.u32 == 0;
-    event->signaled = ctx.r6.u32 != 0;
-    const auto handle = create_event_handle(event);
-    if (handle == 0) {
+    auto event = std::make_shared<GuestEventObject>(ctx.r5.u32 == 0, ctx.r6.u32 != 0);
+    const auto handle = process_kernel_objects().insert(event);
+    if (!handle) {
         ctx.r3.u32 = 0xC0000017u; // STATUS_NO_MEMORY
         return;
     }
-    put_be32(at(base, ctx.r3.u32), handle);
+    put_be32(at(base, ctx.r3.u32), *handle);
     ctx.r3.u32 = kStatusSuccess;
 }
 PPC_FUNC(NtSetEvent) {
     const auto handle = ctx.r3.u32;
-    auto event = lookup_event(handle);
-    if (!event) {
+    auto object = process_kernel_objects().lookup(handle);
+    if (!object || object->type() != GuestKernelObjectType::Event) {
         ctx.r3.u32 = kStatusInvalidHandle;
         return;
     }
-    const auto previous = signal_event(event) ? 1u : 0u;
+    const auto previous = std::static_pointer_cast<GuestEventObject>(std::move(object))->set() ? 1u : 0u;
     if (ctx.r4.u32 != 0) put_be32(at(base, ctx.r4.u32), previous);
     ctx.r3.u32 = kStatusSuccess;
 }
 PPC_FUNC(NtClearEvent) {
-    auto event = lookup_event(ctx.r3.u32);
-    if (!event) {
+    auto object = process_kernel_objects().lookup(ctx.r3.u32);
+    if (!object || object->type() != GuestKernelObjectType::Event) {
         ctx.r3.u32 = kStatusInvalidHandle;
         return;
     }
-    {
-        std::lock_guard lock(event->mutex);
-        event->signaled = false;
-    }
+    std::static_pointer_cast<GuestEventObject>(std::move(object))->clear();
     ctx.r3.u32 = kStatusSuccess;
 }
 PPC_FUNC(NtWaitForSingleObjectEx) {
-    auto event = lookup_event(ctx.r3.u32);
-    if (!event) {
-        ctx.r3.u32 = kStatusInvalidHandle;
-        return;
-    }
     const auto timeout = decode_guest_timeout(base, ctx.r6.u32);
-    ctx.r3.u32 = wait_for_event(event, timeout) ? kStatusSuccess : kStatusTimeout;
+    const auto result = process_kernel_objects().wait(ctx.r3.u32, timeout);
+    switch (result) {
+    case GuestKernelObjectWaitResult::Signaled: ctx.r3.u32 = kStatusSuccess; break;
+    case GuestKernelObjectWaitResult::Timeout: ctx.r3.u32 = kStatusTimeout; break;
+    case GuestKernelObjectWaitResult::InvalidHandle: ctx.r3.u32 = kStatusInvalidHandle; break;
+    }
 }
 PPC_FUNC(NtClose) {
-    ctx.r3.u32 = close_event(ctx.r3.u32) ? kStatusSuccess : kStatusInvalidHandle;
+    ctx.r3.u32 = process_kernel_objects().close(ctx.r3.u32)
+        ? kStatusSuccess : kStatusInvalidHandle;
 }
 
 // A focused subset of common NTSTATUS conversions used by startup diagnostics and

@@ -78,7 +78,7 @@ import log remains the source of truth.
 `runtime/ppc/boot_hle.*` provides a host-backed compatibility subset for the imports currently reached or
 prioritized by Too Human startup. It includes process/time queries; selected XConfig values; ANSI/Unicode string
 initialization and Latin-1 conversions; FILETIME/TIME_FIELDS conversions; XEX header/module/privilege queries;
-critical sections; 256 per-process kernel TLS indices with host-thread-local values; unnamed dispatcher events; selected
+critical sections; 256 per-process kernel TLS indices with host-thread-local values; notification/synchronization events in a typed process handle table; selected
 XAM startup/message-box behavior; and diagnostic, exit, and networking-startup handlers. Register the handlers with
 `register_boot_imports(registry)` before `initialize_title_runtime`.
 
@@ -87,8 +87,8 @@ The synchronization subset is deliberately bounded. Critical sections use recurs
 synchronization/auto-reset behavior, initial state, set/clear, finite or infinite waits, and close. The Xbox ABI is
 preserved: `NtCreateEvent` receives its output handle in r3, object attributes in r4, event type in r5 and initial
 state in r6; `NtWaitForSingleObjectEx` receives handle, wait mode, alertable flag and timeout pointer in r3-r6.
-Named-object lookup, generic object-manager semantics, APC delivery/alertable completion, and non-event handle types
-are not implemented. Kernel TLS values are per host thread, matching the intended one-host-thread-per-guest-thread
+`NtWaitForSingleObjectEx` and `NtClose` use the shared object table. Event set/clear remains event-only. Named-object
+lookup, APC delivery/alertable completion, multiple-wait operations, and other dispatcher-object types are not implemented. Kernel TLS values are per host thread, matching the intended one-host-thread-per-guest-thread
 execution model.
 
 Thread stacks and both guard regions use the host's native page size, with a 16 KiB minimum guest stack. This avoids assuming every host has 4 KiB pages. Partial context-allocation failures roll back already allocated runtime blocks and the stack reservation.
