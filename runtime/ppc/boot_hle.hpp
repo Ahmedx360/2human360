@@ -6,10 +6,10 @@
 
 namespace toohuman::runtime {
 
-// Stateless startup-time HLE for Xbox 360 kernel/XAM imports reached by Too Human's CRT startup
-// (see docs/startup-imports.md). Everything here is pure: no object manager, scheduler, files or
-// device state. Imports that need a thread/object model (critical sections, events, waits, TLS) are
-// intentionally NOT included and still fail fast until that model exists.
+// Early-startup HLE for Xbox 360 kernel/XAM imports reached by Too Human's CRT startup
+// (see docs/startup-imports.md). This layer includes bounded string helpers, simple host-backed
+// recursive critical sections, and host-thread-local KeTls slots. It does not yet provide the
+// Xbox object manager, guest scheduler, events, waits, or per-guest-thread KTHREAD/PCR structures.
 //
 // Calling convention (Xbox 360 PPC ABI): arguments in r3..r10, result in r3, guest memory big-endian.
 //
@@ -24,6 +24,15 @@ PPCFunc XGetAVPack;
 PPCFunc RtlInitAnsiString;
 PPCFunc RtlMultiByteToUnicodeN;
 PPCFunc RtlUnicodeToMultiByteN;
+PPCFunc RtlInitializeCriticalSection;
+PPCFunc RtlInitializeCriticalSectionAndSpinCount;
+PPCFunc RtlEnterCriticalSection;
+PPCFunc RtlTryEnterCriticalSection;
+PPCFunc RtlLeaveCriticalSection;
+PPCFunc KeTlsAlloc;
+PPCFunc KeTlsFree;
+PPCFunc KeTlsGetValue;
+PPCFunc KeTlsSetValue;
 PPCFunc FscSetCacheElementCount;
 PPCFunc DbgPrint;
 PPCFunc KeBugCheck;

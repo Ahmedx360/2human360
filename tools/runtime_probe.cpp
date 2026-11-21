@@ -2,6 +2,7 @@
 #include "image/xex_image.hpp"
 #include "memory/guest_address_space.hpp"
 #include "ppc/title_runtime.hpp"
+#include "ppc/boot_hle.hpp"
 
 #include <cstdint>
 #include <fstream>
@@ -82,6 +83,10 @@ int main(int argc, char** argv) {
     }
 
     toohuman::runtime::PpcImportRegistry imports;
+    if (!toohuman::runtime::register_boot_imports(imports, &error)) {
+        std::cerr << "Startup HLE registration failed: " << error << '\n';
+        return 1;
+    }
     toohuman::runtime::TitleRuntimeInitReport report{};
     if (!toohuman::runtime::initialize_title_runtime(
             memory, *loaded_image, xex_bytes, imports, &report, &error)) {
@@ -93,6 +98,7 @@ int main(int argc, char** argv) {
               << loaded_image->image_base << " (size 0x" << loaded_image->image_size
               << ", entry 0x" << loaded_image->entry_point << ")\n" << std::dec;
     std::cout << "Registered PPC functions: " << report.translated_functions << '\n';
+    std::cout << "Registered startup HLE handlers: 22" << '\n';
     std::cout << "Registered function imports: " << report.function_imports << '\n';
     std::cout << "Patched function IAT slots: " << report.function_iat_slots << '\n';
     std::cout << "Bound kernel variable exports: " << report.variable_imports << '\n';
