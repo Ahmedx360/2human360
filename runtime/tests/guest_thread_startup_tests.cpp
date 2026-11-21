@@ -46,10 +46,11 @@ int main() {
     assert(state.thread_id == 1u);
     assert(state.stack_size == 0x40000u);
     assert(state.stack_allocation_base == 0x70000000u);
-    assert(state.stack_allocation_size == 0x42000u);
+    assert(state.stack_guard_size == GuestAddressSpace::page_size());
+    assert(state.stack_allocation_size == 0x40000u + 2u * state.stack_guard_size);
     assert(stack_heap.available_bytes() == 0x00100000u - state.stack_allocation_size);
     assert(state.kthread_address >= 0xA0000000u);
-    assert(state.stack_limit == state.stack_allocation_base + 0x1000u);
+    assert(state.stack_limit == state.stack_allocation_base + state.stack_guard_size);
     assert(state.stack_base == state.stack_limit + 0x40000u);
     assert(state.context.r1.u32 == state.stack_base);
     assert(state.context.r13.u32 == state.pcr_address);
@@ -57,9 +58,9 @@ int main() {
 
     const auto* bytes = memory.base();
     // The initializer has already protected both stack guard pages.
-    assert(memory.protect_region(state.stack_allocation_base, 0x1000u,
+    assert(memory.protect_region(state.stack_allocation_base, state.stack_guard_size,
                                  GuestMemoryProtection::NoAccess, &error));
-    assert(memory.protect_region(state.stack_base, 0x1000u,
+    assert(memory.protect_region(state.stack_base, state.stack_guard_size,
                                  GuestMemoryProtection::NoAccess, &error));
 
     assert(state.tls_size == 0x550u);
@@ -113,7 +114,8 @@ int main() {
     assert(worker.tls_static_address != state.tls_static_address);
     assert(worker.stack_allocation_base != state.stack_allocation_base);
     assert(worker.stack_size == 0x20000u);
-    assert(worker.stack_allocation_size == 0x22000u);
+    assert(worker.stack_guard_size == GuestAddressSpace::page_size());
+    assert(worker.stack_allocation_size == 0x20000u + 2u * worker.stack_guard_size);
     assert(worker.context.r3.u32 == 0xCAFEBABEu);
     assert(worker.context.r1.u32 == worker.stack_base);
     assert(worker.context.r13.u32 == worker.pcr_address);

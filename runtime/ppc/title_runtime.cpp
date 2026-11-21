@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstring>
 #include <limits>
+#include <vector>
 
 namespace toohuman::runtime {
 namespace {
@@ -87,13 +88,27 @@ bool initialize_guest_thread(GuestAddressSpace& memory,
     const std::uint32_t effective_stack_size =
         requested_stack_size != 0 ? requested_stack_size :
         (xex.default_stack_size != 0 ? xex.default_stack_size : 0x40000u);
-    if (effective_stack_size > std::numeric_limits<std::uint32_t>::max() - 0x2FFFu) {
+    const auto native_page_size = GuestAddressSpace::page_size();
+    if (native_page_size < 0x1000u ||
+        (native_page_size & (native_page_size - 1u)) != 0 ||
+        native_page_size > std::numeric_limits<std::uint32_t>::max()) {
+        return fail("Host page size is outside the supported guest stack range");
+    }
+    const auto guard_size = static_cast<std::uint32_t>(native_page_size);
+    const std::uint64_t page_mask = guard_size - 1u;
+    const std::uint64_t min_stack =
+        (0x4000u + page_mask) & ~page_mask;
+    if (static_cast<std::uint64_t>(effective_stack_size) >
+        std::numeric_limits<std::uint32_t>::max() - 2ull * guard_size - page_mask) {
         return fail("Guest thread stack size is outside the supported range");
     }
-    // Xenia enforces a 16 KiB minimum and rounds each stack to page size.
-    const auto rounded_stack_size = (effective_stack_size + 0xFFFu) & ~0xFFFu;
-    const std::uint32_t stack_size =
-        rounded_stack_size < 0x4000u ? 0x4000u : rounded_stack_size;
+    // Keep a 16 KiB minimum and align both guard boundaries to native host pages.
+    const auto rounded_stack_size =
+        (static_cast<std::uint64_t>(effective_stack_size) + page_mask) & ~page_mask;
+    const auto stack_size64 = std::max(rounded_stack_size, min_stack);
+    const auto stack_size = static_cast<std::uint32_t>(stack_size64);
+    const auto stack_allocation_size =
+        static_cast<std::size_t>(stack_size) + 2ull * guard_size;
 
     const std::uint32_t tls_slots =
         xex.tls_info && xex.tls_info->slot_count != 0 ? xex.tls_info->slot_count : 1024u;
@@ -121,33 +136,52 @@ bool initialize_guest_thread(GuestAddressSpace& memory,
         tls_source_offset = static_cast<std::size_t>(offset);
     }
 
+    std::vector<std::uint32_t> runtime_allocations;
+    runtime_allocations.reserve(4);
     const auto allocate = [&](std::size_t size, std::size_t alignment,
                               std::uint32_t& out) -> bool {
         const auto address = runtime_heap.allocate(size, alignment);
         if (!address || *address == 0) return false;
         out = *address;
         std::memset(memory.base() + out, 0, size);
+        runtime_allocations.push_back(out);
         return true;
     };
 
-    const auto stack_allocation_size = static_cast<std::size_t>(stack_size) + 0x2000u;
-    const auto stack_allocation = stack_heap.allocate(stack_allocation_size, 0x1000u);
+    const auto stack_allocation = stack_heap.allocate(stack_allocation_size, guard_size);
     if (!stack_allocation) return fail("Guest stack heap could not allocate the guest thread stack");
     state.stack_allocation_base = *stack_allocation;
     const bool create_process_info_block = process_info_block_address == 0;
     state.owns_process_info_block = create_process_info_block;
+    const auto rollback_allocations = [&] {
+        (void)memory.protect_region(state.stack_allocation_base,
+                                    stack_allocation_size,
+                                    GuestMemoryProtection::ReadWrite, nullptr);
+        (void)stack_heap.deallocate(state.stack_allocation_base);
+        for (auto it = runtime_allocations.rbegin();
+             it != runtime_allocations.rend(); ++it) {
+            (void)runtime_heap.deallocate(*it);
+        }
+        state = GuestThreadStartup{};
+    };
+    const auto fail_after_allocation = [&](const char* message) {
+        rollback_allocations();
+        return fail(message);
+    };
+
     if (!allocate(0xAB0, 16, state.kthread_address) ||
         !allocate(0x2D8, 16, state.pcr_address) ||
         (create_process_info_block &&
          !allocate(0x60, 16, state.process_info_block_address)) ||
         !allocate(tls_total_size, 16, state.tls_static_address)) {
-        return fail("Runtime virtual heap could not allocate guest thread state");
+        return fail_after_allocation("Runtime virtual heap could not allocate guest thread state");
     }
     if (!create_process_info_block)
         state.process_info_block_address = process_info_block_address;
 
     state.stack_allocation_size = static_cast<std::uint32_t>(stack_allocation_size);
-    state.stack_limit = state.stack_allocation_base + 0x1000u;
+    state.stack_guard_size = guard_size;
+    state.stack_limit = state.stack_allocation_base + guard_size;
     state.stack_base = state.stack_limit + stack_size;
     state.stack_size = stack_size;
     state.tls_size = tls_total_size;
@@ -159,11 +193,11 @@ bool initialize_guest_thread(GuestAddressSpace& memory,
 
     std::memset(memory.base() + state.stack_allocation_base, 0xBE,
                 state.stack_allocation_size);
-    if (!memory.protect_region(state.stack_allocation_base, 0x1000u,
+    if (!memory.protect_region(state.stack_allocation_base, guard_size,
                                GuestMemoryProtection::NoAccess, error) ||
-        !memory.protect_region(state.stack_base, 0x1000u,
+        !memory.protect_region(state.stack_base, guard_size,
                                GuestMemoryProtection::NoAccess, error)) {
-        return fail("Could not protect the guest thread stack guard pages");
+        return fail_after_allocation("Could not protect the guest thread stack guard pages");
     }
 
     // Xenia's layout places the static TLS template at tls_static_address;
@@ -254,12 +288,14 @@ bool release_guest_thread_context(GuestAddressSpace& memory,
         state.pcr_address == 0 || state.tls_static_address == 0 ||
         state.process_info_block_address == 0 || state.tls_size == 0 ||
         state.stack_allocation_base == 0 || state.stack_allocation_size == 0 ||
-        state.stack_size == 0 ||
-        state.stack_limit != state.stack_allocation_base + 0x1000u ||
+        state.stack_size == 0 || state.stack_guard_size == 0 ||
+        state.stack_limit != state.stack_allocation_base + state.stack_guard_size ||
         static_cast<std::uint64_t>(state.stack_allocation_base) +
                 state.stack_allocation_size > GuestAddressSpace::kSize ||
         static_cast<std::uint64_t>(state.stack_limit) + state.stack_size != state.stack_base ||
-        static_cast<std::uint64_t>(state.stack_base) + 0x1000u !=
+        static_cast<std::uint64_t>(state.stack_size) + 2ull * state.stack_guard_size !=
+            state.stack_allocation_size ||
+        static_cast<std::uint64_t>(state.stack_base) + state.stack_guard_size !=
                 static_cast<std::uint64_t>(state.stack_allocation_base) +
                     state.stack_allocation_size) {
         return fail("Guest thread context is incomplete or internally inconsistent");
