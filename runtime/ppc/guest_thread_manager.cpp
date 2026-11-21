@@ -59,7 +59,7 @@ std::shared_ptr<GuestThreadManager::Record> GuestThreadManager::find_thread(
     GuestThreadHandle handle) const {
     auto object = object_table_->lookup(handle);
     if (!object || object->type() != GuestKernelObjectType::Thread) return {};
-    return std::static_pointer_cast<Record>(std::move(object));
+    return std::dynamic_pointer_cast<Record>(std::move(object));
 }
 void GuestThreadManager::reap_completed_workers() {
     std::vector<std::shared_ptr<Record>> completed;

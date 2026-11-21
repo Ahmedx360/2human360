@@ -243,7 +243,7 @@ bool initialize_guest_thread(GuestAddressSpace& memory,
     store_be32(kthread + 0x048, state.kthread_address);
     store_be32(kthread + 0x04C, state.kthread_address + 0x018);
     store_be16(kthread + 0x054, 0x0102);
-    store_be16(kthread + 0x056, 1);
+    store_be16(kthread + 0x056, (creation_flags & 0x01u) != 0 ? 1u : 0u);
     store_be32(kthread + 0x05C, state.stack_base);
     store_be32(kthread + 0x060, state.stack_limit);
     store_be32(kthread + 0x068, state.tls_static_address);

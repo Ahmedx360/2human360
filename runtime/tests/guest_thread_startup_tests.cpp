@@ -81,6 +81,7 @@ int main() {
 
     const auto* kthread = bytes + state.kthread_address;
     assert(kthread[0] == 6);
+    assert(read_be16(kthread + 0x056) == 0u); // Main thread is runnable.
     assert(read_be32(kthread + 0x05C) == state.stack_base);
     assert(read_be32(kthread + 0x060) == state.stack_limit);
     assert(read_be32(kthread + 0x068) == state.tls_static_address);
@@ -133,6 +134,7 @@ int main() {
     assert(read_be32(worker_kthread + 0x068) == worker.tls_static_address);
     assert(read_be32(worker_kthread + 0x084) == state.process_info_block_address);
     assert(read_be32(worker_kthread + 0x14C) == worker.thread_id);
+    assert(read_be16(worker_kthread + 0x056) == 0u); // Flag 0x80 is not CREATE_SUSPENDED.
     assert(read_be32(worker_kthread + 0x150) == worker.start_address);
     assert(read_be32(worker_kthread + 0x16C) == worker.creation_flags);
 
@@ -172,6 +174,18 @@ int main() {
     assert(recycled_worker.stack_allocation_base == released_worker_stack);
     assert(release_guest_thread_context(memory, heap, stack_heap,
                                         recycled_worker, &error));
+
+    // Xbox X_CREATE_SUSPENDED is creation_flags bit 0. Verify the guest KTHREAD
+    // state matches that bit independently of the host worker lifecycle gate.
+    GuestThreadStartup suspended_worker{};
+    assert(initialize_guest_thread(
+        memory, image, xex, heap, stack_heap,
+        0x20000u, 4u, image.image_base + 0x1800u, 0u,
+        state.process_info_block_address, 0x01u, suspended_worker, &error));
+    const auto* suspended_kthread = bytes + suspended_worker.kthread_address;
+    assert(read_be16(suspended_kthread + 0x056) == 1u);
+    assert(release_guest_thread_context(memory, heap, stack_heap,
+                                        suspended_worker, &error));
 
     GuestThreadStartup invalid_worker{};
     assert(!initialize_guest_thread(

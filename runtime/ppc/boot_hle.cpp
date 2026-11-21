@@ -18,6 +18,7 @@
 #include <mutex>
 #include <unordered_map>
 #include <thread>
+#include <utility>
 
 namespace toohuman::runtime {
 
@@ -457,13 +458,14 @@ PPC_FUNC(XamShowMessageBoxUIEx) {
     }
 
     auto object = process_kernel_objects().lookup(event_handle);
-    if (!object || object->type() != GuestKernelObjectType::Event) {
+    auto event = std::dynamic_pointer_cast<GuestEventObject>(std::move(object));
+    if (!event) {
         put_be32(at(base, overlapped + 0x00), kStatusInvalidHandle);
         put_be32(at(base, overlapped + 0x18), kStatusInvalidHandle);
         ctx.r3.u32 = kStatusInvalidHandle;
         return;
     }
-    std::static_pointer_cast<GuestEventObject>(std::move(object))->set();
+    event->set();
     ctx.r3.u32 = kErrorIoPending;
 }
 
@@ -812,26 +814,35 @@ PPC_FUNC(NtCreateEvent) {
 PPC_FUNC(NtSetEvent) {
     const auto handle = ctx.r3.u32;
     auto object = process_kernel_objects().lookup(handle);
-    if (!object || object->type() != GuestKernelObjectType::Event) {
+    auto event = std::dynamic_pointer_cast<GuestEventObject>(std::move(object));
+    if (!event) {
         ctx.r3.u32 = kStatusInvalidHandle;
         return;
     }
-    const auto previous = std::static_pointer_cast<GuestEventObject>(std::move(object))->set() ? 1u : 0u;
+    const auto previous = event->set() ? 1u : 0u;
     if (ctx.r4.u32 != 0) put_be32(at(base, ctx.r4.u32), previous);
     ctx.r3.u32 = kStatusSuccess;
 }
 PPC_FUNC(NtClearEvent) {
     auto object = process_kernel_objects().lookup(ctx.r3.u32);
-    if (!object || object->type() != GuestKernelObjectType::Event) {
+    auto event = std::dynamic_pointer_cast<GuestEventObject>(std::move(object));
+    if (!event) {
         ctx.r3.u32 = kStatusInvalidHandle;
         return;
     }
-    std::static_pointer_cast<GuestEventObject>(std::move(object))->clear();
+    event->clear();
     ctx.r3.u32 = kStatusSuccess;
 }
 PPC_FUNC(NtWaitForSingleObjectEx) {
+    // Retain a strong reference before touching the optional guest timeout
+    // pointer. Invalid handles must not trigger a read through an invalid pointer.
+    auto object = process_kernel_objects().lookup(ctx.r3.u32);
+    if (!object) {
+        ctx.r3.u32 = kStatusInvalidHandle;
+        return;
+    }
     const auto timeout = decode_guest_timeout(base, ctx.r6.u32);
-    const auto result = process_kernel_objects().wait(ctx.r3.u32, timeout);
+    const auto result = object->wait(timeout);
     switch (result) {
     case GuestKernelObjectWaitResult::Signaled: ctx.r3.u32 = kStatusSuccess; break;
     case GuestKernelObjectWaitResult::Timeout: ctx.r3.u32 = kStatusTimeout; break;

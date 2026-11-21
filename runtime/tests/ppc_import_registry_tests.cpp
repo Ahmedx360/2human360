@@ -435,6 +435,14 @@ int main() {
     assert(boot_context.r3.u32 == 0u);
 
     set_guest_u64(timeout_in, 0);
+    assert(boot_context.r3.u32 == 0xC0000008u); // STATUS_INVALID_HANDLE.
+
+    boot_context = {};
+    boot_context.r3.u32 = 0xFFFFFFFFu;
+    boot_context.r6.u32 = 0xFFFFFFFFu;
+    call_test_import(0x82001140u, boot_context);
+    assert(boot_context.r3.u32 == 0xC0000008u);
+
     boot_context = {};
     boot_context.r3.u32 = handle_out;
     boot_context.r5.u32 = 0; // Notification event: manual reset.
@@ -530,12 +538,30 @@ int main() {
     const auto completed_thread = guest_threads.create(
         toohuman::runtime::GuestThreadStartup{},
         [](toohuman::runtime::GuestThreadStartup&, std::stop_token) { return 0x12345678u; },
-        false, &error);
+        true, &error);
     assert(completed_thread.has_value());
+
+    // A suspended thread object times out through the same NT wait entry point.
+    boot_context = {};
+    boot_context.r3.u32 = *completed_thread;
+    boot_context.r6.u32 = timeout_in; // zero interval: poll
+    call_test_import(0x82001140u, boot_context);
+    assert(boot_context.r3.u32 == 0x102u); // STATUS_TIMEOUT.
+
+    // Event-only operations reject a thread object even though both share handles.
+    boot_context = {};
+    boot_context.r3.u32 = *completed_thread;
+    call_test_import(0x82001138u, boot_context); // NtSetEvent.
+    assert(boot_context.r3.u32 == 0xC0000008u);
+
+    std::uint32_t previous_thread_suspend_count = 0;
+    assert(guest_threads.resume(*completed_thread, &previous_thread_suspend_count, &error));
+    assert(previous_thread_suspend_count == 1u);
     assert(guest_threads.wait(*completed_thread, std::chrono::seconds(2)) ==
            toohuman::runtime::GuestThreadWaitResult::Signaled);
     boot_context = {};
     boot_context.r3.u32 = *completed_thread;
+    boot_context.r6.u32 = timeout_in;
     call_test_import(0x82001140u, boot_context); // NtWaitForSingleObjectEx.
     assert(boot_context.r3.u32 == 0u);
     boot_context = {};
