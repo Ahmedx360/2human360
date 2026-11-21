@@ -695,6 +695,9 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
                 return;
             }
 
+            // Keep the heap reservation and region metadata atomic with
+            // respect to concurrent free/protect/query operations.
+            std::lock_guard region_lock(virtual_memory_regions_mutex_);
             std::optional<std::uint32_t> allocation;
             if (adjusted_base == 0) {
                 allocation = virtual_heap_->allocate(
@@ -725,19 +728,16 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
             region.page_size = page_size;
             region.allocation_protect = protection;
             region.protections.push_back({0u, region.size, protection});
-            {
-                std::lock_guard region_lock(virtual_memory_regions_mutex_);
-                const auto [it, inserted] =
-                    virtual_memory_regions_.emplace(*allocation, std::move(region));
-                (void)it;
-                if (!inserted) {
-                    (void)memory_->protect_region(
-                        *allocation, static_cast<std::size_t>(rounded_size),
-                        GuestMemoryProtection::ReadWrite, nullptr);
-                    (void)virtual_heap_->deallocate(*allocation);
-                    context.r3.u32 = kStatusUnsuccessful;
-                    return;
-                }
+            const auto [it, inserted] =
+                virtual_memory_regions_.emplace(*allocation, std::move(region));
+            (void)it;
+            if (!inserted) {
+                (void)memory_->protect_region(
+                    *allocation, static_cast<std::size_t>(rounded_size),
+                    GuestMemoryProtection::ReadWrite, nullptr);
+                (void)virtual_heap_->deallocate(*allocation);
+                context.r3.u32 = kStatusUnsuccessful;
+                return;
             }
 
             store_be32(base + base_pointer, *allocation);
@@ -821,12 +821,12 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
                 return;
             }
 
+            std::lock_guard region_lock(virtual_memory_regions_mutex_);
             const auto allocation = virtual_heap_->allocation_containing(requested_base);
             if (!allocation) {
                 context.r3.u32 = kStatusMemoryNotAllocated;
                 return;
             }
-            std::lock_guard region_lock(virtual_memory_regions_mutex_);
             const auto region_it = virtual_memory_regions_.find(allocation->first);
             if (region_it == virtual_memory_regions_.end()) {
                 context.r3.u32 = kStatusMemoryNotAllocated;
@@ -936,12 +936,12 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
                 context.r3.u32 = kStatusAccessViolation;
                 return;
             }
+            std::lock_guard region_lock(virtual_memory_regions_mutex_);
             const auto allocation = virtual_heap_->allocation_containing(guest_address);
             if (!allocation) {
                 context.r3.u32 = kStatusInvalidParameter;
                 return;
             }
-            std::lock_guard region_lock(virtual_memory_regions_mutex_);
             const auto region_it = virtual_memory_regions_.find(allocation->first);
             if (region_it == virtual_memory_regions_.end()) {
                 context.r3.u32 = kStatusInvalidParameter;
