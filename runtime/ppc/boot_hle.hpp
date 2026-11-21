@@ -28,6 +28,8 @@ PPCFunc KeGetCurrentProcessType;
 PPCFunc KeQueryPerformanceFrequency;
 PPCFunc KeQuerySystemTime;
 PPCFunc KeDelayExecutionThread;
+PPCFunc RtlTimeToTimeFields;
+PPCFunc RtlTimeFieldsToTime;
 PPCFunc XGetLanguage;
 PPCFunc XGetAVPack;
 PPCFunc ExGetXConfigSetting;

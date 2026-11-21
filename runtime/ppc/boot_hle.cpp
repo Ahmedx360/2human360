@@ -312,6 +312,92 @@ PPC_FUNC(KeDelayExecutionThread) {
     ctx.r3.u32 = kStatusSuccess;
 }
 
+// xboxkrnl #0x140. Converts FILETIME to the big-endian 16-byte TIME_FIELDS layout.
+PPC_FUNC(RtlTimeToTimeFields) {
+    const auto time_pointer = ctx.r3.u32;
+    const auto fields_pointer = ctx.r4.u32;
+    if (time_pointer == 0 || fields_pointer == 0) return;
+    constexpr std::uint64_t kWindowsEpochOffset100ns = 116444736000000000ull;
+    const auto filetime = get_be64(at(base, time_pointer));
+    std::int64_t unix_milliseconds = 0;
+    if (filetime >= kWindowsEpochOffset100ns) {
+        unix_milliseconds = static_cast<std::int64_t>(
+            (filetime - kWindowsEpochOffset100ns) / 10000u);
+    } else {
+        const auto before_epoch = kWindowsEpochOffset100ns - filetime;
+        unix_milliseconds = -static_cast<std::int64_t>((before_epoch + 9999u) / 10000u);
+    }
+    using Milliseconds = std::chrono::milliseconds;
+    const std::chrono::sys_time<Milliseconds> instant{Milliseconds(unix_milliseconds)};
+    const auto day_point = std::chrono::floor<std::chrono::days>(instant);
+    const std::chrono::year_month_day date{day_point};
+    if (!date.ok()) {
+        std::memset(at(base, fields_pointer), 0, 16);
+        return;
+    }
+    const std::chrono::hh_mm_ss time_of_day{instant - day_point};
+    auto* fields = at(base, fields_pointer);
+    put_be16(fields + 0, static_cast<std::uint16_t>(static_cast<int>(date.year())));
+    put_be16(fields + 2, static_cast<std::uint16_t>(static_cast<unsigned>(date.month())));
+    put_be16(fields + 4, static_cast<std::uint16_t>(static_cast<unsigned>(date.day())));
+    put_be16(fields + 6, static_cast<std::uint16_t>(time_of_day.hours().count()));
+    put_be16(fields + 8, static_cast<std::uint16_t>(time_of_day.minutes().count()));
+    put_be16(fields + 10, static_cast<std::uint16_t>(time_of_day.seconds().count()));
+    put_be16(fields + 12, static_cast<std::uint16_t>(time_of_day.subseconds().count()));
+    put_be16(fields + 14, static_cast<std::uint16_t>(std::chrono::weekday{day_point}.c_encoding()));
+}
+
+// xboxkrnl #0x13F. Returns BOOLEAN and preserves output on invalid fields.
+PPC_FUNC(RtlTimeFieldsToTime) {
+    const auto fields_pointer = ctx.r3.u32;
+    const auto time_pointer = ctx.r4.u32;
+    if (fields_pointer == 0 || time_pointer == 0) {
+        ctx.r3.u32 = 0;
+        return;
+    }
+    const auto* fields = at(base, fields_pointer);
+    const auto year_value = get_be16(fields + 0);
+    const auto month_value = get_be16(fields + 2);
+    const auto day_value = get_be16(fields + 4);
+    const auto hour = get_be16(fields + 6);
+    const auto minute = get_be16(fields + 8);
+    const auto second = get_be16(fields + 10);
+    const auto millisecond = get_be16(fields + 12);
+    if (year_value < 1601u || month_value < 1u || month_value > 12u ||
+        day_value < 1u || day_value > 31u || hour > 23u || minute > 59u ||
+        second > 59u || millisecond > 999u) {
+        ctx.r3.u32 = 0;
+        return;
+    }
+    const std::chrono::year_month_day date{
+        std::chrono::year{static_cast<int>(year_value)},
+        std::chrono::month{month_value}, std::chrono::day{day_value}};
+    if (!date.ok()) {
+        ctx.r3.u32 = 0;
+        return;
+    }
+    const auto days_since_unix_epoch = std::chrono::sys_days{date}.time_since_epoch().count();
+    const auto seconds_since_unix_epoch =
+        static_cast<std::int64_t>(days_since_unix_epoch) * 86400 +
+        static_cast<std::int64_t>(hour) * 3600 +
+        static_cast<std::int64_t>(minute) * 60 + second;
+    constexpr std::int64_t kWindowsEpochOffsetSeconds = 11644473600ll;
+    const auto seconds_since_windows_epoch =
+        seconds_since_unix_epoch + kWindowsEpochOffsetSeconds;
+    constexpr std::uint64_t kTicksPerSecond = 10000000ull;
+    const auto milliseconds_ticks = static_cast<std::uint64_t>(millisecond) * 10000u;
+    if (seconds_since_windows_epoch < 0 ||
+        static_cast<std::uint64_t>(seconds_since_windows_epoch) >
+            (std::numeric_limits<std::uint64_t>::max() - milliseconds_ticks) / kTicksPerSecond) {
+        ctx.r3.u32 = 0;
+        return;
+    }
+    const auto filetime = static_cast<std::uint64_t>(seconds_since_windows_epoch) *
+                          kTicksPerSecond + milliseconds_ticks;
+    put_be64(at(base, time_pointer), filetime);
+    ctx.r3.u32 = 1;
+}
+
 // xam #0x3CD. Returns the XC language id; 1 == XC_LANGUAGE_ENGLISH.
 PPC_FUNC(XGetLanguage) {
     (void)base;

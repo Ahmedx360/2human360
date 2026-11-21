@@ -48,7 +48,7 @@ int main() {
                                     &test_import_handler, &error));
     std::size_t startup_hle_count = 0;
     assert(toohuman::runtime::register_boot_imports(imports, &error, &startup_hle_count));
-    assert(startup_hle_count == 42u);
+    assert(startup_hle_count == 44u);
     const std::vector<toohuman::runtime::XexImport> metadata{
         {"xboxkrnl.exe", 0x74u, 0, 1, 0x82001100u},
         {"xboxkrnl.exe", 0x011Bu, 0, 1, 0x82001104u},
@@ -81,11 +81,13 @@ int main() {
         {"xboxkrnl.exe", 0x0136u, 0, 1, 0x82001170u},
         {"xboxkrnl.exe", 0x005Au, 0, 1, 0x82001174u},
         {"xboxkrnl.exe", 0x0083u, 0, 1, 0x82001178u},
-        {"xboxkrnl.exe", 0x0084u, 0, 1, 0x8200117Cu}
+        {"xboxkrnl.exe", 0x0084u, 0, 1, 0x8200117Cu},
+        {"xboxkrnl.exe", 0x0140u, 0, 1, 0x82001180u},
+        {"xboxkrnl.exe", 0x013Fu, 0, 1, 0x82001184u}
     };
     std::size_t registered = 0;
     assert(imports.install(memory, metadata, &registered, &error));
-    assert(registered == 32);
+    assert(registered == 34);
     assert(memory.get_function<PPCFunc*>(0x82001100u) != &test_default_handler);
 
     PPCContext context{};
@@ -402,6 +404,40 @@ int main() {
     boot_context.r5.u32 = 0; // Null interval pointer.
     call_test_import(0x82001174u, boot_context);
     assert(boot_context.r3.u32 == 0xC000000Du);
+
+    // TIME_FIELDS round-trip: leap day, milliseconds and weekday in guest BE layout.
+    constexpr std::uint32_t time_fields_in = 0x82014140u;
+    constexpr std::uint32_t time_filetime = 0x82014160u;
+    constexpr std::uint32_t time_fields_out = 0x82014170u;
+    const auto write_be16_field = [&](std::uint32_t address, std::uint16_t value) {
+        memory.base()[address] = static_cast<std::uint8_t>(value >> 8);
+        memory.base()[address + 1] = static_cast<std::uint8_t>(value);
+    };
+    const auto read_be16_field = [&](std::uint32_t address) {
+        return static_cast<std::uint16_t>(
+            (static_cast<std::uint16_t>(memory.base()[address]) << 8) |
+            memory.base()[address + 1]);
+    };
+    const std::uint16_t fields_values[]{2024, 2, 29, 12, 34, 56, 789, 4};
+    for (std::uint32_t i = 0; i < 8; ++i)
+        write_be16_field(time_fields_in + i * 2, fields_values[i]);
+    boot_context = {};
+    boot_context.r3.u32 = time_fields_in;
+    boot_context.r4.u32 = time_filetime;
+    call_test_import(0x82001180u, boot_context); // RtlTimeFieldsToTime
+    assert(boot_context.r3.u32 == 1u);
+    boot_context = {};
+    boot_context.r3.u32 = time_filetime;
+    boot_context.r4.u32 = time_fields_out;
+    call_test_import(0x82001184u, boot_context); // RtlTimeToTimeFields
+    for (std::uint32_t i = 0; i < 8; ++i)
+        assert(read_be16_field(time_fields_out + i * 2) == fields_values[i]);
+    write_be16_field(time_fields_in + 4, 30); // Invalid 2024-02-30.
+    boot_context = {};
+    boot_context.r3.u32 = time_fields_in;
+    boot_context.r4.u32 = time_filetime;
+    call_test_import(0x82001180u, boot_context);
+    assert(boot_context.r3.u32 == 0u);
 
     set_guest_u64(timeout_in, 0);
     boot_context = {};
