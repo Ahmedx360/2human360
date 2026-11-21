@@ -57,6 +57,7 @@ endif()
 if(TH_BUILD_RECOMP_LIB)
     add_library(TooHumanPpcRuntime STATIC
         ppc/function_table.cpp
+        ppc/guest_thread_manager.cpp
         ppc/import_registry.cpp
         ppc/boot_hle_register.cpp
         ppc/title_runtime.cpp
@@ -94,6 +95,18 @@ if(BUILD_TESTING AND TH_BUILD_RECOMP_LIB)
         target_compile_options(TooHumanPpcImportRegistryTests PRIVATE -UNDEBUG)
     endif()
     add_test(NAME TooHumanPpcImportRegistryTests COMMAND TooHumanPpcImportRegistryTests)
+
+    add_executable(TooHumanGuestThreadManagerTests
+        tests/guest_thread_manager_tests.cpp
+    )
+    target_link_libraries(TooHumanGuestThreadManagerTests PRIVATE TooHumanPpcRuntime)
+    target_compile_features(TooHumanGuestThreadManagerTests PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(TooHumanGuestThreadManagerTests PRIVATE /UNDEBUG)
+    else()
+        target_compile_options(TooHumanGuestThreadManagerTests PRIVATE -UNDEBUG)
+    endif()
+    add_test(NAME TooHumanGuestThreadManagerTests COMMAND TooHumanGuestThreadManagerTests)
 
     add_executable(TooHumanGuestThreadStartupTests
         tests/guest_thread_startup_tests.cpp

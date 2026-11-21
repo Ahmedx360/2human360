@@ -88,8 +88,15 @@ synchronization/auto-reset behavior, initial state, set/clear, finite or infinit
 preserved: `NtCreateEvent` receives its output handle in r3, object attributes in r4, event type in r5 and initial
 state in r6; `NtWaitForSingleObjectEx` receives handle, wait mode, alertable flag and timeout pointer in r3-r6.
 Named-object lookup, generic object-manager semantics, APC delivery/alertable completion, and non-event handle types
-are not implemented. Kernel TLS values are per host thread, matching the current single-host-thread-per-guest-thread
-assumption; guest thread creation and scheduling are not yet present.
+are not implemented. Kernel TLS values are per host thread, matching the intended one-host-thread-per-guest-thread
+execution model.
+
+GuestThreadManager is a separately testable host-side lifecycle primitive. It owns executor workers,
+models initial suspension/resume counts, provides finite/infinite completion waits and exit-code queries, and
+keeps a live worker alive after its public handle is closed. Executors receive a stop token and must cooperate
+with shutdown. The manager is deliberately not yet connected to ExCreateThread, NtResumeThread,
+NtWaitForSingleObjectEx or the generated PPC bridge; guest thread contexts can be prepared, but the game's
+real worker-thread ABI and safe concurrent import dispatch remain outstanding.
 
 `XamShowMessageBoxUIEx` auto-selects the focused choice in this headless runtime. XConfig support is limited to the
 explicit categories/settings in the handler. `DbgPrint` logs the format string without expanding guest varargs;
@@ -97,6 +104,22 @@ explicit categories/settings in the handler. `DbgPrint` logs the format string w
 unsupported even though XNet/WSA startup returns success. The handlers are tested by `TooHumanBootHleTests` without
 linking the generated game library (needs `ppc_context.h`/SIMDe; set `-DTH_SIMDE_DIR=...` if the XenonRecomp
 submodule is not checked out).
+
+## Implemented: host thread lifecycle primitive
+
+GuestThreadManager owns host workers that execute a caller-provided entry callback over an already prepared
+GuestThreadStartup record. It models suspended/running/completed state, one initial suspend count,
+resume-count reporting, completion waits (poll/finite/infinite), exit-code lookup (259 while active),
+invalid handles, and handle closure without terminating a live worker. Completed workers are joined and
+reaped on subsequent manager operations; remaining workers receive a stop request and are joined during
+manager destruction.
+
+This is intentionally a generic lifecycle layer rather than a claim of Xbox thread support. The callback must
+cooperate with its stop token. It does not initialize guest context, execute PPC by itself, update guest
+KTHREAD state on transitions, implement suspend beyond the initial gate, or register any kernel import.
+ExCreateThread, NtResumeThread, thread-object dispatch waits/close integration, APCs, termination, and
+concurrent PPC import-registry safety remain future work. TooHumanGuestThreadManagerTests exercises
+suspend/resume, timeout/completion, exit codes, invalid handles, and closing a live handle without cancelling it.
 
 ## Next implementation sequence
 

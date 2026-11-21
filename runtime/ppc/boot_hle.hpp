@@ -8,9 +8,10 @@
 namespace toohuman::runtime {
 
 // Startup HLEs for Xbox 360 kernel/XAM imports reached by Too Human. This layer includes bounded
-// RTL helpers, host-backed critical sections and events, KeTls, and a single guest main-thread
-// KTHREAD/PCR/TLS context. Full guest scheduling, APCs, object-manager semantics, timers, and
-// true multi-threaded guest execution remain incomplete.
+// RTL helpers, host-backed critical sections and events, KeTls, and main/worker guest-thread context
+// initialization. A separate host thread lifecycle primitive exists, but it is not yet wired to
+// ExCreateThread/NtResumeThread or PPC execution. APCs, object-manager semantics, timers, and full
+// guest scheduling remain incomplete.
 //
 // Calling convention (Xbox 360 PPC ABI): arguments in r3..r10, result in r3, guest memory big-endian.
 //
