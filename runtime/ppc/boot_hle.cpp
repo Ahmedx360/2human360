@@ -779,7 +779,7 @@ PPC_FUNC(RtlTryEnterCriticalSection) {
         ctx.r3.u32 = 0;
         return;
     }
-    mark_critical_section_acquired(base, address);
+    mark_critical_section_acquired(base, address, ctx);
     ctx.r3.u32 = 1;
 }
 PPC_FUNC(RtlLeaveCriticalSection) {

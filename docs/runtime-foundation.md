@@ -75,17 +75,28 @@ entry point; they form a recognisable CRT startup (virtual-memory setup, critica
 This is a static prioritisation aid: indirect calls and data-dependent branches are not followed, so the runtime's fail-fast
 import log remains the source of truth.
 
-`runtime/ppc/boot_hle.*` implements the **stateless** subset (13 imports): `KeGetCurrentProcessType`, `XGetLanguage`,
-`XGetAVPack`, `RtlInitAnsiString`, `RtlMultiByteToUnicodeN`, `RtlUnicodeToMultiByteN`, `FscSetCacheElementCount`, `DbgPrint`
-(format string logged, varargs not expanded), `KeBugCheck`/`KeBugCheckEx` (log and abort), `HalReturnToFirmware` (clean exit),
-and `NetDll_XNetStartup`/`NetDll_WSAStartup` (return success; any real socket import still fails fast). Call
-`register_boot_imports(registry)` before `initialize_title_runtime`. The handlers are tested by `TooHumanBootHleTests`
-without the generated game library (needs only `ppc_context.h` and SIMDe; set `-DTH_SIMDE_DIR=...` if the XenonRecomp
-submodule is not checked out).
+`runtime/ppc/boot_hle.*` provides a host-backed compatibility subset for the imports currently reached or
+prioritized by Too Human startup. It includes process/time queries; selected XConfig values; ANSI/Unicode string
+initialization and Latin-1 conversions; FILETIME/TIME_FIELDS conversions; XEX header/module/privilege queries;
+critical sections; process-wide kernel TLS slots with host-thread-local values; unnamed dispatcher events; selected
+XAM startup/message-box behavior; and diagnostic, exit, and networking-startup handlers. Register the handlers with
+`register_boot_imports(registry)` before `initialize_title_runtime`.
 
-Deliberately **not** implemented because they need a thread/object model: `RtlInitializeCriticalSection`/`Enter`/`Leave`,
-`NtCreateEvent`/`NtWaitForSingleObjectEx`/`NtClose`, `KeTls*`, `ExGetXConfigSetting`, `XamShowMessageBoxUIEx`,
-`XamGetSystemVersion`, `XexGetModuleHandle`/`XexGetProcedureAddress`, `RtlRaiseException`, `RtlNtStatusToDosError`.
+The synchronization subset is deliberately bounded. Critical sections use recursive host mutexes and mirror the
+28-byte guest structure's lock count, recursion count, and owner. Events support notification/manual-reset and
+synchronization/auto-reset behavior, initial state, set/clear, finite or infinite waits, and close. The Xbox ABI is
+preserved: `NtCreateEvent` receives its output handle in r3, object attributes in r4, event type in r5 and initial
+state in r6; `NtWaitForSingleObjectEx` receives handle, wait mode, alertable flag and timeout pointer in r3-r6.
+Named-object lookup, generic object-manager semantics, APC delivery/alertable completion, and non-event handle types
+are not implemented. Kernel TLS values are per host thread, matching the current single-host-thread-per-guest-thread
+assumption; guest thread creation and scheduling are not yet present.
+
+`XamShowMessageBoxUIEx` auto-selects the focused choice in this headless runtime. XConfig support is limited to the
+explicit categories/settings in the handler. `DbgPrint` logs the format string without expanding guest varargs;
+`RtlRaiseException` only recognizes the MSVC thread-name marker and otherwise fails fast; actual socket calls remain
+unsupported even though XNet/WSA startup returns success. The handlers are tested by `TooHumanBootHleTests` without
+linking the generated game library (needs `ppc_context.h`/SIMDe; set `-DTH_SIMDE_DIR=...` if the XenonRecomp
+submodule is not checked out).
 
 ## Next implementation sequence
 

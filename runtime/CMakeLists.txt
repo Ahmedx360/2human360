@@ -26,7 +26,7 @@ set_target_properties(TooHumanRuntimeCore PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
 
-# Stateless startup HLE. The handlers need only the generated ppc_context.h/ppc_config.h and SIMDe,
+# Early-startup HLE. The handlers need only the generated ppc_context.h/ppc_config.h and SIMDe,
 # not the 375-unit game library, so they build and test without it.
 if(NOT DEFINED TH_SIMDE_DIR)
     set(TH_SIMDE_DIR "${CMAKE_SOURCE_DIR}/tools/XenonRecomp/thirdparty/simde")
