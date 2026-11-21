@@ -695,9 +695,6 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
                 return;
             }
 
-            // Keep the heap reservation and region metadata atomic with
-            // respect to concurrent free/protect/query operations.
-            std::lock_guard region_lock(virtual_memory_regions_mutex_);
             std::optional<std::uint32_t> allocation;
             if (adjusted_base == 0) {
                 allocation = virtual_heap_->allocate(
@@ -773,7 +770,6 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
                 context.r3.u32 = kStatusInvalidParameter;
                 return;
             }
-            std::lock_guard region_lock(virtual_memory_regions_mutex_);
             const auto region_it = virtual_memory_regions_.find(guest_address);
             if (region_it == virtual_memory_regions_.end()) {
                 context.r3.u32 = kStatusUnsuccessful;
@@ -793,6 +789,7 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
         }
 
         if (import.ordinal == 0x00E1) { // NtProtectVirtualMemory
+            std::lock_guard region_lock(virtual_memory_regions_mutex_);
             const auto base_pointer = context.r3.u32;
             const auto size_pointer = context.r4.u32;
             const auto old_protection_pointer = context.r6.u32;
@@ -929,6 +926,7 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
         }
 
         if (import.ordinal == 0x00EE) { // NtQueryVirtualMemory
+            std::lock_guard region_lock(virtual_memory_regions_mutex_);
             const auto guest_address = context.r3.u32;
             const auto information_pointer = context.r4.u32;
             constexpr std::uint32_t kMemoryBasicInformationSize = 28;
