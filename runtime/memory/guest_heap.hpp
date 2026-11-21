@@ -7,6 +7,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace toohuman::runtime {
@@ -25,11 +26,16 @@ public:
     [[nodiscard]] bool initialize(std::string* error = nullptr);
     [[nodiscard]] std::optional<std::uint32_t> allocate(
         std::size_t bytes, std::size_t alignment = 16);
+    [[nodiscard]] std::optional<std::uint32_t> allocate_at(
+        std::uint32_t guest_address, std::size_t bytes,
+        std::size_t alignment = 0x1000);
     [[nodiscard]] bool deallocate(std::uint32_t guest_address);
 
     [[nodiscard]] std::size_t available_bytes() const;
     [[nodiscard]] std::optional<std::size_t> allocation_size(
         std::uint32_t guest_address) const;
+    [[nodiscard]] std::optional<std::pair<std::uint32_t, std::size_t>>
+        allocation_containing(std::uint32_t guest_address) const;
     [[nodiscard]] bool owns(std::uint32_t guest_address,
                             std::size_t bytes = 1) const noexcept;
 

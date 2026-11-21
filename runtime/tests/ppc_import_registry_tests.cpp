@@ -159,12 +159,15 @@ int main() {
         {"xam.xex", 0x01EAu, 0, 1, thunk_base + 8, 0},
         {"xam.xex", 0x01ECu, 0, 1, thunk_base + 12, 0},
         {"xboxkrnl.exe", 0x012Bu, 0, 1, thunk_base + 16, 0},
-        {"xboxkrnl.exe", 0x0194u, 0, 1, thunk_base + 20, 0}
+        {"xboxkrnl.exe", 0x0194u, 0, 1, thunk_base + 20, 0},
+        {"xboxkrnl.exe", 0x00CCu, 0, 1, thunk_base + 24, 0},
+        {"xboxkrnl.exe", 0x00DCu, 0, 1, thunk_base + 28, 0},
+        {"xboxkrnl.exe", 0x00EEu, 0, 1, thunk_base + 32, 0}
     };
     std::size_t registered_pool_imports = 0;
     assert(variable_registry.install(
         variable_memory, pool_imports, &registered_pool_imports, &error));
-    assert(registered_pool_imports == 6);
+    assert(registered_pool_imports == 9);
 
     PPCContext header_field_context{};
     header_field_context.ctr.u32 = thunk_base + 16;
@@ -231,5 +234,66 @@ int main() {
     pool_context.r3.u32 = xam_pointer;
     call_import(thunk_base + 12, pool_context); // XamFree
     assert(pool_context.r3.u32 == 0);
+
+    // Exercise the basic guest virtual-memory lifecycle using a pool buffer
+    // for the in/out pointer arguments and MEMORY_BASIC_INFORMATION output.
+    pool_context = {};
+    pool_context.r4.u32 = 0x100;
+    call_import(thunk_base, pool_context);
+    const auto io_buffer = pool_context.r3.u32;
+    assert(io_buffer >= 0x86000000u);
+    const auto write_be = [&](std::uint32_t address, std::uint32_t value) {
+        variable_memory.base()[address] = static_cast<std::uint8_t>(value >> 24);
+        variable_memory.base()[address + 1] = static_cast<std::uint8_t>(value >> 16);
+        variable_memory.base()[address + 2] = static_cast<std::uint8_t>(value >> 8);
+        variable_memory.base()[address + 3] = static_cast<std::uint8_t>(value);
+    };
+    const auto read_guest_be = [&](std::uint32_t address) {
+        return (static_cast<std::uint32_t>(variable_memory.base()[address]) << 24) |
+               (static_cast<std::uint32_t>(variable_memory.base()[address + 1]) << 16) |
+               (static_cast<std::uint32_t>(variable_memory.base()[address + 2]) << 8) |
+               static_cast<std::uint32_t>(variable_memory.base()[address + 3]);
+    };
+    write_be(io_buffer, 0);
+    write_be(io_buffer + 4, 0x1234);
+    PPCContext vm_context{};
+    vm_context.r3.u32 = io_buffer;
+    vm_context.r4.u32 = io_buffer + 4;
+    vm_context.r5.u32 = 0x3000; // MEM_RESERVE | MEM_COMMIT
+    vm_context.r6.u32 = 0x04;   // PAGE_READWRITE
+    vm_context.r7.u32 = 0;      // Not devkit memory.
+    call_import(thunk_base + 24, vm_context);
+    assert(vm_context.r3.u32 == 0);
+    const auto virtual_address = read_guest_be(io_buffer);
+    const auto virtual_size = read_guest_be(io_buffer + 4);
+    assert(virtual_address == 0xA0000000u);
+    assert(virtual_size == 0x2000u);
+
+    vm_context = {};
+    vm_context.r3.u32 = virtual_address + 0x100;
+    vm_context.r4.u32 = io_buffer + 8;
+    call_import(thunk_base + 32, vm_context);
+    assert(vm_context.r3.u32 == 0);
+    assert(read_guest_be(io_buffer + 8) == virtual_address);
+    assert(read_guest_be(io_buffer + 12) == virtual_address);
+    assert(read_guest_be(io_buffer + 16) == 0x04u);
+    assert(read_guest_be(io_buffer + 20) == virtual_size);
+    assert(read_guest_be(io_buffer + 24) == 0x1000u);
+    assert(read_guest_be(io_buffer + 28) == 0x04u);
+    assert(read_guest_be(io_buffer + 32) == 0x00020000u);
+
+    write_be(io_buffer + 4, 0); // MEM_RELEASE requires RegionSize == 0.
+    vm_context = {};
+    vm_context.r3.u32 = io_buffer;
+    vm_context.r4.u32 = io_buffer + 4;
+    vm_context.r5.u32 = 0x8000; // MEM_RELEASE
+    vm_context.r6.u32 = 0;
+    call_import(thunk_base + 28, vm_context);
+    assert(vm_context.r3.u32 == 0);
+    assert(read_guest_be(io_buffer + 4) == virtual_size);
+
+    pool_context = {};
+    pool_context.r3.u32 = io_buffer;
+    call_import(thunk_base + 4, pool_context);
     return 0;
 }

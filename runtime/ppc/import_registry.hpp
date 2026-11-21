@@ -58,6 +58,9 @@ private:
     std::unordered_map<std::uint32_t, ImportBinding> imports_by_thunk_;
     std::unordered_map<std::string, PPCFunc*> handlers_;
     std::unique_ptr<GuestHeap> guest_heap_;
+    std::unique_ptr<GuestHeap> virtual_heap_;
+    std::uint32_t image_base_{};
+    std::uint32_t image_size_{};
     std::jthread timestamp_thread_;
     std::uint32_t xex_header_guest_address_{};
     std::uint32_t xex_header_size_{};

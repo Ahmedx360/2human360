@@ -44,6 +44,12 @@ void store_be32(std::uint8_t* p, std::uint32_t value) {
     p[2] = static_cast<std::uint8_t>(value >> 8);
     p[3] = static_cast<std::uint8_t>(value);
 }
+std::uint32_t load_be32(const std::uint8_t* p) {
+    return (static_cast<std::uint32_t>(p[0]) << 24) |
+           (static_cast<std::uint32_t>(p[1]) << 16) |
+           (static_cast<std::uint32_t>(p[2]) << 8) |
+           static_cast<std::uint32_t>(p[3]);
+}
 void store_be16(std::uint8_t* p, std::uint16_t value) {
     p[0] = static_cast<std::uint8_t>(value >> 8);
     p[1] = static_cast<std::uint8_t>(value);
@@ -188,6 +194,15 @@ bool PpcImportRegistry::prepare_variable_imports(
     if (heap_start < function_table_end || heap_start < image_end ||
         heap_end > (std::uint64_t{1} << 32)) {
         set_error(error, "Reserved kernel variable heap overlaps the image/function table or exceeds guest VA");
+        return false;
+    }
+
+    image_base_ = image.image_base;
+    image_size_ = image.image_size;
+    virtual_heap_ = std::make_unique<GuestHeap>(
+        memory, 0xA0000000u, 0x20000000u);
+    if (!virtual_heap_->initialize(error)) {
+        virtual_heap_.reset();
         return false;
     }
 
@@ -561,6 +576,154 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) const 
         context.r3.u32 = privilege < 32u
             ? ((system_flags >> privilege) & 1u) : 0u;
         return;
+    }
+
+    if (binding.handler == nullptr && import.library == "xboxkrnl.exe") {
+        constexpr std::uint32_t kStatusSuccess = 0x00000000u;
+        constexpr std::uint32_t kStatusUnsuccessful = 0xC0000001u;
+        constexpr std::uint32_t kStatusAccessViolation = 0xC0000005u;
+        constexpr std::uint32_t kStatusInvalidParameter = 0xC000000Du;
+        constexpr std::uint32_t kStatusNoMemory = 0xC0000017u;
+        constexpr std::uint32_t kStatusMemoryNotAllocated = 0xC00000A0u;
+        constexpr std::uint32_t kStatusNotSupported = 0xC00000BBu;
+        constexpr std::uint32_t kMemCommit = 0x00001000u;
+        constexpr std::uint32_t kMemReserve = 0x00002000u;
+        constexpr std::uint32_t kMemDecommit = 0x00004000u;
+        constexpr std::uint32_t kMemRelease = 0x00008000u;
+        constexpr std::uint32_t kMemReset = 0x00080000u;
+        constexpr std::uint32_t kMemNoZero = 0x00800000u;
+        constexpr std::uint32_t kMemLargePages = 0x20000000u;
+
+        const auto valid_guest_buffer = [&](std::uint32_t address,
+                                            std::uint64_t length) {
+            if (!guest_range_valid(address, length)) return false;
+            const auto end = static_cast<std::uint64_t>(address) + length;
+            const auto image_end = static_cast<std::uint64_t>(image_base_) + image_size_;
+            if (address >= image_base_ && end <= image_end) return true;
+            if (guest_heap_ && guest_heap_->owns(address, static_cast<std::size_t>(length)))
+                return true;
+            return virtual_heap_ &&
+                   virtual_heap_->owns(address, static_cast<std::size_t>(length));
+        };
+
+        if (import.ordinal == 0x00CC) { // NtAllocateVirtualMemory
+            const auto base_pointer = context.r3.u32;
+            const auto size_pointer = context.r4.u32;
+            if (!valid_guest_buffer(base_pointer, 4) ||
+                !valid_guest_buffer(size_pointer, 4)) {
+                context.r3.u32 = kStatusAccessViolation;
+                return;
+            }
+            const auto requested_base = load_be32(base + base_pointer);
+            const auto requested_size = load_be32(base + size_pointer);
+            const auto allocation_type = context.r5.u32;
+            const auto protection = context.r6.u32;
+            const auto debug_memory = context.r7.u32;
+            if (debug_memory != 0 || requested_size == 0 ||
+                (allocation_type & kMemReset) != 0 ||
+                (allocation_type & (kMemCommit | kMemReserve)) == 0) {
+                context.r3.u32 = kStatusInvalidParameter;
+                return;
+            }
+
+            const std::uint32_t page_size =
+                (allocation_type & kMemLargePages) ? 0x10000u : 0x1000u;
+            const auto adjusted_base = requested_base == 0
+                ? 0u : requested_base & ~(page_size - 1u);
+            const auto rounded_size =
+                (static_cast<std::uint64_t>(requested_size) + page_size - 1u) &
+                ~(static_cast<std::uint64_t>(page_size) - 1u);
+            if (rounded_size == 0 || rounded_size > 0xFFFFFFFFu) {
+                context.r3.u32 = kStatusInvalidParameter;
+                return;
+            }
+
+            std::optional<std::uint32_t> allocation;
+            if (adjusted_base == 0) {
+                allocation = virtual_heap_->allocate(
+                    static_cast<std::size_t>(rounded_size), page_size);
+            } else {
+                allocation = virtual_heap_->allocate_at(
+                    adjusted_base, static_cast<std::size_t>(rounded_size), page_size);
+            }
+            if (!allocation) {
+                context.r3.u32 = kStatusNoMemory;
+                return;
+            }
+            if ((allocation_type & kMemNoZero) == 0) {
+                std::memset(base + *allocation, 0,
+                            static_cast<std::size_t>(rounded_size));
+            }
+            store_be32(base + base_pointer, *allocation);
+            store_be32(base + size_pointer, static_cast<std::uint32_t>(rounded_size));
+            (void)protection; // Guest protection is tracked by the query HLE below.
+            context.r3.u32 = kStatusSuccess;
+            return;
+        }
+
+        if (import.ordinal == 0x00DC) { // NtFreeVirtualMemory
+            const auto base_pointer = context.r3.u32;
+            const auto size_pointer = context.r4.u32;
+            if (!valid_guest_buffer(base_pointer, 4) ||
+                !valid_guest_buffer(size_pointer, 4)) {
+                context.r3.u32 = kStatusAccessViolation;
+                return;
+            }
+            const auto guest_address = load_be32(base + base_pointer);
+            const auto region_size = load_be32(base + size_pointer);
+            const auto free_type = context.r5.u32;
+            const auto debug_memory = context.r6.u32;
+            if (debug_memory != 0 || guest_address == 0) {
+                context.r3.u32 = guest_address == 0
+                    ? kStatusMemoryNotAllocated : kStatusInvalidParameter;
+                return;
+            }
+            if (free_type == kMemDecommit) {
+                // Decommit must preserve the reservation. The current heap
+                // allocator models whole reservations, so do not fake success.
+                context.r3.u32 = kStatusNotSupported;
+                return;
+            }
+            if (free_type != kMemRelease || region_size != 0) {
+                context.r3.u32 = kStatusInvalidParameter;
+                return;
+            }
+            const auto allocation = virtual_heap_->allocation_containing(guest_address);
+            if (!allocation || allocation->first != guest_address ||
+                !virtual_heap_->deallocate(guest_address)) {
+                context.r3.u32 = kStatusUnsuccessful;
+                return;
+            }
+            store_be32(base + size_pointer,
+                       static_cast<std::uint32_t>(allocation->second));
+            context.r3.u32 = kStatusSuccess;
+            return;
+        }
+
+        if (import.ordinal == 0x00EE) { // NtQueryVirtualMemory
+            const auto guest_address = context.r3.u32;
+            const auto information_pointer = context.r4.u32;
+            constexpr std::uint32_t kMemoryBasicInformationSize = 28;
+            if (!valid_guest_buffer(information_pointer, kMemoryBasicInformationSize)) {
+                context.r3.u32 = kStatusAccessViolation;
+                return;
+            }
+            const auto allocation = virtual_heap_->allocation_containing(guest_address);
+            if (!allocation) {
+                context.r3.u32 = kStatusInvalidParameter;
+                return;
+            }
+            store_be32(base + information_pointer + 0, allocation->first);
+            store_be32(base + information_pointer + 4, allocation->first);
+            store_be32(base + information_pointer + 8, 0x04u); // PAGE_READWRITE
+            store_be32(base + information_pointer + 12,
+                       static_cast<std::uint32_t>(allocation->second));
+            store_be32(base + information_pointer + 16, kMemCommit);
+            store_be32(base + information_pointer + 20, 0x04u);
+            store_be32(base + information_pointer + 24, 0x00020000u); // MEM_PRIVATE
+            context.r3.u32 = kStatusSuccess;
+            return;
+        }
     }
 
     if (binding.handler == nullptr) {
