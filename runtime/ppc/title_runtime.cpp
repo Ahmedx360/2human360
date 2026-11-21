@@ -1,6 +1,7 @@
 #include "ppc/title_runtime.hpp"
 
 #include "ppc/function_table.hpp"
+#include "ppc/boot_hle.hpp"
 
 namespace toohuman::runtime {
 
@@ -42,6 +43,7 @@ bool initialize_title_runtime(GuestAddressSpace& memory,
             &variable_import_count, error)) {
         return false;
     }
+    boot_hle::set_executable_module_handle(imports.executable_module_handle());
 
     if (!memory.map_image(mapped_image, error)) return false;
 

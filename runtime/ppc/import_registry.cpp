@@ -199,6 +199,9 @@ bool PpcImportRegistry::prepare_variable_imports(
 
     image_base_ = image.image_base;
     image_size_ = image.image_size;
+    executable_module_handle_ = 0;
+    xex_header_guest_address_ = 0;
+    xex_header_size_ = 0;
     virtual_heap_ = std::make_unique<GuestHeap>(
         memory, 0xA0000000u, 0x20000000u);
     if (!virtual_heap_->initialize(error)) {
@@ -291,6 +294,7 @@ bool PpcImportRegistry::prepare_variable_imports(
             xex_header_size_ = xex_header_size;
             store_be32(memory.base() + *module_record + 0x58, *header_copy);
             store_be32(bytes, *module_record);
+            executable_module_handle_ = *module_record;
             break;
         }
         case 0x01AE: { // ExLoadedCommandLine.

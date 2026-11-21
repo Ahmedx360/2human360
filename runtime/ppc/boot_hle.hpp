@@ -16,6 +16,9 @@ namespace toohuman::runtime {
 // Register before initialize_title_runtime(); returns false (and sets *error) on a duplicate.
 [[nodiscard]] bool register_boot_imports(PpcImportRegistry& imports, std::string* error = nullptr);
 
+// Called once variable imports have created the executable LDR record.
+void set_executable_module_handle(std::uint32_t handle) noexcept;
+
 // Exposed for unit tests (they are plain PPC-callable functions).
 namespace boot_hle {
 PPCFunc KeGetCurrentProcessType;
@@ -24,6 +27,8 @@ PPCFunc XGetAVPack;
 PPCFunc ExGetXConfigSetting;
 PPCFunc XamGetSystemVersion;
 PPCFunc XamShowMessageBoxUIEx;
+PPCFunc XexGetModuleHandle;
+PPCFunc XexGetProcedureAddress;
 PPCFunc RtlInitAnsiString;
 PPCFunc RtlInitUnicodeString;
 PPCFunc RtlMultiByteToUnicodeN;

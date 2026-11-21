@@ -46,6 +46,11 @@ public:
 
     void dispatch(PPCContext& context, std::uint8_t* base) const;
 
+    // Guest LDR_DATA_TABLE_ENTRY address backing XexExecutableModuleHandle.
+    [[nodiscard]] std::uint32_t executable_module_handle() const noexcept {
+        return executable_module_handle_;
+    }
+
 private:
     [[nodiscard]] static std::string make_key(const std::string& library,
                                               std::uint16_t ordinal);
@@ -64,6 +69,7 @@ private:
     std::jthread timestamp_thread_;
     std::uint32_t xex_header_guest_address_{};
     std::uint32_t xex_header_size_{};
+    std::uint32_t executable_module_handle_{};
     bool variables_prepared_{};
     bool installed_{};
 };

@@ -18,6 +18,11 @@
 #include <unordered_map>
 
 namespace toohuman::runtime {
+
+void set_executable_module_handle(std::uint32_t handle) noexcept {
+    g_executable_module_handle.store(handle, std::memory_order_release);
+}
+
 namespace {
 
 constexpr std::uint32_t kStatusSuccess = 0;
@@ -48,6 +53,24 @@ std::uint32_t guest_strnlen(const std::uint8_t* s, std::uint32_t limit) {
 std::uint32_t get_be32(const std::uint8_t* p) {
     return (std::uint32_t(p[0]) << 24) | (std::uint32_t(p[1]) << 16) |
            (std::uint32_t(p[2]) << 8) | std::uint32_t(p[3]);
+}
+
+std::atomic<std::uint32_t> g_executable_module_handle{0};
+
+bool guest_ascii_equals_ignore_case(const std::uint8_t* base,
+                                    std::uint32_t address,
+                                    const char* expected) {
+    std::size_t index = 0;
+    while (expected[index] != '\\0') {
+        auto value = base[address + static_cast<std::uint32_t>(index)];
+        if (value >= 'A' && value <= 'Z') value = static_cast<std::uint8_t>(value + ('a' - 'A'));
+        auto wanted = static_cast<std::uint8_t>(expected[index]);
+        if (wanted >= 'A' && wanted <= 'Z') wanted = static_cast<std::uint8_t>(wanted + ('a' - 'A'));
+        if (value != wanted) return false;
+        ++index;
+        if (index > 260) return false;
+    }
+    return base[address + static_cast<std::uint32_t>(index)] == 0;
 }
 std::uint64_t get_be64(const std::uint8_t* p) {
     return (std::uint64_t(get_be32(p)) << 32) | get_be32(p + 4);
@@ -343,6 +366,55 @@ PPC_FUNC(XamShowMessageBoxUIEx) {
 
     signal_event(event);
     ctx.r3.u32 = kErrorIoPending;
+}
+
+PPC_FUNC(XexGetModuleHandle) {
+    constexpr std::uint32_t kErrorNotFound = 0x00000490u;
+    constexpr std::uint32_t kErrorInvalidParameter = 87u;
+    const auto name_address = ctx.r3.u32;
+    const auto output_address = ctx.r4.u32;
+    if (output_address == 0) {
+        ctx.r3.u32 = kErrorInvalidParameter;
+        return;
+    }
+
+    const auto module_handle = g_executable_module_handle.load(std::memory_order_acquire);
+    const bool is_executable = name_address == 0 ||
+        guest_ascii_equals_ignore_case(base, name_address, "default.xex");
+    if (module_handle == 0 || !is_executable) {
+        put_be32(at(base, output_address), 0);
+        ctx.r3.u32 = kErrorNotFound;
+        return;
+    }
+
+    put_be32(at(base, output_address), module_handle);
+    ctx.r3.u32 = kStatusSuccess;
+}
+
+PPC_FUNC(XexGetProcedureAddress) {
+    constexpr std::uint32_t kStatusDriverEntrypointNotFound = 0xC0000263u;
+    const auto module_handle = ctx.r3.u32;
+    const auto symbol = ctx.r4.u32;
+    const auto output_address = ctx.r5.u32;
+    if (output_address == 0 || symbol == 0) {
+        ctx.r3.u32 = kStatusInvalidParameter;
+        return;
+    }
+
+    const auto executable_handle =
+        g_executable_module_handle.load(std::memory_order_acquire);
+    if (executable_handle == 0 ||
+        (module_handle != 0 && module_handle != executable_handle)) {
+        put_be32(at(base, output_address), 0);
+        ctx.r3.u32 = kStatusInvalidHandle;
+        return;
+    }
+
+    // The original Too Human XEX has a zero IMAGE_DIRECTORY_ENTRY_EXPORT
+    // (confirmed from the file's PE32 optional header), so neither ordinal
+    // nor name lookups can legitimately resolve in the executable module.
+    put_be32(at(base, output_address), 0);
+    ctx.r3.u32 = kStatusDriverEntrypointNotFound;
 }
 
 PPC_FUNC(RtlInitAnsiString) {

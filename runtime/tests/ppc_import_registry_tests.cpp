@@ -70,11 +70,13 @@ int main() {
         {"xboxkrnl.exe", 0x012Du, 0, 1, 0x8200114Cu},
         {"xboxkrnl.exe", 0x0010u, 0, 1, 0x82001150u},
         {"xam.xex", 0x0282u, 0, 1, 0x82001154u},
-        {"xam.xex", 0x02DCu, 0, 1, 0x82001158u}
+        {"xam.xex", 0x02DCu, 0, 1, 0x82001158u},
+        {"xboxkrnl.exe", 0x0195u, 0, 1, 0x8200115Cu},
+        {"xboxkrnl.exe", 0x0197u, 0, 1, 0x82001160u}
     };
     std::size_t registered = 0;
     assert(imports.install(memory, metadata, &registered, &error));
-    assert(registered == 23);
+    assert(registered == 25);
     assert(memory.get_function<PPCFunc*>(0x82001100u) != &test_default_handler);
 
     PPCContext context{};
@@ -212,6 +214,54 @@ int main() {
     boot_context = {};
     call_test_import(0x82001154u, boot_context);
     assert(boot_context.r3.u32 == 0u); // XamGetSystemVersion's startup stub.
+
+    // The XEX executable module has an LDR record; the uploaded PE has no exports.
+    constexpr std::uint32_t fake_module_handle = 0x86001000u;
+    constexpr std::uint32_t module_name = 0x82014200u;
+    constexpr std::uint32_t module_handle_out = 0x82014220u;
+    constexpr std::uint32_t procedure_out = 0x82014224u;
+    set_executable_module_handle(fake_module_handle);
+    boot_context = {};
+    boot_context.r3.u32 = 0; // Null name selects executable module.
+    boot_context.r4.u32 = module_handle_out;
+    call_test_import(0x8200115Cu, boot_context);
+    assert(boot_context.r3.u32 == 0);
+    assert(guest_be32(module_handle_out) == fake_module_handle);
+
+    const char default_name[] = "Default.xex";
+    std::memcpy(memory.base() + module_name, default_name, sizeof(default_name));
+    boot_context = {};
+    boot_context.r3.u32 = module_name;
+    boot_context.r4.u32 = module_handle_out;
+    call_test_import(0x8200115Cu, boot_context);
+    assert(boot_context.r3.u32 == 0);
+    assert(guest_be32(module_handle_out) == fake_module_handle);
+
+    const char unknown_name[] = "missing.xex";
+    std::memcpy(memory.base() + module_name, unknown_name, sizeof(unknown_name));
+    boot_context = {};
+    boot_context.r3.u32 = module_name;
+    boot_context.r4.u32 = module_handle_out;
+    call_test_import(0x8200115Cu, boot_context);
+    assert(boot_context.r3.u32 == 0x490u);
+    assert(guest_be32(module_handle_out) == 0);
+
+    boot_context = {};
+    boot_context.r3.u32 = fake_module_handle;
+    boot_context.r4.u32 = 1; // Ordinal lookup.
+    boot_context.r5.u32 = procedure_out;
+    call_test_import(0x82001160u, boot_context);
+    assert(boot_context.r3.u32 == 0xC0000263u);
+    assert(guest_be32(procedure_out) == 0);
+
+    boot_context = {};
+    boot_context.r3.u32 = 0; // Null hmodule also selects executable module.
+    boot_context.r4.u32 = module_name; // Name lookup; executable still has no exports.
+    boot_context.r5.u32 = procedure_out;
+    call_test_import(0x82001160u, boot_context);
+    assert(boot_context.r3.u32 == 0xC0000263u);
+    assert(guest_be32(procedure_out) == 0);
+    set_executable_module_handle(0);
 
     // Event create/set/clear/wait/close lifecycle, including manual vs auto reset.
     constexpr std::uint32_t handle_out = 0x82013000u;
