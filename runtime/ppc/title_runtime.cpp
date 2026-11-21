@@ -35,13 +35,19 @@ std::uint64_t guest_system_time_100ns() {
 
 } // namespace
 
-bool initialize_guest_main_thread(GuestAddressSpace& memory,
-                                  const LoadedPeImage& image,
-                                  const XexImportResult& xex,
-                                  GuestHeap& runtime_heap,
-                                  GuestHeap& stack_heap,
-                                  GuestMainThreadStartup& state,
-                                  std::string* error) {
+bool initialize_guest_thread(GuestAddressSpace& memory,
+                             const LoadedPeImage& image,
+                             const XexImportResult& xex,
+                             GuestHeap& runtime_heap,
+                             GuestHeap& stack_heap,
+                             std::uint32_t requested_stack_size,
+                             std::uint32_t thread_id,
+                             std::uint32_t start_address,
+                             std::uint32_t start_context,
+                             std::uint32_t process_info_block_address,
+                             std::uint32_t creation_flags,
+                             GuestThreadStartup& state,
+                             std::string* error) {
     if (!memory.valid()) {
         if (error) *error = "Guest address space must be reserved before thread startup";
         return false;
@@ -51,25 +57,34 @@ bool initialize_guest_main_thread(GuestAddressSpace& memory,
         return false;
     }
     const auto image_end = static_cast<std::uint64_t>(image.image_base) + image.image_size;
-    if (image_end > GuestAddressSpace::kSize ||
-        image.entry_point < image.image_base ||
-        static_cast<std::uint64_t>(image.entry_point) + 4u > image_end ||
-        (image.entry_point & 3u) != 0) {
-        if (error) *error = "Guest entry point is outside or unaligned within the loaded image";
+    if (thread_id == 0 || image_end > GuestAddressSpace::kSize ||
+        start_address < image.image_base ||
+        static_cast<std::uint64_t>(start_address) + 4u > image_end ||
+        (start_address & 3u) != 0) {
+        if (error) *error = "Guest thread ID or start address is invalid";
         return false;
     }
+    if (process_info_block_address != 0 &&
+        ((process_info_block_address & 3u) != 0 ||
+         static_cast<std::uint64_t>(process_info_block_address) + 0x60u >
+             GuestAddressSpace::kSize)) {
+        if (error) *error = "Guest ProcessInfoBlock address is invalid";
+        return false;
+    }
+    state = GuestThreadStartup{};
     const auto fail = [&](const char* message) {
         if (error) *error = message;
         return false;
     };
 
-    const std::uint32_t requested_stack_size =
-        xex.default_stack_size != 0 ? xex.default_stack_size : 0x40000u;
-    if (requested_stack_size > std::numeric_limits<std::uint32_t>::max() - 0x2FFFu) {
-        return fail("XEX default stack size is outside the supported range");
+    const std::uint32_t effective_stack_size =
+        requested_stack_size != 0 ? requested_stack_size :
+        (xex.default_stack_size != 0 ? xex.default_stack_size : 0x40000u);
+    if (effective_stack_size > std::numeric_limits<std::uint32_t>::max() - 0x2FFFu) {
+        return fail("Guest thread stack size is outside the supported range");
     }
     // Xenia enforces a 16 KiB minimum and rounds each stack to page size.
-    const auto rounded_stack_size = (requested_stack_size + 0xFFFu) & ~0xFFFu;
+    const auto rounded_stack_size = (effective_stack_size + 0xFFFu) & ~0xFFFu;
     const std::uint32_t stack_size =
         rounded_stack_size < 0x4000u ? 0x4000u : rounded_stack_size;
 
@@ -110,14 +125,18 @@ bool initialize_guest_main_thread(GuestAddressSpace& memory,
 
     const auto stack_allocation_size = static_cast<std::size_t>(stack_size) + 0x2000u;
     const auto stack_allocation = stack_heap.allocate(stack_allocation_size, 0x1000u);
-    if (!stack_allocation) return fail("Guest stack heap could not allocate the main-thread stack");
+    if (!stack_allocation) return fail("Guest stack heap could not allocate the guest thread stack");
     state.stack_allocation_base = *stack_allocation;
+    const bool create_process_info_block = process_info_block_address == 0;
     if (!allocate(0xAB0, 16, state.kthread_address) ||
         !allocate(0x2D8, 16, state.pcr_address) ||
-        !allocate(0x60, 16, state.process_info_block_address) ||
+        (create_process_info_block &&
+         !allocate(0x60, 16, state.process_info_block_address)) ||
         !allocate(tls_total_size, 16, state.tls_static_address)) {
-        return fail("Runtime virtual heap could not allocate the guest main-thread state");
+        return fail("Runtime virtual heap could not allocate guest thread state");
     }
+    if (!create_process_info_block)
+        state.process_info_block_address = process_info_block_address;
 
     state.stack_allocation_size = static_cast<std::uint32_t>(stack_allocation_size);
     state.stack_limit = state.stack_allocation_base + 0x1000u;
@@ -125,7 +144,10 @@ bool initialize_guest_main_thread(GuestAddressSpace& memory,
     state.stack_size = stack_size;
     state.tls_size = tls_total_size;
     state.tls_dynamic_address = state.tls_static_address + tls_data_size;
-    state.thread_id = 1;
+    state.thread_id = thread_id;
+    state.start_address = start_address;
+    state.start_context = start_context;
+    state.creation_flags = creation_flags;
 
     std::memset(memory.base() + state.stack_allocation_base, 0xBE,
                 state.stack_allocation_size);
@@ -133,7 +155,7 @@ bool initialize_guest_main_thread(GuestAddressSpace& memory,
                                GuestMemoryProtection::NoAccess, error) ||
         !memory.protect_region(state.stack_base, 0x1000u,
                                GuestMemoryProtection::NoAccess, error)) {
-        return fail("Could not protect the main-thread stack guard pages");
+        return fail("Could not protect the guest thread stack guard pages");
     }
 
     // Xenia's layout places the static TLS template at tls_static_address;
@@ -143,21 +165,23 @@ bool initialize_guest_main_thread(GuestAddressSpace& memory,
                     image.bytes.data() + tls_source_offset, tls_raw_size);
     }
 
-    // Match Xenia's 0x60-byte ProcessInfoBlock. Process type 1 is user/title.
-    auto* process_info = memory.base() + state.process_info_block_address;
-    store_be32(process_info + 0x04, 0);
-    store_be32(process_info + 0x08, 0);
-    store_be32(process_info + 0x0C, 0x0000007Fu);
-    store_be32(process_info + 0x10, 0x001F0000u);
-    store_be32(process_info + 0x14, 0); // Thread count is maintained by scheduler.
-    process_info[0x1B] = 0x06;
-    store_be32(process_info + 0x1C, 16u * 1024u);
-    store_be32(process_info + 0x24, tls_data_size);
-    store_be32(process_info + 0x28, tls_raw_size);
-    store_be16(process_info + 0x2C, static_cast<std::uint16_t>(tls_slots * 4u));
-    process_info[0x2F] = 1; // X_PROCTYPE_USER.
-    store_be32(process_info + 0x54, 0);
-    store_be32(process_info + 0x58, 0);
+    // The ProcessInfoBlock is process-wide. Only the first thread creates it.
+    if (create_process_info_block) {
+        auto* process_info = memory.base() + state.process_info_block_address;
+        store_be32(process_info + 0x04, 0);
+        store_be32(process_info + 0x08, 0);
+        store_be32(process_info + 0x0C, 0x0000007Fu);
+        store_be32(process_info + 0x10, 0x001F0000u);
+        store_be32(process_info + 0x14, 0); // Thread count is maintained by scheduler.
+        process_info[0x1B] = 0x06;
+        store_be32(process_info + 0x1C, 16u * 1024u);
+        store_be32(process_info + 0x24, tls_data_size);
+        store_be32(process_info + 0x28, tls_raw_size);
+        store_be16(process_info + 0x2C, static_cast<std::uint16_t>(tls_slots * 4u));
+        process_info[0x2F] = 1; // X_PROCTYPE_USER.
+        store_be32(process_info + 0x54, 0);
+        store_be32(process_info + 0x58, 0);
+    }
 
     auto* pcr = memory.base() + state.pcr_address;
     store_be32(pcr + 0x00, state.tls_static_address);
@@ -194,18 +218,32 @@ bool initialize_guest_main_thread(GuestAddressSpace& memory,
     store_be32(kthread + 0x144, state.kthread_address + 0x144);
     store_be32(kthread + 0x148, state.kthread_address + 0x144);
     store_be32(kthread + 0x14C, state.thread_id);
-    store_be32(kthread + 0x150, image.entry_point);
+    store_be32(kthread + 0x150, start_address);
     store_be32(kthread + 0x154, state.kthread_address + 0x154);
     store_be32(kthread + 0x158, state.kthread_address + 0x154);
     store_be32(kthread + 0x160, 0);
-    store_be32(kthread + 0x16C, 0);
+    store_be32(kthread + 0x16C, creation_flags);
     store_be32(kthread + 0x17C, 1);
 
     state.context = PPCContext{};
     state.context.r1.u32 = state.stack_base & ~0xFu;
+    state.context.r3.u32 = start_context;
     state.context.r13.u32 = state.pcr_address;
     state.context.lr = 0;
     return true;
+}
+
+bool initialize_guest_main_thread(GuestAddressSpace& memory,
+                                  const LoadedPeImage& image,
+                                  const XexImportResult& xex,
+                                  GuestHeap& runtime_heap,
+                                  GuestHeap& stack_heap,
+                                  GuestMainThreadStartup& state,
+                                  std::string* error) {
+    return initialize_guest_thread(
+        memory, image, xex, runtime_heap, stack_heap,
+        xex.default_stack_size, 1u, image.entry_point, 0u, 0u, 0u,
+        state, error);
 }
 
 bool initialize_title_runtime(GuestAddressSpace& memory,

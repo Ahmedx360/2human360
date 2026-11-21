@@ -96,6 +96,55 @@ int main() {
     assert(read_be16(pib + 0x2C) == 0x100u);
     assert(pib[0x2F] == 1u);
 
+    // A worker thread receives an independent KTHREAD, PCR, stack and TLS,
+    // while sharing the process-wide ProcessInfoBlock with the main thread.
+    GuestThreadStartup worker{};
+    assert(initialize_guest_thread(
+        memory, image, xex, heap, stack_heap,
+        0x20000u, 2u, image.image_base + 0x1800u, 0xCAFEBABEu,
+        state.process_info_block_address, 0x80u, worker, &error));
+    assert(worker.thread_id == 2u);
+    assert(worker.start_address == image.image_base + 0x1800u);
+    assert(worker.start_context == 0xCAFEBABEu);
+    assert(worker.creation_flags == 0x80u);
+    assert(worker.process_info_block_address == state.process_info_block_address);
+    assert(worker.kthread_address != state.kthread_address);
+    assert(worker.pcr_address != state.pcr_address);
+    assert(worker.tls_static_address != state.tls_static_address);
+    assert(worker.stack_allocation_base != state.stack_allocation_base);
+    assert(worker.stack_size == 0x20000u);
+    assert(worker.stack_allocation_size == 0x22000u);
+    assert(worker.context.r3.u32 == 0xCAFEBABEu);
+    assert(worker.context.r1.u32 == worker.stack_base);
+    assert(worker.context.r13.u32 == worker.pcr_address);
+    assert(worker.context.lr == 0);
+
+    const auto* worker_pcr = bytes + worker.pcr_address;
+    assert(read_be32(worker_pcr + 0x00) == worker.tls_static_address);
+    assert(read_be32(worker_pcr + 0x70) == worker.stack_base);
+    assert(read_be32(worker_pcr + 0x74) == worker.stack_limit);
+    assert(read_be32(worker_pcr + 0x100) == worker.kthread_address);
+
+    const auto* worker_kthread = bytes + worker.kthread_address;
+    assert(read_be32(worker_kthread + 0x05C) == worker.stack_base);
+    assert(read_be32(worker_kthread + 0x060) == worker.stack_limit);
+    assert(read_be32(worker_kthread + 0x068) == worker.tls_static_address);
+    assert(read_be32(worker_kthread + 0x084) == state.process_info_block_address);
+    assert(read_be32(worker_kthread + 0x14C) == worker.thread_id);
+    assert(read_be32(worker_kthread + 0x150) == worker.start_address);
+    assert(read_be32(worker_kthread + 0x16C) == worker.creation_flags);
+
+    assert(bytes[worker.tls_static_address] == image.bytes[0x800u]);
+    assert(bytes[worker.tls_static_address + 0x44Fu] == image.bytes[0xC4Fu]);
+    for (std::uint32_t i = 0; i < 0x100u; ++i)
+        assert(bytes[worker.tls_dynamic_address + i] == 0);
+
+    GuestThreadStartup invalid_worker{};
+    assert(!initialize_guest_thread(
+        memory, image, xex, heap, stack_heap,
+        0x20000u, 0u, image.image_base + 0x1800u, 0u,
+        state.process_info_block_address, 0u, invalid_worker, &error));
+
     auto invalid_xex = xex;
     invalid_xex.tls_info->slot_count = 0x4000u;
     GuestMainThreadStartup invalid_state{};

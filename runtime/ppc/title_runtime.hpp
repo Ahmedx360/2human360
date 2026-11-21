@@ -11,7 +11,7 @@
 
 namespace toohuman::runtime {
 
-struct GuestMainThreadStartup {
+struct GuestThreadStartup {
     std::uint32_t kthread_address{};
     std::uint32_t pcr_address{};
     std::uint32_t process_info_block_address{};
@@ -24,8 +24,13 @@ struct GuestMainThreadStartup {
     std::uint32_t stack_base{};
     std::uint32_t stack_size{};
     std::uint32_t thread_id{};
+    std::uint32_t start_address{};
+    std::uint32_t start_context{};
+    std::uint32_t creation_flags{};
     PPCContext context{};
 };
+
+using GuestMainThreadStartup = GuestThreadStartup;
 
 struct TitleRuntimeInitReport {
     std::size_t translated_functions{};
@@ -38,7 +43,27 @@ struct TitleRuntimeInitReport {
     GuestMainThreadStartup main_thread{};
 };
 
-// Initializes one guest main thread's KTHREAD/PCR/PIB/TLS/stack context.
+// Initializes a guest thread's KTHREAD/PCR/TLS/stack and PPC register context.
+// Pass process_info_block_address=0 for the process's first/main thread; the helper
+// allocates and initializes its ProcessInfoBlock. Worker threads pass the existing
+// process block so the per-process data remains shared. This prepares a context;
+// it does not schedule or execute the thread.
+[[nodiscard]] bool initialize_guest_thread(
+    GuestAddressSpace& memory,
+    const LoadedPeImage& image,
+    const XexImportResult& xex,
+    GuestHeap& runtime_heap,
+    GuestHeap& stack_heap,
+    std::uint32_t requested_stack_size,
+    std::uint32_t thread_id,
+    std::uint32_t start_address,
+    std::uint32_t start_context,
+    std::uint32_t process_info_block_address,
+    std::uint32_t creation_flags,
+    GuestThreadStartup& state,
+    std::string* error = nullptr);
+
+// Initializes the main thread and creates the process-wide ProcessInfoBlock.
 // The caller supplies separate process-state and stack heaps for independent testing.
 [[nodiscard]] bool initialize_guest_main_thread(
     GuestAddressSpace& memory,
