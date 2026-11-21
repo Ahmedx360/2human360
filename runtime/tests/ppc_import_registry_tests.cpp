@@ -246,15 +246,15 @@ int main() {
     constexpr std::uint32_t module_name = 0x82014200u;
     constexpr std::uint32_t module_handle_out = 0x82014220u;
     constexpr std::uint32_t procedure_out = 0x82014224u;
-    set_executable_module_handle(fake_module_handle);
+    toohuman::runtime::set_executable_module_handle(fake_module_handle);
     // LDR_DATA_TABLE_ENTRY +0x58 points to the copied XEX header.
-    set_guest_be32(fake_module_handle + 0x58, synthetic_xex_header);
-    set_guest_be32(synthetic_xex_header + 8, 0x40);
-    set_guest_be32(synthetic_xex_header + 0x14, 2);
-    set_guest_be32(synthetic_xex_header + 0x18, 0x00030000u);
-    set_guest_be32(synthetic_xex_header + 0x1C, 0x00000600u);
-    set_guest_be32(synthetic_xex_header + 0x20, 0x00020104u);
-    set_guest_be32(synthetic_xex_header + 0x24, 0x00000030u);
+    write_guest_be32(fake_module_handle + 0x58, synthetic_xex_header);
+    write_guest_be32(synthetic_xex_header + 8, 0x40);
+    write_guest_be32(synthetic_xex_header + 0x14, 2);
+    write_guest_be32(synthetic_xex_header + 0x18, 0x00030000u);
+    write_guest_be32(synthetic_xex_header + 0x1C, 0x00000600u);
+    write_guest_be32(synthetic_xex_header + 0x20, 0x00020104u);
+    write_guest_be32(synthetic_xex_header + 0x24, 0x00000030u);
 
     // RtlImageXexHeaderField returns inline values or pointers based on key type.
     boot_context = {};
@@ -270,23 +270,23 @@ int main() {
 
     // RtlCompareMemoryUlong returns the matching prefix length in bytes.
     constexpr std::uint32_t compare_source = 0x82014380u;
-    set_guest_be32(compare_source + 0, 0x11223344u);
-    set_guest_be32(compare_source + 4, 0xAABBCCDDu);
-    set_guest_be32(compare_source + 8, 0x11223344u);
+    write_guest_be32(compare_source + 0, 0x11223344u);
+    write_guest_be32(compare_source + 4, 0xAABBCCDDu);
+    write_guest_be32(compare_source + 8, 0x11223344u);
     boot_context = {};
     boot_context.r3.u32 = compare_source;
     boot_context.r4.u32 = 12;
     boot_context.r5.u32 = 0x11223344u;
     call_test_import(0x8200116Cu, boot_context);
     assert(boot_context.r3.u32 == 4u);
-    set_guest_be32(compare_source + 4, 0x11223344u);
+    write_guest_be32(compare_source + 4, 0x11223344u);
     boot_context = {};
     boot_context.r3.u32 = compare_source;
     boot_context.r4.u32 = 12;
     boot_context.r5.u32 = 0x11223344u;
     call_test_import(0x8200116Cu, boot_context);
     assert(boot_context.r3.u32 == 12u);
-    set_guest_be32(compare_source + 0, 0xAABBCCDDu);
+    write_guest_be32(compare_source + 0, 0xAABBCCDDu);
     boot_context = {};
     boot_context.r3.u32 = compare_source;
     boot_context.r4.u32 = 12;
@@ -302,7 +302,7 @@ int main() {
 
     // RtlRaiseException recognizes MSVC's thread-name marker without unwinding.
     constexpr std::uint32_t exception_record = 0x82014480u;
-    set_guest_be32(exception_record, 0x406D1388u);
+    write_guest_be32(exception_record, 0x406D1388u);
     boot_context = {};
     boot_context.r3.u32 = exception_record;
     call_test_import(0x82001170u, boot_context);
@@ -364,7 +364,7 @@ int main() {
     call_test_import(0x82001160u, boot_context);
     assert(boot_context.r3.u32 == 0xC0000263u);
     assert(guest_be32(procedure_out) == 0);
-    set_executable_module_handle(0);
+    toohuman::runtime::set_executable_module_handle(0);
 
     // Event create/set/clear/wait/close lifecycle, including manual vs auto reset.
     constexpr std::uint32_t handle_out = 0x82013000u;
@@ -373,12 +373,6 @@ int main() {
     const auto set_guest_u64 = [&](std::uint32_t address, std::uint64_t value) {
         for (std::uint32_t i = 0; i < 8; ++i)
             memory.base()[address + i] = static_cast<std::uint8_t>(value >> (56 - i * 8));
-    };
-    const auto set_guest_be32 = [&](std::uint32_t address, std::uint32_t value) {
-        memory.base()[address] = static_cast<std::uint8_t>(value >> 24);
-        memory.base()[address + 1] = static_cast<std::uint8_t>(value >> 16);
-        memory.base()[address + 2] = static_cast<std::uint8_t>(value >> 8);
-        memory.base()[address + 3] = static_cast<std::uint8_t>(value);
     };
 
     // KeQueryPerformanceFrequency uses the Xbox 360 50 MHz timebase.
@@ -541,9 +535,9 @@ int main() {
     call_test_import(0x82001134u, boot_context);
     const auto message_event = guest_be32(message_event_out);
     assert(message_event != 0);
-    set_guest_be32(message_overlapped + 0x0C, message_event);
-    set_guest_be32(message_stack + 0x54, message_result);
-    set_guest_be32(message_stack + 0x5C, message_overlapped);
+    write_guest_be32(message_overlapped + 0x0C, message_event);
+    write_guest_be32(message_stack + 0x54, message_result);
+    write_guest_be32(message_stack + 0x5C, message_overlapped);
     boot_context = {};
     boot_context.r1.u32 = message_stack;
     boot_context.r3.u32 = 0xFF;

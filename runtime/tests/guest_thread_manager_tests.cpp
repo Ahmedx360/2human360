@@ -6,7 +6,7 @@
 
 namespace {
 bool wait_until(const std::atomic<bool>& value) {
-    const auto deadline = std::chrono::steady_clock::now() + 2s;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
     while (!value.load(std::memory_order_acquire) &&
            std::chrono::steady_clock::now() < deadline) {
         std::this_thread::yield();
