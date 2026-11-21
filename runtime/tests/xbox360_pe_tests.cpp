@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cassert>
+#include <cstdio>
 #include <cstdint>
 #include <vector>
 #include <string>
@@ -123,7 +124,11 @@ int main() {
     import_image.bytes[0x1007] = 0x74;
     const auto xex = make_xex_imports();
     const auto imports = toohuman::runtime::parse_xex2_imports(xex, import_image);
-    assert(imports);
+    if (!imports) {
+        std::fprintf(stderr, "XEX import fixture failed to parse: %s\\n",
+                     imports.error.c_str());
+        return 1;
+    }
     assert(imports.imports.size() == 2);
     assert(imports.libraries.size() == 1);
     assert(imports.libraries[0].name == "xboxkrnl.exe");
