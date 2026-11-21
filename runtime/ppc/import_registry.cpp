@@ -612,16 +612,27 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) const 
         constexpr std::uint32_t kMemNoZero = 0x00800000u;
         constexpr std::uint32_t kMemLargePages = 0x20000000u;
 
+        const auto heap_contains_allocated_range = [&](const GuestHeap& heap,
+                                                       std::uint32_t address,
+                                                       std::uint64_t length) {
+            const auto allocation = heap.allocation_containing(address);
+            if (!allocation || address < allocation->first) return false;
+            const auto allocation_end = static_cast<std::uint64_t>(allocation->first) +
+                                        allocation->second;
+            const auto requested_end = static_cast<std::uint64_t>(address) + length;
+            return requested_end <= allocation_end;
+        };
         const auto valid_guest_buffer = [&](std::uint32_t address,
                                             std::uint64_t length) {
             if (!guest_range_valid(address, length)) return false;
             const auto end = static_cast<std::uint64_t>(address) + length;
             const auto image_end = static_cast<std::uint64_t>(image_base_) + image_size_;
             if (address >= image_base_ && end <= image_end) return true;
-            if (guest_heap_ && guest_heap_->owns(address, static_cast<std::size_t>(length)))
+            if (guest_heap_ && heap_contains_allocated_range(*guest_heap_, address, length))
                 return true;
-            return virtual_heap_ &&
-                   virtual_heap_->owns(address, static_cast<std::size_t>(length));
+            if (virtual_heap_ && heap_contains_allocated_range(*virtual_heap_, address, length))
+                return true;
+            return stack_heap_ && heap_contains_allocated_range(*stack_heap_, address, length);
         };
 
         if (import.ordinal == 0x00CC) { // NtAllocateVirtualMemory

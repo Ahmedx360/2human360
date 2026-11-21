@@ -4,6 +4,7 @@
 #include "ppc/title_runtime.hpp"
 #include "ppc/boot_hle.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <fstream>
 #include <iostream>
