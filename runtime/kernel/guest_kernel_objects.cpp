@@ -65,6 +65,19 @@ bool GuestKernelObjectTable::close(GuestKernelHandle handle) {
     object->on_handle_closed();
     return true;
 }
+
+void GuestKernelObjectTable::clear() {
+    decltype(objects_) closing;
+    {
+        std::lock_guard lock(mutex_);
+        closing.swap(objects_);
+    }
+    // As with close(), object callbacks may re-enter the table.
+    for (auto& [handle, object] : closing) {
+        (void)handle;
+        if (object) object->on_handle_closed();
+    }
+}
 GuestKernelObjectWaitResult GuestKernelObjectTable::wait(
     GuestKernelHandle handle, std::optional<std::chrono::milliseconds> timeout) const {
     auto object = lookup(handle);

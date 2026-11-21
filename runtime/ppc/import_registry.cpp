@@ -197,6 +197,9 @@ PpcImportRegistry::~PpcImportRegistry() {
         stopping_threads = std::move(thread_runtime_);
     }
     stopping_threads.reset();
+    // This is the process-scoped singleton handle table. Do not leak event
+    // handles across title/registry lifetimes.
+    process_kernel_objects().clear();
     // Join before releasing registry-owned state. The worker holds a raw
     // pointer into GuestAddressSpace, whose lifetime is managed by the caller.
     timestamp_thread_.request_stop();

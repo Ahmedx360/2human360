@@ -46,6 +46,8 @@ public:
                                  std::shared_ptr<GuestKernelObject> object);
     [[nodiscard]] std::shared_ptr<GuestKernelObject> lookup(GuestKernelHandle handle) const;
     [[nodiscard]] bool close(GuestKernelHandle handle);
+    // Close every remaining object during process teardown. Callbacks run unlocked.
+    void clear();
     [[nodiscard]] GuestKernelObjectWaitResult wait(
         GuestKernelHandle handle,
         std::optional<std::chrono::milliseconds> timeout = std::nullopt) const;

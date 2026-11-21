@@ -98,6 +98,15 @@ int main() {
     assert(!objects.insert_at(0u, notification));
     assert(objects.close(native_thread_address));
 
+    // Process teardown clears all handles atomically and invokes callbacks
+    // after releasing the table lock.
+    auto clear_callback = std::make_shared<ReentrantCloseObject>(objects);
+    assert(objects.insert(clear_callback));
+    objects.clear();
+    assert(objects.size() == 0u);
+    assert(clear_callback->callback_called);
+    assert(clear_callback->remaining_handles == 0u);
+
     assert(!objects.insert(nullptr));
     return 0;
 }
