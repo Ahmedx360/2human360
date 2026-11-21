@@ -2,7 +2,8 @@
 
 namespace toohuman::runtime {
 
-bool register_boot_imports(PpcImportRegistry& imports, std::string* error) {
+bool register_boot_imports(PpcImportRegistry& imports, std::string* error,
+                           std::size_t* registered_count) {
     struct Entry { const char* library; std::uint16_t ordinal; PPCFunc* fn; };
     const Entry entries[] = {
         {"xboxkrnl.exe", 0x0003, &boot_hle::DbgPrint},
@@ -19,6 +20,9 @@ bool register_boot_imports(PpcImportRegistry& imports, std::string* error) {
         {"xboxkrnl.exe", 0x0052, &boot_hle::KeBugCheck},
         {"xboxkrnl.exe", 0x0053, &boot_hle::KeBugCheckEx},
         {"xboxkrnl.exe", 0x0066, &boot_hle::KeGetCurrentProcessType},
+        {"xboxkrnl.exe", 0x0083, &boot_hle::KeQueryPerformanceFrequency},
+        {"xboxkrnl.exe", 0x0084, &boot_hle::KeQuerySystemTime},
+        {"xboxkrnl.exe", 0x005A, &boot_hle::KeDelayExecutionThread},
         {"xboxkrnl.exe", 0x012C, &boot_hle::RtlInitAnsiString},
         {"xboxkrnl.exe", 0x012D, &boot_hle::RtlInitUnicodeString},
         {"xboxkrnl.exe", 0x0133, &boot_hle::RtlMultiByteToUnicodeN},
@@ -45,8 +49,15 @@ bool register_boot_imports(PpcImportRegistry& imports, std::string* error) {
         {"xam.xex",      0x03CB, &boot_hle::XGetAVPack},
         {"xam.xex",      0x03CD, &boot_hle::XGetLanguage},
     };
-    for (const auto& e : entries)
-        if (!imports.register_handler(e.library, e.ordinal, e.fn, error)) return false;
+    std::size_t count = 0;
+    for (const auto& e : entries) {
+        if (!imports.register_handler(e.library, e.ordinal, e.fn, error)) {
+            if (registered_count) *registered_count = count;
+            return false;
+        }
+        ++count;
+    }
+    if (registered_count) *registered_count = count;
     return true;
 }
 

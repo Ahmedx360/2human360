@@ -89,7 +89,8 @@ int main(int argc, char** argv) {
     }
 
     toohuman::runtime::PpcImportRegistry imports;
-    if (!toohuman::runtime::register_boot_imports(imports, &error)) {
+    std::size_t startup_hle_count = 0;
+    if (!toohuman::runtime::register_boot_imports(imports, &error, &startup_hle_count)) {
         std::cerr << "Startup HLE registration failed: " << error << '\n';
         return 1;
     }
@@ -104,7 +105,7 @@ int main(int argc, char** argv) {
               << loaded_image->image_base << " (size 0x" << loaded_image->image_size
               << ", entry 0x" << loaded_image->entry_point << ")\n" << std::dec;
     std::cout << "Registered PPC functions: " << report.translated_functions << '\n';
-    std::cout << "Registered startup HLE handlers: 39" << '\n';
+    std::cout << "Registered startup HLE handlers: " << startup_hle_count << '\n';
     std::cout << "Registered function imports: " << report.function_imports << '\n';
     std::cout << "Patched function IAT slots: " << report.function_iat_slots << '\n';
     std::cout << "Bound kernel variable exports: " << report.variable_imports << '\n';

@@ -16,6 +16,7 @@
 #include <memory>
 #include <mutex>
 #include <unordered_map>
+#include <thread>
 
 namespace toohuman::runtime {
 
@@ -34,6 +35,10 @@ inline void put_be32(std::uint8_t* p, std::uint32_t v) {
     p[1] = static_cast<std::uint8_t>(v >> 16);
     p[2] = static_cast<std::uint8_t>(v >> 8);
     p[3] = static_cast<std::uint8_t>(v);
+}
+inline void put_be64(std::uint8_t* p, std::uint64_t v) {
+    put_be32(p, static_cast<std::uint32_t>(v >> 32));
+    put_be32(p + 4, static_cast<std::uint32_t>(v));
 }
 inline std::uint16_t get_be16(const std::uint8_t* p) {
     return static_cast<std::uint16_t>((p[0] << 8) | p[1]);
@@ -70,6 +75,13 @@ bool guest_ascii_equals_ignore_case(const std::uint8_t* base,
 }
 std::uint64_t get_be64(const std::uint8_t* p) {
     return (std::uint64_t(get_be32(p)) << 32) | get_be32(p + 4);
+}
+
+std::uint64_t current_guest_filetime_100ns() {
+    constexpr std::uint64_t kWindowsEpochOffset100ns = 116444736000000000ull;
+    const auto unix_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    return static_cast<std::uint64_t>(unix_ns / 100) + kWindowsEpochOffset100ns;
 }
 
 constexpr std::uint32_t kStatusInvalidHandle = 0xC0000008u;
@@ -255,6 +267,49 @@ namespace boot_hle {
 PPC_FUNC(KeGetCurrentProcessType) {
     (void)base;
     ctx.r3.u32 = 1;
+}
+
+// xboxkrnl #0x83. Xenia configures the Xenon timebase to 50 MHz.
+PPC_FUNC(KeQueryPerformanceFrequency) {
+    (void)base;
+    ctx.r3.u32 = 50000000u;
+}
+
+// xboxkrnl #0x84. Writes a guest-endian FILETIME (100 ns since 1601).
+PPC_FUNC(KeQuerySystemTime) {
+    if (ctx.r3.u32 != 0)
+        put_be64(at(base, ctx.r3.u32), current_guest_filetime_100ns());
+}
+
+// xboxkrnl #0x5A. Uses a signed LARGE_INTEGER interval in 100 ns units.
+// Negative values are relative durations; positive values are absolute FILETIME deadlines.
+// APC delivery is not emulated yet; completed waits return STATUS_SUCCESS.
+PPC_FUNC(KeDelayExecutionThread) {
+    const auto interval_address = ctx.r5.u32;
+    if (interval_address == 0) {
+        ctx.r3.u32 = kStatusInvalidParameter;
+        return;
+    }
+    const auto raw_interval = get_be64(at(base, interval_address));
+    std::uint64_t delay_ticks = 0;
+    if ((raw_interval & (std::uint64_t{1} << 63)) != 0) {
+        delay_ticks = (~raw_interval) + 1u;
+    } else if (raw_interval != 0) {
+        const auto now = current_guest_filetime_100ns();
+        delay_ticks = raw_interval > now ? raw_interval - now : 0;
+    }
+    using Nanoseconds = std::chrono::nanoseconds;
+    using Rep = Nanoseconds::rep;
+    const auto maximum_ticks = static_cast<std::uint64_t>(
+        std::numeric_limits<Rep>::max() / 100);
+    delay_ticks = std::min(delay_ticks, maximum_ticks);
+    if (delay_ticks == 0) {
+        std::this_thread::yield();
+    } else {
+        std::this_thread::sleep_for(
+            Nanoseconds(static_cast<Rep>(delay_ticks * 100u)));
+    }
+    ctx.r3.u32 = kStatusSuccess;
 }
 
 // xam #0x3CD. Returns the XC language id; 1 == XC_LANGUAGE_ENGLISH.

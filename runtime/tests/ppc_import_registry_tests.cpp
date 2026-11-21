@@ -46,7 +46,9 @@ int main() {
     toohuman::runtime::PpcImportRegistry imports;
     assert(imports.register_handler("xboxkrnl.exe", 0x74u,
                                     &test_import_handler, &error));
-    assert(toohuman::runtime::register_boot_imports(imports, &error));
+    std::size_t startup_hle_count = 0;
+    assert(toohuman::runtime::register_boot_imports(imports, &error, &startup_hle_count));
+    assert(startup_hle_count == 42u);
     const std::vector<toohuman::runtime::XexImport> metadata{
         {"xboxkrnl.exe", 0x74u, 0, 1, 0x82001100u},
         {"xboxkrnl.exe", 0x011Bu, 0, 1, 0x82001104u},
@@ -76,11 +78,14 @@ int main() {
         {"xboxkrnl.exe", 0x0194u, 0, 1, 0x82001164u},
         {"xboxkrnl.exe", 0x012Bu, 0, 1, 0x82001168u},
         {"xboxkrnl.exe", 0x011Bu, 0, 1, 0x8200116Cu},
-        {"xboxkrnl.exe", 0x0136u, 0, 1, 0x82001170u}
+        {"xboxkrnl.exe", 0x0136u, 0, 1, 0x82001170u},
+        {"xboxkrnl.exe", 0x005Au, 0, 1, 0x82001174u},
+        {"xboxkrnl.exe", 0x0083u, 0, 1, 0x82001178u},
+        {"xboxkrnl.exe", 0x0084u, 0, 1, 0x8200117Cu}
     };
     std::size_t registered = 0;
     assert(imports.install(memory, metadata, &registered, &error));
-    assert(registered == 29);
+    assert(registered == 32);
     assert(memory.get_function<PPCFunc*>(0x82001100u) != &test_default_handler);
 
     PPCContext context{};
@@ -373,6 +378,31 @@ int main() {
         memory.base()[address + 2] = static_cast<std::uint8_t>(value >> 8);
         memory.base()[address + 3] = static_cast<std::uint8_t>(value);
     };
+
+    // KeQueryPerformanceFrequency uses the Xbox 360 50 MHz timebase.
+    boot_context = {};
+    call_test_import(0x82001178u, boot_context);
+    assert(boot_context.r3.u32 == 50000000u);
+    constexpr std::uint32_t guest_system_time_out = 0x82014120u;
+    boot_context = {};
+    boot_context.r3.u32 = guest_system_time_out;
+    call_test_import(0x8200117Cu, boot_context);
+    assert(guest_be32(guest_system_time_out) >= 0x01D00000u);
+    assert(guest_be32(guest_system_time_out + 4) != 0u);
+
+    constexpr std::uint32_t delay_interval = 0x82014130u;
+    set_guest_u64(delay_interval, static_cast<std::uint64_t>(-10000ll)); // 1 ms.
+    boot_context = {};
+    boot_context.r3.u32 = 0; // KernelMode.
+    boot_context.r4.u32 = 0; // Not alertable.
+    boot_context.r5.u32 = delay_interval;
+    call_test_import(0x82001174u, boot_context);
+    assert(boot_context.r3.u32 == 0u);
+    boot_context = {};
+    boot_context.r5.u32 = 0; // Null interval pointer.
+    call_test_import(0x82001174u, boot_context);
+    assert(boot_context.r3.u32 == 0xC000000Du);
+
     set_guest_u64(timeout_in, 0);
     boot_context = {};
     boot_context.r3.u32 = handle_out;
