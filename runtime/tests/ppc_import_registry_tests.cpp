@@ -732,18 +732,34 @@ int main() {
                (static_cast<std::uint32_t>(variable_memory.base()[address + 2]) << 8) |
                static_cast<std::uint32_t>(variable_memory.base()[address + 3]);
     };
-    write_be(io_buffer, 0);
+
+    // Reserved-but-unallocated heap addresses are not valid syscall buffers.
+    // This must return STATUS_ACCESS_VIOLATION without touching PROT_NONE pages.
+    write_be(io_buffer + 4, 0x1000);
+    PPCContext invalid_buffer_context{};
+    invalid_buffer_context.r3.u32 = 0xA1000000u; // Inside virtual heap, but unallocated.
+    invalid_buffer_context.r4.u32 = io_buffer + 4;
+    invalid_buffer_context.r5.u32 = 0x3000;
+    invalid_buffer_context.r6.u32 = 0x04;
+    call_import(thunk_base + 24, invalid_buffer_context);
+    assert(invalid_buffer_context.r3.u32 == 0xC0000005u);
+
+    // The stack allocator's committed block is also a valid in/out buffer.
+    const auto stack_io = variable_registry.stack_heap()->allocate(0x40, 16);
+    assert(stack_io && *stack_io == 0x70000000u);
+    write_be(*stack_io, 0);
+    write_be(*stack_io + 4, 0x1000);
     write_be(io_buffer + 4, 0x1234);
     PPCContext vm_context{};
-    vm_context.r3.u32 = io_buffer;
-    vm_context.r4.u32 = io_buffer + 4;
+    vm_context.r3.u32 = *stack_io;
+    vm_context.r4.u32 = *stack_io + 4;
     vm_context.r5.u32 = 0x3000; // MEM_RESERVE | MEM_COMMIT
     vm_context.r6.u32 = 0x04;   // PAGE_READWRITE
     vm_context.r7.u32 = 0;      // Not devkit memory.
     call_import(thunk_base + 24, vm_context);
     assert(vm_context.r3.u32 == 0);
-    const auto virtual_address = read_guest_be(io_buffer);
-    const auto virtual_size = read_guest_be(io_buffer + 4);
+    const auto virtual_address = read_guest_be(*stack_io);
+    const auto virtual_size = read_guest_be(*stack_io + 4);
     assert(virtual_address == 0xA0000000u);
     assert(virtual_size == 0x2000u);
 
@@ -760,15 +776,16 @@ int main() {
     assert(read_guest_be(io_buffer + 28) == 0x04u);
     assert(read_guest_be(io_buffer + 32) == 0x00020000u);
 
-    write_be(io_buffer + 4, 0); // MEM_RELEASE requires RegionSize == 0.
+    write_be(*stack_io + 4, 0); // MEM_RELEASE requires RegionSize == 0.
     vm_context = {};
-    vm_context.r3.u32 = io_buffer;
-    vm_context.r4.u32 = io_buffer + 4;
+    vm_context.r3.u32 = *stack_io;
+    vm_context.r4.u32 = *stack_io + 4;
     vm_context.r5.u32 = 0x8000; // MEM_RELEASE
     vm_context.r6.u32 = 0;
     call_import(thunk_base + 28, vm_context);
     assert(vm_context.r3.u32 == 0);
-    assert(read_guest_be(io_buffer + 4) == virtual_size);
+    assert(read_guest_be(*stack_io + 4) == virtual_size);
+    assert(variable_registry.stack_heap()->deallocate(*stack_io));
 
     pool_context = {};
     pool_context.r3.u32 = io_buffer;
