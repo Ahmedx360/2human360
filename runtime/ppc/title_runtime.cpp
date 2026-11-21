@@ -49,6 +49,14 @@ bool initialize_guest_main_thread(GuestAddressSpace& memory,
         if (error) *error = "Guest thread startup requires a complete mapped-image description";
         return false;
     }
+    const auto image_end = static_cast<std::uint64_t>(image.image_base) + image.image_size;
+    if (image_end > GuestAddressSpace::kSize ||
+        image.entry_point < image.image_base ||
+        static_cast<std::uint64_t>(image.entry_point) + 4u > image_end ||
+        (image.entry_point & 3u) != 0) {
+        if (error) *error = "Guest entry point is outside or unaligned within the loaded image";
+        return false;
+    }
     const auto fail = [&](const char* message) {
         if (error) *error = message;
         return false;

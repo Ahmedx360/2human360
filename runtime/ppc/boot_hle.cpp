@@ -462,7 +462,7 @@ PPC_FUNC(RtlCompareMemoryUlong) {
 PPC_FUNC(RtlRaiseException) {
     const auto record = ctx.r3.u32;
     if (record == 0) {
-        std::fprintf(stderr, "[TooHuman] RtlRaiseException received a null record\\n");
+        std::fprintf(stderr, "[TooHuman] RtlRaiseException received a null record\n");
         std::abort();
     }
 
@@ -474,7 +474,7 @@ PPC_FUNC(RtlRaiseException) {
         return;
     }
 
-    std::fprintf(stderr, "[TooHuman] Unsupported guest exception 0x%08X at 0x%08X\\n",
+    std::fprintf(stderr, "[TooHuman] Unsupported guest exception 0x%08X at 0x%08X\n",
                  code, get_be32(at(base, record + 0x0C)));
     std::fflush(stderr);
     std::abort(); // SEH/C++ exception unwinding is not implemented yet.
@@ -520,7 +520,7 @@ PPC_FUNC(XexCheckExecutablePrivilege) {
 }
 
 PPC_FUNC(XamLoaderTerminateTitle) {
-    std::fprintf(stderr, "[TooHuman] XamLoaderTerminateTitle: guest requested title termination\\n");
+    std::fprintf(stderr, "[TooHuman] XamLoaderTerminateTitle: guest requested title termination\n");
     std::fflush(stderr);
     std::exit(0);
 }

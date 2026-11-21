@@ -96,5 +96,10 @@ int main() {
     GuestMainThreadStartup invalid_state{};
     assert(!initialize_guest_main_thread(
         memory, image, invalid_xex, heap, invalid_state, &error));
+
+    auto invalid_image = image;
+    invalid_image.entry_point = 0x83000000u;
+    assert(!initialize_guest_main_thread(
+        memory, invalid_image, xex, heap, invalid_state, &error));
     return 0;
 }
