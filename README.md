@@ -14,7 +14,7 @@ You must provide your own legally obtained game files. No game executable, asset
 | Recompiler fixes | Title-specific PE loader, switch-boundary and VMX/codegen fixes |
 | Generated-code library | CMake static-library target added; requires Clang and SIMDe |
 | Kernel/XAM HLE | Actual XEX import inventory/name map, function-IAT patching and backing storage for 11 kernel data exports implemented; only basic pool/XAM allocation handlers are implemented; most kernel/XAM services remain missing |
-| Guest memory / image loader | Bounded big-endian memory view, standalone PE loader, direct unencrypted/basic-compressed XEX loader, section protections, 4 GiB guest address space and 128 MiB synchronized guest pool heap implemented; MMIO, aliases and guest threads remain future work |
+| Guest memory / image loader | Bounded big-endian memory view, standalone PE loader, direct unencrypted/basic-compressed XEX loader, section protections, 4 GiB guest address space, guest heaps, and allocation/query/protection HLE for virtual memory implemented; MMIO, aliases and full guest-thread scheduling remain future work |
 | PPC indirect calls | Generated function map, diagnostic unresolved-target trap, caller-context invocation, function IAT patching and exact library/ordinal trampoline dispatch implemented |
 | Xenos graphics / EDRAM | Runtime implementation still required |
 | XMA audio | Runtime implementation still required |

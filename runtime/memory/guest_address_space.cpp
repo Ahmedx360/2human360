@@ -54,6 +54,10 @@ bool protect_pages(void* address, std::size_t size, std::uint8_t flags) noexcept
 
 } // namespace
 
+std::size_t GuestAddressSpace::page_size() noexcept {
+    return host_page_size();
+}
+
 GuestAddressSpace::GuestAddressSpace(void* reservation) noexcept
     : reservation_(reservation) {}
 

@@ -41,6 +41,32 @@ When the generated library is enabled, `TooHumanPpcRuntime` registers every non-
 
 The PE-only workflow cannot provide this metadata. Use the optional XEX TOML configuration with the matching original `default.xex` to preserve imports when regenerating the PPC translation. The `TooHumanXexImportAudit <default.xex>` utility now loads and audits the supplied XEX directly; the two-file `<default.xex> <default.exe>` form remains available for extracted PE workflows. The audit prints library IDs/versions, descriptor records, function/IAT pairings and genuine variable imports. The supplied Too Human executable has two import libraries (`xam.xex` and `xboxkrnl.exe`), 242 function thunks and 11 genuine variable imports.
 
+## Implemented: guest virtual-memory query and protection
+
+The Too Human runtime tracks each `NtAllocateVirtualMemory` reservation's
+initial XDK protection and its current protection-homogeneous page ranges.
+Allocation applies the requested `PAGE_NOACCESS`, `PAGE_READONLY`,
+`PAGE_READWRITE`, or `PAGE_WRITECOPY` state to the host mapping (write-copy is
+represented as writable RAM). Execute permissions and guard pages are not
+emulated: execute requests return `STATUS_ACCESS_DENIED`, while unsupported
+protection flags return `STATUS_INVALID_PAGE_PROTECTION`. Cache modifiers
+`PAGE_NOCACHE` and `PAGE_WRITECOMBINE` are accepted but do not change host cache
+policy.
+
+`NtProtectVirtualMemory` uses the Xbox 360 ABI (`r3`/`r4` are pointers to the
+in/out base and size, `r5` is the new protection, `r6` is optional
+`OldProtect`, and `r7` is `DebugMemory`). It rounds the requested range to the
+owning allocation's page granularity, refuses ranges that cross an allocation,
+applies host page permissions, returns the first affected page's previous
+protection, and splits/coalesces the region metadata. `NtQueryVirtualMemory`
+uses the two-argument Xbox title ABI (`r3` is the queried address value and
+`r4` is the `MEMORY_BASIC_INFORMATION` output pointer); it reports the
+containing homogeneous region, the original `AllocationProtect`, and the
+current `Protect` rather than assuming every page is read/write. The guest
+allocator uses the native host page size as a minimum protection granularity
+on hosts whose pages are larger than 4 KiB. Decommit and guard-page faults are
+not modelled yet.
+
 ## Startup import priorities and boot HLE
 
 `tools/startup_import_trace.py` walks the recompiled call graph from `_xstart` in source order and reports where each

@@ -65,6 +65,21 @@ bool guest_range_valid(std::uint32_t address, std::uint64_t length) noexcept {
                                 (std::uint64_t{1} << 32));
 }
 
+bool translate_guest_protection(std::uint32_t flags,
+                                GuestMemoryProtection& protection) noexcept {
+    // Cache modifiers are accepted. Guard pages and unknown flags are not
+    // modelled by the current guest fault/exception layer.
+    constexpr std::uint32_t kAllowedModifiers = 0x00000600u;
+    if ((flags & ~(0x000000FFu | kAllowedModifiers)) != 0) return false;
+    switch (flags & 0xFFu) {
+    case 0x01u: protection = GuestMemoryProtection::NoAccess; return true;
+    case 0x02u: protection = GuestMemoryProtection::ReadOnly; return true;
+    case 0x04u:
+    case 0x08u: protection = GuestMemoryProtection::ReadWrite; return true;
+    default: return false;
+    }
+}
+
 [[noreturn]] void invalid_guest_memory_call(const char* name,
                                             std::uint32_t address,
                                             std::uint32_t length) {
@@ -203,6 +218,7 @@ bool PpcImportRegistry::prepare_variable_imports(
         return false;
     }
 
+    memory_ = &memory;
     image_base_ = image.image_base;
     image_size_ = image.image_size;
     executable_module_handle_ = 0;
@@ -604,6 +620,8 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) const 
         constexpr std::uint32_t kStatusNoMemory = 0xC0000017u;
         constexpr std::uint32_t kStatusMemoryNotAllocated = 0xC00000A0u;
         constexpr std::uint32_t kStatusNotSupported = 0xC00000BBu;
+        constexpr std::uint32_t kStatusAccessDenied = 0xC0000022u;
+        constexpr std::uint32_t kStatusInvalidPageProtection = 0xC0000045u;
         constexpr std::uint32_t kMemCommit = 0x00001000u;
         constexpr std::uint32_t kMemReserve = 0x00002000u;
         constexpr std::uint32_t kMemDecommit = 0x00004000u;
@@ -648,15 +666,25 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) const 
             const auto allocation_type = context.r5.u32;
             const auto protection = context.r6.u32;
             const auto debug_memory = context.r7.u32;
+            GuestMemoryProtection host_protection{};
             if (debug_memory != 0 || requested_size == 0 ||
                 (allocation_type & kMemReset) != 0 ||
                 (allocation_type & (kMemCommit | kMemReserve)) == 0) {
                 context.r3.u32 = kStatusInvalidParameter;
                 return;
             }
+            if ((protection & 0xF0u) != 0) {
+                context.r3.u32 = kStatusAccessDenied;
+                return;
+            }
+            if (!translate_guest_protection(protection, host_protection)) {
+                context.r3.u32 = kStatusInvalidPageProtection;
+                return;
+            }
 
-            const std::uint32_t page_size =
-                (allocation_type & kMemLargePages) ? 0x10000u : 0x1000u;
+            const auto page_size = static_cast<std::uint32_t>(std::max<std::size_t>(
+                GuestAddressSpace::page_size(),
+                (allocation_type & kMemLargePages) ? 0x10000u : 0x1000u));
             const auto adjusted_base = requested_base == 0
                 ? 0u : requested_base & ~(page_size - 1u);
             const auto rounded_size =
@@ -683,9 +711,24 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) const 
                 std::memset(base + *allocation, 0,
                             static_cast<std::size_t>(rounded_size));
             }
+            if (memory_ == nullptr ||
+                !memory_->protect_region(*allocation,
+                                         static_cast<std::size_t>(rounded_size),
+                                         host_protection, nullptr)) {
+                (void)virtual_heap_->deallocate(*allocation);
+                context.r3.u32 = kStatusAccessDenied;
+                return;
+            }
+
+            VirtualMemoryRegion region{};
+            region.size = static_cast<std::uint32_t>(rounded_size);
+            region.page_size = page_size;
+            region.allocation_protect = protection;
+            region.protections.push_back({0u, region.size, protection});
+            virtual_memory_regions_.emplace(*allocation, std::move(region));
+
             store_be32(base + base_pointer, *allocation);
             store_be32(base + size_pointer, static_cast<std::uint32_t>(rounded_size));
-            (void)protection; // Guest protection is tracked by the query HLE below.
             context.r3.u32 = kStatusSuccess;
             return;
         }
@@ -725,6 +768,142 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) const 
             }
             store_be32(base + size_pointer,
                        static_cast<std::uint32_t>(allocation->second));
+            virtual_memory_regions_.erase(allocation->first);
+            context.r3.u32 = kStatusSuccess;
+            return;
+        }
+
+        if (import.ordinal == 0x00E1) { // NtProtectVirtualMemory
+            const auto base_pointer = context.r3.u32;
+            const auto size_pointer = context.r4.u32;
+            const auto old_protection_pointer = context.r6.u32;
+            if (!valid_guest_buffer(base_pointer, 4) ||
+                !valid_guest_buffer(size_pointer, 4) ||
+                (old_protection_pointer != 0 &&
+                 !valid_guest_buffer(old_protection_pointer, 4))) {
+                context.r3.u32 = kStatusAccessViolation;
+                return;
+            }
+
+            const auto requested_base = load_be32(base + base_pointer);
+            const auto requested_size = load_be32(base + size_pointer);
+            const auto new_protection = context.r5.u32;
+            if (requested_size == 0 || context.r7.u32 != 0) {
+                context.r3.u32 = kStatusInvalidParameter;
+                return;
+            }
+            if ((new_protection & 0xF0u) != 0) {
+                context.r3.u32 = kStatusAccessDenied;
+                return;
+            }
+            GuestMemoryProtection host_protection{};
+            if (!translate_guest_protection(new_protection, host_protection)) {
+                context.r3.u32 = kStatusInvalidPageProtection;
+                return;
+            }
+
+            const auto allocation = virtual_heap_->allocation_containing(requested_base);
+            if (!allocation) {
+                context.r3.u32 = kStatusMemoryNotAllocated;
+                return;
+            }
+            const auto region_it = virtual_memory_regions_.find(allocation->first);
+            if (region_it == virtual_memory_regions_.end()) {
+                context.r3.u32 = kStatusMemoryNotAllocated;
+                return;
+            }
+            auto& region = region_it->second;
+            if (region.page_size == 0) {
+                context.r3.u32 = kStatusInvalidParameter;
+                return;
+            }
+            const std::uint64_t page_mask =
+                static_cast<std::uint64_t>(region.page_size) - 1u;
+            const std::uint64_t raw_end =
+                static_cast<std::uint64_t>(requested_base) + requested_size;
+            if (raw_end > GuestAddressSpace::kSize) {
+                context.r3.u32 = kStatusInvalidParameter;
+                return;
+            }
+            const auto aligned_base = static_cast<std::uint64_t>(requested_base) & ~page_mask;
+            const auto aligned_end = (raw_end + page_mask) & ~page_mask;
+            const auto allocation_end =
+                static_cast<std::uint64_t>(allocation->first) + allocation->second;
+            if (aligned_end > GuestAddressSpace::kSize || aligned_end <= aligned_base ||
+                aligned_base < allocation->first || aligned_end > allocation_end ||
+                aligned_end - aligned_base > 0xFFFFFFFFu) {
+                context.r3.u32 = kStatusMemoryNotAllocated;
+                return;
+            }
+
+            const auto range_begin = static_cast<std::uint32_t>(aligned_base - allocation->first);
+            const auto range_end = static_cast<std::uint32_t>(aligned_end - allocation->first);
+            const auto current = std::find_if(
+                region.protections.begin(), region.protections.end(),
+                [range_begin](const VirtualMemoryProtectionRange& range) {
+                    return range_begin >= range.offset &&
+                           range_begin < static_cast<std::uint64_t>(range.offset) + range.size;
+                });
+            if (current == region.protections.end()) {
+                context.r3.u32 = kStatusMemoryNotAllocated;
+                return;
+            }
+            const auto old_protection = current->protection;
+            if (memory_ == nullptr ||
+                !memory_->protect_region(static_cast<std::uint32_t>(aligned_base),
+                                         static_cast<std::size_t>(aligned_end - aligned_base),
+                                         host_protection, nullptr)) {
+                context.r3.u32 = kStatusAccessDenied;
+                return;
+            }
+
+            std::vector<VirtualMemoryProtectionRange> updated;
+            updated.reserve(region.protections.size() + 2);
+            for (const auto& range : region.protections) {
+                const auto range_begin_old = static_cast<std::uint64_t>(range.offset);
+                const auto range_end_old = range_begin_old + range.size;
+                if (range_end_old <= range_begin || range_begin_old >= range_end) {
+                    updated.push_back(range);
+                    continue;
+                }
+                if (range_begin_old < range_begin) {
+                    updated.push_back({range.offset,
+                        static_cast<std::uint32_t>(range_begin - range_begin_old),
+                        range.protection});
+                }
+                const auto overlap_begin = std::max(range_begin_old,
+                                                    static_cast<std::uint64_t>(range_begin));
+                const auto overlap_end = std::min(range_end_old,
+                                                  static_cast<std::uint64_t>(range_end));
+                updated.push_back({static_cast<std::uint32_t>(overlap_begin),
+                    static_cast<std::uint32_t>(overlap_end - overlap_begin),
+                    new_protection});
+                if (range_end_old > range_end) {
+                    updated.push_back({static_cast<std::uint32_t>(range_end),
+                        static_cast<std::uint32_t>(range_end_old - range_end),
+                        range.protection});
+                }
+            }
+
+            std::vector<VirtualMemoryProtectionRange> merged;
+            merged.reserve(updated.size());
+            for (const auto& range : updated) {
+                if (!merged.empty() &&
+                    merged.back().protection == range.protection &&
+                    static_cast<std::uint64_t>(merged.back().offset) +
+                        merged.back().size == range.offset) {
+                    merged.back().size += range.size;
+                } else {
+                    merged.push_back(range);
+                }
+            }
+            region.protections = std::move(merged);
+
+            if (old_protection_pointer != 0)
+                store_be32(base + old_protection_pointer, old_protection);
+            store_be32(base + base_pointer, static_cast<std::uint32_t>(aligned_base));
+            store_be32(base + size_pointer,
+                       static_cast<std::uint32_t>(aligned_end - aligned_base));
             context.r3.u32 = kStatusSuccess;
             return;
         }
@@ -742,13 +921,31 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) const 
                 context.r3.u32 = kStatusInvalidParameter;
                 return;
             }
-            store_be32(base + information_pointer + 0, allocation->first);
+            const auto region_it = virtual_memory_regions_.find(allocation->first);
+            if (region_it == virtual_memory_regions_.end()) {
+                context.r3.u32 = kStatusInvalidParameter;
+                return;
+            }
+            const auto offset = guest_address - allocation->first;
+            const auto& region = region_it->second;
+            const auto protection_it = std::find_if(
+                region.protections.begin(), region.protections.end(),
+                [offset](const VirtualMemoryProtectionRange& range) {
+                    return offset >= range.offset &&
+                           static_cast<std::uint64_t>(offset) <
+                               static_cast<std::uint64_t>(range.offset) + range.size;
+                });
+            if (protection_it == region.protections.end()) {
+                context.r3.u32 = kStatusInvalidParameter;
+                return;
+            }
+            store_be32(base + information_pointer + 0,
+                       allocation->first + protection_it->offset);
             store_be32(base + information_pointer + 4, allocation->first);
-            store_be32(base + information_pointer + 8, 0x04u); // PAGE_READWRITE
-            store_be32(base + information_pointer + 12,
-                       static_cast<std::uint32_t>(allocation->second));
+            store_be32(base + information_pointer + 8, region.allocation_protect);
+            store_be32(base + information_pointer + 12, protection_it->size);
             store_be32(base + information_pointer + 16, kMemCommit);
-            store_be32(base + information_pointer + 20, 0x04u);
+            store_be32(base + information_pointer + 20, protection_it->protection);
             store_be32(base + information_pointer + 24, 0x00020000u); // MEM_PRIVATE
             context.r3.u32 = kStatusSuccess;
             return;

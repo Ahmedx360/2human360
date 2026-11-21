@@ -676,12 +676,13 @@ int main() {
         {"xboxkrnl.exe", 0x0194u, 0, 1, thunk_base + 20, 0},
         {"xboxkrnl.exe", 0x00CCu, 0, 1, thunk_base + 24, 0},
         {"xboxkrnl.exe", 0x00DCu, 0, 1, thunk_base + 28, 0},
-        {"xboxkrnl.exe", 0x00EEu, 0, 1, thunk_base + 32, 0}
+        {"xboxkrnl.exe", 0x00EEu, 0, 1, thunk_base + 32, 0},
+        {"xboxkrnl.exe", 0x00E1u, 0, 1, thunk_base + 36, 0}
     };
     std::size_t registered_pool_imports = 0;
     assert(variable_registry.install(
         variable_memory, pool_imports, &registered_pool_imports, &error));
-    assert(registered_pool_imports == 9);
+    assert(registered_pool_imports == 10);
 
     PPCContext header_field_context{};
     header_field_context.ctr.u32 = thunk_base + 16;
@@ -725,6 +726,8 @@ int main() {
         assert(function != nullptr);
         function(ctx, variable_memory.base());
     };
+    const auto vm_page_size =
+        static_cast<std::uint32_t>(GuestAddressSpace::page_size());
 
     PPCContext pool_context{};
     pool_context.r4.u32 = 0x100;
@@ -785,7 +788,7 @@ int main() {
     assert(stack_io && *stack_io == 0x70000000u);
     write_be(*stack_io, 0);
     write_be(*stack_io + 4, 0x1000);
-    write_be(io_buffer + 4, 0x1234);
+    write_be(io_buffer + 4, vm_page_size + 1u);
     PPCContext vm_context{};
     vm_context.r3.u32 = *stack_io;
     vm_context.r4.u32 = *stack_io + 4;
@@ -797,7 +800,7 @@ int main() {
     const auto virtual_address = read_guest_be(*stack_io);
     const auto virtual_size = read_guest_be(*stack_io + 4);
     assert(virtual_address == 0xA0000000u);
-    assert(virtual_size == 0x2000u);
+    assert(virtual_size == vm_page_size * 2u);
 
     vm_context = {};
     vm_context.r3.u32 = virtual_address + 0x100;
@@ -811,6 +814,72 @@ int main() {
     assert(read_guest_be(io_buffer + 24) == 0x1000u);
     assert(read_guest_be(io_buffer + 28) == 0x04u);
     assert(read_guest_be(io_buffer + 32) == 0x00020000u);
+
+    // NtProtectVirtualMemory: r3/r4 point to in/out base/size, r5 is PAGE_*,
+    // r6 points to OldProtect, and r7 is DebugMemory.
+    write_be(*stack_io + 8, virtual_address + 0x100u);
+    write_be(*stack_io + 12, vm_page_size);
+    write_be(*stack_io + 16, 0xDEADBEEFu);
+    PPCContext protect_context{};
+    protect_context.r3.u32 = *stack_io + 8;
+    protect_context.r4.u32 = *stack_io + 12;
+    protect_context.r5.u32 = 0x02u; // PAGE_READONLY
+    protect_context.r6.u32 = *stack_io + 16;
+    call_import(thunk_base + 36, protect_context);
+    assert(protect_context.r3.u32 == 0);
+    assert(read_guest_be(*stack_io + 8) == virtual_address);
+    assert(read_guest_be(*stack_io + 12) == vm_page_size);
+    assert(read_guest_be(*stack_io + 16) == 0x04u); // Previous PAGE_READWRITE.
+
+    // Query reports protection-homogeneous regions rather than the whole allocation.
+    vm_context = {};
+    vm_context.r3.u32 = virtual_address + 0x100u;
+    vm_context.r4.u32 = io_buffer + 8;
+    call_import(thunk_base + 32, vm_context);
+    assert(vm_context.r3.u32 == 0);
+    assert(read_guest_be(io_buffer + 8) == virtual_address);
+    assert(read_guest_be(io_buffer + 12) == virtual_address);
+    assert(read_guest_be(io_buffer + 16) == 0x04u); // Original AllocationProtect.
+    assert(read_guest_be(io_buffer + 20) == vm_page_size);
+    assert(read_guest_be(io_buffer + 24) == 0x1000u); // MEM_COMMIT.
+    assert(read_guest_be(io_buffer + 28) == 0x02u); // Current PAGE_READONLY.
+    assert(read_guest_be(io_buffer + 32) == 0x00020000u);
+
+    vm_context = {};
+    vm_context.r3.u32 = virtual_address + vm_page_size + 0x100u;
+    vm_context.r4.u32 = io_buffer + 8;
+    call_import(thunk_base + 32, vm_context);
+    assert(vm_context.r3.u32 == 0);
+    assert(read_guest_be(io_buffer + 8) == virtual_address + vm_page_size);
+    assert(read_guest_be(io_buffer + 12) == virtual_address);
+    assert(read_guest_be(io_buffer + 20) == vm_page_size);
+    assert(read_guest_be(io_buffer + 28) == 0x04u);
+
+    // Restore write access and make sure OldProtect receives PAGE_READONLY.
+    protect_context = {};
+    protect_context.r3.u32 = *stack_io + 8;
+    protect_context.r4.u32 = *stack_io + 12;
+    protect_context.r5.u32 = 0x04u; // PAGE_READWRITE
+    protect_context.r6.u32 = *stack_io + 16;
+    call_import(thunk_base + 36, protect_context);
+    assert(protect_context.r3.u32 == 0);
+    assert(read_guest_be(*stack_io + 16) == 0x02u);
+
+    // Execute permissions are denied until guest execution/fault semantics exist.
+    protect_context = {};
+    protect_context.r3.u32 = *stack_io + 8;
+    protect_context.r4.u32 = *stack_io + 12;
+    protect_context.r5.u32 = 0x20u; // PAGE_EXECUTE_READ
+    protect_context.r6.u32 = *stack_io + 16;
+    call_import(thunk_base + 36, protect_context);
+    assert(protect_context.r3.u32 == 0xC0000022u); // STATUS_ACCESS_DENIED.
+
+    protect_context = {};
+    protect_context.r3.u32 = *stack_io + 8;
+    protect_context.r4.u32 = *stack_io + 12;
+    protect_context.r5.u32 = 0;
+    call_import(thunk_base + 36, protect_context);
+    assert(protect_context.r3.u32 == 0xC0000045u); // STATUS_INVALID_PAGE_PROTECTION.
 
     write_be(*stack_io + 4, 0); // MEM_RELEASE requires RegionSize == 0.
     vm_context = {};

@@ -34,6 +34,8 @@ public:
     GuestAddressSpace& operator=(GuestAddressSpace&& other) noexcept;
 
     [[nodiscard]] static GuestAddressSpace reserve(std::string* error = nullptr);
+    // Native page granularity used by commit_region/protect_region.
+    [[nodiscard]] static std::size_t page_size() noexcept;
 
     // Commits the image's guest virtual range as read/write and copies its
     // image-relative bytes to base() + image.image_base. Section-specific

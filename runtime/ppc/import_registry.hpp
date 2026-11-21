@@ -13,6 +13,7 @@
 #include <thread>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace toohuman::runtime {
 
@@ -59,6 +60,18 @@ public:
     }
 
 private:
+    struct VirtualMemoryProtectionRange {
+        std::uint32_t offset{};
+        std::uint32_t size{};
+        std::uint32_t protection{};
+    };
+    struct VirtualMemoryRegion {
+        std::uint32_t size{};
+        std::uint32_t page_size{};
+        std::uint32_t allocation_protect{};
+        std::vector<VirtualMemoryProtectionRange> protections;
+    };
+
     [[nodiscard]] static std::string make_key(const std::string& library,
                                               std::uint16_t ordinal);
 
@@ -72,6 +85,8 @@ private:
     std::unique_ptr<GuestHeap> guest_heap_;
     std::unique_ptr<GuestHeap> virtual_heap_;
     std::unique_ptr<GuestHeap> stack_heap_;
+    GuestAddressSpace* memory_{};
+    std::unordered_map<std::uint32_t, VirtualMemoryRegion> virtual_memory_regions_;
     std::uint32_t image_base_{};
     std::uint32_t image_size_{};
     std::jthread timestamp_thread_;
