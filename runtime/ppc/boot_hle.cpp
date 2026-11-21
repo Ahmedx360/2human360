@@ -4,9 +4,13 @@
 #include <array>
 #include <atomic>
 #include <bitset>
+#include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <limits>
+#include <optional>
 #include <cstring>
 #include <functional>
 #include <memory>
@@ -44,6 +48,84 @@ std::uint32_t guest_strnlen(const std::uint8_t* s, std::uint32_t limit) {
 std::uint32_t get_be32(const std::uint8_t* p) {
     return (std::uint32_t(p[0]) << 24) | (std::uint32_t(p[1]) << 16) |
            (std::uint32_t(p[2]) << 8) | std::uint32_t(p[3]);
+}
+std::uint64_t get_be64(const std::uint8_t* p) {
+    return (std::uint64_t(get_be32(p)) << 32) | get_be32(p + 4);
+}
+
+constexpr std::uint32_t kStatusInvalidHandle = 0xC0000008u;
+constexpr std::uint32_t kStatusInvalidParameter = 0xC000000Du;
+constexpr std::uint32_t kStatusTimeout = 0x00000102u;
+
+struct GuestEvent {
+    bool manual_reset{};
+    bool signaled{};
+    std::mutex mutex;
+    std::condition_variable condition;
+};
+std::mutex g_events_mutex;
+std::unordered_map<std::uint32_t, std::shared_ptr<GuestEvent>> g_events;
+std::uint32_t g_next_event_handle = 0x1000u;
+
+std::uint32_t create_event_handle(const std::shared_ptr<GuestEvent>& event) {
+    std::lock_guard lock(g_events_mutex);
+    for (std::uint64_t attempts = 0; attempts < 0x3FFFF000ull; ++attempts) {
+        const auto handle = g_next_event_handle;
+        g_next_event_handle += 4;
+        if (g_next_event_handle < 0x1000u) g_next_event_handle = 0x1000u;
+        if (handle != 0 && g_events.emplace(handle, event).second) return handle;
+    }
+    return 0;
+}
+std::shared_ptr<GuestEvent> lookup_event(std::uint32_t handle) {
+    std::lock_guard lock(g_events_mutex);
+    const auto it = g_events.find(handle);
+    return it == g_events.end() ? nullptr : it->second;
+}
+bool close_event(std::uint32_t handle) {
+    std::lock_guard lock(g_events_mutex);
+    return g_events.erase(handle) != 0;
+}
+
+std::optional<std::chrono::milliseconds> decode_guest_timeout(
+    std::uint8_t* base, std::uint32_t timeout_address) {
+    if (timeout_address == 0) return std::nullopt; // Infinite wait.
+    const auto ticks = get_be64(at(base, timeout_address));
+    if (ticks == 0) return std::chrono::milliseconds(0);
+
+    std::uint64_t milliseconds = 0;
+    if ((ticks & (std::uint64_t{1} << 63)) != 0) {
+        // Negative LARGE_INTEGER values are relative 100 ns intervals.
+        const auto magnitude = (~ticks) + 1;
+        milliseconds = magnitude / 10000;
+    } else {
+        // Positive values are absolute Windows FILETIME timestamps.
+        constexpr std::uint64_t kWindowsEpochOffset100ns = 116444736000000000ull;
+        const auto now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        const auto now_filetime = static_cast<std::uint64_t>(now_ns / 100) +
+                                  kWindowsEpochOffset100ns;
+        milliseconds = ticks > now_filetime ? (ticks - now_filetime) / 10000 : 0;
+    }
+    const auto max_ms = static_cast<std::uint64_t>(
+        std::numeric_limits<std::chrono::milliseconds::rep>::max());
+    return std::chrono::milliseconds(static_cast<std::chrono::milliseconds::rep>(
+        std::min(milliseconds, max_ms)));
+}
+
+bool wait_for_event(const std::shared_ptr<GuestEvent>& event,
+                    const std::optional<std::chrono::milliseconds>& timeout) {
+    std::unique_lock lock(event->mutex);
+    if (!event->signaled) {
+        const auto ready = [&] { return event->signaled; };
+        if (timeout) {
+            if (!event->condition.wait_for(lock, *timeout, ready)) return false;
+        } else {
+            event->condition.wait(lock, ready);
+        }
+    }
+    if (!event->manual_reset) event->signaled = false;
+    return true;
 }
 
 constexpr std::uint32_t kTlsSlotCount = 256;
@@ -159,6 +241,24 @@ PPC_FUNC(RtlInitAnsiString) {
 // xboxkrnl #0x133. RtlMultiByteToUnicodeN(WCHAR* out /*r3*/, ULONG outMax /*r4*/, ULONG* outBytes /*r5, opt*/,
 //                                         const char* in /*r6*/, ULONG inBytes /*r7*/) -> NTSTATUS.
 // Single-byte (Latin-1) widening; guest WCHARs are big-endian UTF-16.
+// xboxkrnl #0x12D. UNICODE_STRING has the same 8-byte descriptor layout as ANSI_STRING,
+// but Length and MaximumLength are byte counts and the source is big-endian UTF-16.
+PPC_FUNC(RtlInitUnicodeString) {
+    auto* dest = at(base, ctx.r3.u32);
+    const auto src = ctx.r4.u32;
+    std::uint16_t length = 0, maximum = 0;
+    if (src != 0) {
+        std::uint32_t characters = 0;
+        while (characters < 0x7FFFu && get_be16(at(base, src) + characters * 2) != 0)
+            ++characters;
+        length = static_cast<std::uint16_t>(characters * 2);
+        maximum = static_cast<std::uint16_t>((characters + 1) * 2);
+    }
+    put_be16(dest, length);
+    put_be16(dest + 2, maximum);
+    put_be32(dest + 4, src);
+}
+
 PPC_FUNC(RtlMultiByteToUnicodeN) {
     auto* out = at(base, ctx.r3.u32);
     const auto out_max = ctx.r4.u32;
@@ -277,6 +377,97 @@ PPC_FUNC(KeTlsSetValue) {
     }
     g_tls_values[slot] = {ctx.r4.u32, tls_generation(slot)};
     ctx.r3.u32 = 1;
+}
+
+// xboxkrnl #0xD1 / #0xF6 / #0xCE / #0xFD / #0xCF.
+// The early title path uses unnamed dispatcher events. Event type 0 is notification
+// (manual-reset); type 1 is synchronization (auto-reset). Wait timeout pointers carry
+// signed 100 ns intervals, with negative values relative to now and positive FILETIME values.
+PPC_FUNC(NtCreateEvent) {
+    if (ctx.r3.u32 == 0) {
+        ctx.r3.u32 = kStatusInvalidParameter;
+        return;
+    }
+    auto event = std::make_shared<GuestEvent>();
+    event->manual_reset = ctx.r5.u32 == 0;
+    event->signaled = ctx.r6.u32 != 0;
+    const auto handle = create_event_handle(event);
+    if (handle == 0) {
+        ctx.r3.u32 = 0xC0000017u; // STATUS_NO_MEMORY
+        return;
+    }
+    put_be32(at(base, ctx.r3.u32), handle);
+    ctx.r3.u32 = kStatusSuccess;
+}
+PPC_FUNC(NtSetEvent) {
+    const auto handle = ctx.r3.u32;
+    auto event = lookup_event(handle);
+    if (!event) {
+        ctx.r3.u32 = kStatusInvalidHandle;
+        return;
+    }
+    std::uint32_t previous = 0;
+    {
+        std::lock_guard lock(event->mutex);
+        previous = event->signaled ? 1u : 0u;
+        event->signaled = true;
+    }
+    if (ctx.r4.u32 != 0) put_be32(at(base, ctx.r4.u32), previous);
+    if (event->manual_reset) event->condition.notify_all();
+    else event->condition.notify_one();
+    ctx.r3.u32 = kStatusSuccess;
+}
+PPC_FUNC(NtClearEvent) {
+    auto event = lookup_event(ctx.r3.u32);
+    if (!event) {
+        ctx.r3.u32 = kStatusInvalidHandle;
+        return;
+    }
+    {
+        std::lock_guard lock(event->mutex);
+        event->signaled = false;
+    }
+    ctx.r3.u32 = kStatusSuccess;
+}
+PPC_FUNC(NtWaitForSingleObjectEx) {
+    auto event = lookup_event(ctx.r3.u32);
+    if (!event) {
+        ctx.r3.u32 = kStatusInvalidHandle;
+        return;
+    }
+    const auto timeout = decode_guest_timeout(base, ctx.r6.u32);
+    ctx.r3.u32 = wait_for_event(event, timeout) ? kStatusSuccess : kStatusTimeout;
+}
+PPC_FUNC(NtClose) {
+    ctx.r3.u32 = close_event(ctx.r3.u32) ? kStatusSuccess : kStatusInvalidHandle;
+}
+
+// A focused subset of common NTSTATUS conversions used by startup diagnostics and
+// error branches. Unknown values follow RTL's ERROR_MR_MID_NOT_FOUND fallback.
+PPC_FUNC(RtlNtStatusToDosError) {
+    const auto status = ctx.r3.u32;
+    std::uint32_t error = 317u; // ERROR_MR_MID_NOT_FOUND
+    if (status == 0 || (status & 0x20000000u) != 0) {
+        error = status;
+    } else if ((status >> 16) == 0x8007u ||
+               (status & 0xF0000000u) == 0xD0000000u ||
+               (status >> 16) == 0xC001u) {
+        error = status & 0xFFFFu;
+    } else {
+        switch (status) {
+        case 0xC0000008u: error = 6u; break;   // ERROR_INVALID_HANDLE
+        case 0xC000000Du: error = 87u; break;  // ERROR_INVALID_PARAMETER
+        case 0xC0000017u: error = 8u; break;   // ERROR_NOT_ENOUGH_MEMORY
+        case 0xC0000022u: error = 5u; break;   // ERROR_ACCESS_DENIED
+        case 0xC0000023u: error = 122u; break; // ERROR_INSUFFICIENT_BUFFER
+        case 0xC0000034u: error = 2u; break;   // ERROR_FILE_NOT_FOUND
+        case 0xC0000035u: error = 183u; break; // ERROR_ALREADY_EXISTS
+        case 0xC00000BBu: error = 50u; break;  // ERROR_NOT_SUPPORTED
+        case 0x00000102u: error = 1460u; break;// ERROR_TIMEOUT
+        default: break;
+        }
+    }
+    ctx.r3.u32 = error;
 }
 
 // xboxkrnl #0x21. Cache sizing hint for the file-system cache; nothing to configure on a host FS.

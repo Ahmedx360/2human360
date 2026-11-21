@@ -53,11 +53,18 @@ int main() {
         {"xboxkrnl.exe", 0x0152u, 0, 1, 0x82001124u},
         {"xboxkrnl.exe", 0x0153u, 0, 1, 0x82001128u},
         {"xboxkrnl.exe", 0x0154u, 0, 1, 0x8200112Cu},
-        {"xboxkrnl.exe", 0x0155u, 0, 1, 0x82001130u}
+        {"xboxkrnl.exe", 0x0155u, 0, 1, 0x82001130u},
+        {"xboxkrnl.exe", 0x00D1u, 0, 1, 0x82001134u},
+        {"xboxkrnl.exe", 0x00F6u, 0, 1, 0x82001138u},
+        {"xboxkrnl.exe", 0x00CEu, 0, 1, 0x8200113Cu},
+        {"xboxkrnl.exe", 0x00FDu, 0, 1, 0x82001140u},
+        {"xboxkrnl.exe", 0x00CFu, 0, 1, 0x82001144u},
+        {"xboxkrnl.exe", 0x0135u, 0, 1, 0x82001148u},
+        {"xboxkrnl.exe", 0x012Du, 0, 1, 0x8200114Cu}
     };
     std::size_t registered = 0;
     assert(imports.install(memory, metadata, &registered, &error));
-    assert(registered == 13);
+    assert(registered == 20);
     assert(memory.get_function<PPCFunc*>(0x82001100u) != &test_default_handler);
 
     PPCContext context{};
@@ -130,6 +137,107 @@ int main() {
     boot_context = {};
     boot_context.r3.u32 = tls_slot;
     call_test_import(0x8200112Cu, boot_context); // freed slots read as zero
+    assert(boot_context.r3.u32 == 0);
+
+    // Native NTSTATUS conversion and UNICODE_STRING initialization.
+    boot_context = {};
+    boot_context.r3.u32 = 0xC0000008u;
+    call_test_import(0x82001148u, boot_context);
+    assert(boot_context.r3.u32 == 6u);
+    boot_context = {};
+    boot_context.r3.u32 = 0xC000000Du;
+    call_test_import(0x82001148u, boot_context);
+    assert(boot_context.r3.u32 == 87u);
+    constexpr std::uint32_t unicode_source = 0x82014000u;
+    constexpr std::uint32_t unicode_descriptor = 0x82014020u;
+    memory.base()[unicode_source] = 0;
+    memory.base()[unicode_source + 1] = 'A';
+    memory.base()[unicode_source + 2] = 0;
+    memory.base()[unicode_source + 3] = 0;
+    boot_context = {};
+    boot_context.r3.u32 = unicode_descriptor;
+    boot_context.r4.u32 = unicode_source;
+    call_test_import(0x8200114Cu, boot_context);
+    assert(guest_be32(unicode_descriptor) == 0x00040000u);
+    assert(guest_be32(unicode_descriptor + 4) == unicode_source);
+
+    // Event create/set/clear/wait/close lifecycle, including manual vs auto reset.
+    constexpr std::uint32_t handle_out = 0x82013000u;
+    constexpr std::uint32_t timeout_in = 0x82013004u;
+    constexpr std::uint32_t previous_state_out = 0x8201300Cu;
+    const auto set_guest_u64 = [&](std::uint32_t address, std::uint64_t value) {
+        for (std::uint32_t i = 0; i < 8; ++i)
+            memory.base()[address + i] = static_cast<std::uint8_t>(value >> (56 - i * 8));
+    };
+    set_guest_u64(timeout_in, 0);
+    boot_context = {};
+    boot_context.r3.u32 = handle_out;
+    boot_context.r5.u32 = 0; // Notification event: manual reset.
+    boot_context.r6.u32 = 1; // Initially signaled.
+    call_test_import(0x82001134u, boot_context);
+    assert(boot_context.r3.u32 == 0);
+    const auto manual_event = guest_be32(handle_out);
+    assert(manual_event != 0);
+    boot_context = {};
+    boot_context.r3.u32 = manual_event;
+    boot_context.r6.u32 = timeout_in;
+    call_test_import(0x82001140u, boot_context);
+    assert(boot_context.r3.u32 == 0);
+    boot_context = {};
+    boot_context.r3.u32 = manual_event;
+    boot_context.r6.u32 = timeout_in;
+    call_test_import(0x82001140u, boot_context); // Manual-reset remains signaled.
+    assert(boot_context.r3.u32 == 0);
+    boot_context = {};
+    boot_context.r3.u32 = manual_event;
+    call_test_import(0x8200113Cu, boot_context);
+    assert(boot_context.r3.u32 == 0);
+    boot_context = {};
+    boot_context.r3.u32 = manual_event;
+    boot_context.r6.u32 = timeout_in;
+    call_test_import(0x82001140u, boot_context);
+    assert(boot_context.r3.u32 == 0x102u); // STATUS_TIMEOUT.
+    boot_context = {};
+    boot_context.r3.u32 = manual_event;
+    boot_context.r4.u32 = previous_state_out;
+    call_test_import(0x82001138u, boot_context);
+    assert(boot_context.r3.u32 == 0);
+    assert(guest_be32(previous_state_out) == 0);
+    boot_context = {};
+    boot_context.r3.u32 = manual_event;
+    boot_context.r4.u32 = previous_state_out;
+    call_test_import(0x82001138u, boot_context);
+    assert(guest_be32(previous_state_out) == 1);
+    boot_context = {};
+    boot_context.r3.u32 = manual_event;
+    call_test_import(0x82001144u, boot_context);
+    assert(boot_context.r3.u32 == 0);
+    boot_context = {};
+    boot_context.r3.u32 = manual_event;
+    boot_context.r6.u32 = timeout_in;
+    call_test_import(0x82001140u, boot_context);
+    assert(boot_context.r3.u32 == 0xC0000008u); // STATUS_INVALID_HANDLE.
+
+    boot_context = {};
+    boot_context.r3.u32 = handle_out;
+    boot_context.r5.u32 = 1; // Synchronization event: auto reset.
+    boot_context.r6.u32 = 1;
+    call_test_import(0x82001134u, boot_context);
+    assert(boot_context.r3.u32 == 0);
+    const auto auto_event = guest_be32(handle_out);
+    boot_context = {};
+    boot_context.r3.u32 = auto_event;
+    boot_context.r6.u32 = timeout_in;
+    call_test_import(0x82001140u, boot_context);
+    assert(boot_context.r3.u32 == 0);
+    boot_context = {};
+    boot_context.r3.u32 = auto_event;
+    boot_context.r6.u32 = timeout_in;
+    call_test_import(0x82001140u, boot_context); // Auto-reset consumes signal.
+    assert(boot_context.r3.u32 == 0x102u);
+    boot_context = {};
+    boot_context.r3.u32 = auto_event;
+    call_test_import(0x82001144u, boot_context);
     assert(boot_context.r3.u32 == 0);
 
     // RtlFillMemoryUlong writes big-endian ULONGs and ignores a partial tail.
