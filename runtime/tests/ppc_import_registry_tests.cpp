@@ -886,6 +886,76 @@ int main() {
     assert(read_guest_be(*stack_io + 4) == virtual_size);
     assert(variable_registry.stack_heap()->deallocate(*stack_io));
 
+    // Concurrently allocate, query and release independent regions. Each host
+    // worker owns its in/out buffers; only the import registry and guest heaps
+    // are shared. This exercises the region metadata lock and heap ownership
+    // across overlapping NtAllocate/NtQuery/NtFree calls.
+    constexpr std::uint32_t kConcurrentVmWorkers = 8;
+    constexpr std::uint32_t kConcurrentVmIterations = 64;
+    const auto concurrent_scratch = variable_registry.stack_heap()->allocate(
+        kConcurrentVmWorkers * 0x40u, 16);
+    assert(concurrent_scratch);
+    std::atomic<bool> start_workers{false};
+    std::atomic<bool> concurrent_vm_failed{false};
+    std::vector<std::thread> vm_workers;
+    vm_workers.reserve(kConcurrentVmWorkers);
+    for (std::uint32_t worker_index = 0;
+         worker_index < kConcurrentVmWorkers; ++worker_index) {
+        vm_workers.emplace_back([&, worker_index] {
+            while (!start_workers.load(std::memory_order_acquire))
+                std::this_thread::yield();
+            const auto io = *concurrent_scratch + worker_index * 0x40u;
+            for (std::uint32_t iteration = 0;
+                 iteration < kConcurrentVmIterations; ++iteration) {
+                write_be(io, 0);
+                write_be(io + 4, vm_page_size);
+                PPCContext allocate_context{};
+                allocate_context.r3.u32 = io;
+                allocate_context.r4.u32 = io + 4;
+                allocate_context.r5.u32 = 0x3000u;
+                allocate_context.r6.u32 = 0x04u;
+                call_import(thunk_base + 24, allocate_context);
+                if (allocate_context.r3.u32 != 0) {
+                    concurrent_vm_failed.store(true, std::memory_order_relaxed);
+                    return;
+                }
+
+                const auto address = read_guest_be(io);
+                const auto size = read_guest_be(io + 4);
+                if (address < 0xA0000000u || size != vm_page_size) {
+                    concurrent_vm_failed.store(true, std::memory_order_relaxed);
+                    return;
+                }
+
+                PPCContext query_context{};
+                query_context.r3.u32 = address + 0x20u;
+                query_context.r4.u32 = io + 8;
+                call_import(thunk_base + 32, query_context);
+                if (query_context.r3.u32 != 0 ||
+                    read_guest_be(io + 28) != 0x04u) {
+                    concurrent_vm_failed.store(true, std::memory_order_relaxed);
+                    return;
+                }
+
+                write_be(io + 4, 0);
+                PPCContext free_context{};
+                free_context.r3.u32 = io;
+                free_context.r4.u32 = io + 4;
+                free_context.r5.u32 = 0x8000u;
+                call_import(thunk_base + 28, free_context);
+                if (free_context.r3.u32 != 0 ||
+                    read_guest_be(io + 4) != vm_page_size) {
+                    concurrent_vm_failed.store(true, std::memory_order_relaxed);
+                    return;
+                }
+            }
+        });
+    }
+    start_workers.store(true, std::memory_order_release);
+    for (auto& worker : vm_workers) worker.join();
+    assert(!concurrent_vm_failed.load(std::memory_order_relaxed));
+    assert(variable_registry.stack_heap()->deallocate(*concurrent_scratch));
+
     pool_context = {};
     pool_context.r3.u32 = io_buffer;
     call_import(thunk_base + 4, pool_context);

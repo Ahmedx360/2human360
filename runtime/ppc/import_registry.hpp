@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <thread>
@@ -87,6 +88,7 @@ private:
     std::unique_ptr<GuestHeap> stack_heap_;
     GuestAddressSpace* memory_{};
     std::unordered_map<std::uint32_t, VirtualMemoryRegion> virtual_memory_regions_;
+    mutable std::mutex virtual_memory_regions_mutex_;
     std::uint32_t image_base_{};
     std::uint32_t image_size_{};
     std::jthread timestamp_thread_;
