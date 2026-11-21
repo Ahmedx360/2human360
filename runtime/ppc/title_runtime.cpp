@@ -3,6 +3,7 @@
 #include "ppc/function_table.hpp"
 #include "ppc/boot_hle.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <limits>

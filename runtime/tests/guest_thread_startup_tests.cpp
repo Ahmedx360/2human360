@@ -198,5 +198,22 @@ int main() {
     assert(release_guest_thread_context(memory, heap, stack_heap, state, &error));
     assert(heap.available_bytes() == heap.size());
     assert(stack_heap.available_bytes() == stack_heap.size());
+
+    // Exhaust the runtime heap only after the stack allocation and several
+    // KTHREAD/PCR/ProcessInfo allocations have succeeded. Failure must roll
+    // back every partial allocation and restore the stack heap.
+    GuestHeap constrained_runtime_heap(memory, 0xA0200000u, 0x1000u);
+    GuestHeap constrained_stack_heap(memory, 0x70100000u, 0x50000u);
+    assert(constrained_runtime_heap.initialize(&error));
+    assert(constrained_stack_heap.initialize(&error));
+    GuestThreadStartup partial_startup{};
+    assert(!initialize_guest_main_thread(
+        memory, image, xex, constrained_runtime_heap, constrained_stack_heap,
+        partial_startup, &error));
+    assert(partial_startup.kthread_address == 0);
+    assert(constrained_runtime_heap.available_bytes() ==
+           constrained_runtime_heap.size());
+    assert(constrained_stack_heap.available_bytes() ==
+           constrained_stack_heap.size());
     return 0;
 }

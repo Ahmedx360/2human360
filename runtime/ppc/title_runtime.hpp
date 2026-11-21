@@ -20,6 +20,7 @@ struct GuestThreadStartup {
     std::uint32_t tls_size{};
     std::uint32_t stack_allocation_base{};
     std::uint32_t stack_allocation_size{};
+    std::uint32_t stack_guard_size{};
     std::uint32_t stack_limit{};
     std::uint32_t stack_base{};
     std::uint32_t stack_size{};
