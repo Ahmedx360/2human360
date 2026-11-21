@@ -42,21 +42,21 @@ class GeneratedCodeNormalizationTests(unittest.TestCase):
 
     def test_forward_calls_get_declarations_before_same_unit_aliases(self):
         source = (
-            '#include "ppc_recomp_shared.h"\\n'
-            'PPC_FUNC_IMPL(__imp__sub_82000000) {\\n'
-            '\\tsub_82000010(ctx, base);\\n'
-            '\\tsub_82000020(ctx, base);\\n'
-            '}\\n'
-            '__attribute__((alias("__imp__sub_82000010"))) PPC_WEAK_FUNC(sub_82000010);\\n'
-            'PPC_FUNC_IMPL(__imp__sub_82000010) { return; }\\n'
-            '__attribute__((alias("__imp__sub_82000020"))) PPC_WEAK_FUNC(sub_82000020);\\n'
-            'PPC_FUNC_IMPL(__imp__sub_82000020) { return; }\\n'
+            '#include "ppc_recomp_shared.h"\n'
+            'PPC_FUNC_IMPL(__imp__sub_82000000) {\n'
+            '\tsub_82000010(ctx, base);\n'
+            '\tsub_82000020(ctx, base);\n'
+            '}\n'
+            '__attribute__((alias("__imp__sub_82000010"))) PPC_WEAK_FUNC(sub_82000010);\n'
+            'PPC_FUNC_IMPL(__imp__sub_82000010) { return; }\n'
+            '__attribute__((alias("__imp__sub_82000020"))) PPC_WEAK_FUNC(sub_82000020);\n'
+            'PPC_FUNC_IMPL(__imp__sub_82000020) { return; }\n'
         )
         fixed = normalize_cpp_source(source)
         self.assertIn(
-            '#include "ppc_recomp_shared.h"\\n'
-            'PPC_EXTERN_FUNC(sub_82000010);\\n'
-            'PPC_EXTERN_FUNC(sub_82000020);\\n',
+            '#include "ppc_recomp_shared.h"\n'
+            'PPC_EXTERN_FUNC(sub_82000010);\n'
+            'PPC_EXTERN_FUNC(sub_82000020);\n',
             fixed,
         )
         self.assertEqual(fixed.count("PPC_EXTERN_FUNC(sub_82000010);"), 1)
@@ -64,9 +64,9 @@ class GeneratedCodeNormalizationTests(unittest.TestCase):
 
     def test_forward_declaration_normalization_is_idempotent(self):
         source = (
-            '#include "ppc_recomp_shared.h"\\n'
-            'PPC_FUNC_IMPL(__imp__sub_82000000) { sub_82000010(ctx, base); }\\n'
-            '__attribute__((alias("__imp__sub_82000010"))) PPC_WEAK_FUNC(sub_82000010);\\n'
+            '#include "ppc_recomp_shared.h"\n'
+            'PPC_FUNC_IMPL(__imp__sub_82000000) { sub_82000010(ctx, base); }\n'
+            '__attribute__((alias("__imp__sub_82000010"))) PPC_WEAK_FUNC(sub_82000010);\n'
         )
         fixed = normalize_cpp_source(source)
         self.assertEqual(normalize_cpp_source(fixed), fixed)
