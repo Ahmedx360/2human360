@@ -38,6 +38,17 @@ struct TitleRuntimeInitReport {
     GuestMainThreadStartup main_thread{};
 };
 
+// Initializes one guest main thread's KTHREAD/PCR/PIB/TLS/stack context.
+// The caller supplies an initialized guest runtime heap so this can be tested
+// independently of the full game image/import table.
+[[nodiscard]] bool initialize_guest_main_thread(
+    GuestAddressSpace& memory,
+    const LoadedPeImage& image,
+    const XexImportResult& xex,
+    GuestHeap& runtime_heap,
+    GuestMainThreadStartup& state,
+    std::string* error = nullptr);
+
 // Initializes the memory, generated PPC lookup table, XEX IATs and kernel
 // variable backing from a LoadedPeImage (either direct XEX reconstruction or
 // extracted PE) plus its matching original XEX. Register custom HLE handlers

@@ -50,6 +50,7 @@ public:
     // Allocate runtime memory from the committed private guest virtual range.
     [[nodiscard]] std::optional<std::uint32_t> allocate_runtime_memory(
         std::size_t bytes, std::size_t alignment = 16);
+    [[nodiscard]] GuestHeap* runtime_heap() noexcept { return virtual_heap_.get(); }
 
     // Guest LDR_DATA_TABLE_ENTRY address backing XexExecutableModuleHandle.
     [[nodiscard]] std::uint32_t executable_module_handle() const noexcept {

@@ -33,12 +33,14 @@ std::uint64_t guest_system_time_100ns() {
     return kWindowsEpochOffset100ns + static_cast<std::uint64_t>(unix_100ns);
 }
 
-bool initialize_main_thread(GuestAddressSpace& memory,
-                            const LoadedPeImage& image,
-                            const XexImportResult& xex,
-                            PpcImportRegistry& imports,
-                            GuestMainThreadStartup& state,
-                            std::string* error) {
+} // namespace
+
+bool initialize_guest_main_thread(GuestAddressSpace& memory,
+                                  const LoadedPeImage& image,
+                                  const XexImportResult& xex,
+                                  GuestHeap& runtime_heap,
+                                  GuestMainThreadStartup& state,
+                                  std::string* error) {
     const auto fail = [&](const char* message) {
         if (error) *error = message;
         return false;
@@ -59,7 +61,7 @@ bool initialize_main_thread(GuestAddressSpace& memory,
         xex.tls_info && xex.tls_info->slot_count != 0 ? xex.tls_info->slot_count : 1024u;
     const std::uint32_t tls_data_size = xex.tls_info ? xex.tls_info->data_size : 0u;
     const std::uint32_t tls_raw_size = xex.tls_info ? xex.tls_info->raw_data_size : 0u;
-    if (tls_slots > 0x10000u ||
+    if (tls_slots > 0x3FFFu ||
         static_cast<std::uint64_t>(tls_slots) * 4u + tls_data_size >
             std::numeric_limits<std::uint32_t>::max() ||
         tls_raw_size > tls_data_size) {
@@ -83,7 +85,7 @@ bool initialize_main_thread(GuestAddressSpace& memory,
 
     const auto allocate = [&](std::size_t size, std::size_t alignment,
                               std::uint32_t& out) -> bool {
-        const auto address = imports.allocate_runtime_memory(size, alignment);
+        const auto address = runtime_heap.allocate(size, alignment);
         if (!address || *address == 0) return false;
         out = *address;
         std::memset(memory.base() + out, 0, size);
@@ -182,8 +184,6 @@ bool initialize_main_thread(GuestAddressSpace& memory,
     return true;
 }
 
-} // namespace
-
 bool initialize_title_runtime(GuestAddressSpace& memory,
                               const LoadedPeImage& image,
                               std::span<const std::uint8_t> xex_file,
@@ -236,9 +236,14 @@ bool initialize_title_runtime(GuestAddressSpace& memory,
         return false;
     }
 
+    auto* runtime_heap = imports.runtime_heap();
+    if (runtime_heap == nullptr) {
+        if (error) *error = "Guest runtime heap was not initialized before main-thread startup";
+        return false;
+    }
     GuestMainThreadStartup main_thread{};
-    if (!initialize_main_thread(memory, mapped_image, import_result, imports,
-                                main_thread, error)) {
+    if (!initialize_guest_main_thread(memory, mapped_image, import_result,
+                                      *runtime_heap, main_thread, error)) {
         return false;
     }
 

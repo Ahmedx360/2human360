@@ -94,6 +94,18 @@ if(BUILD_TESTING AND TH_BUILD_RECOMP_LIB)
         target_compile_options(TooHumanPpcImportRegistryTests PRIVATE -UNDEBUG)
     endif()
     add_test(NAME TooHumanPpcImportRegistryTests COMMAND TooHumanPpcImportRegistryTests)
+
+    add_executable(TooHumanGuestThreadStartupTests
+        tests/guest_thread_startup_tests.cpp
+    )
+    target_link_libraries(TooHumanGuestThreadStartupTests PRIVATE TooHumanPpcRuntime)
+    target_compile_features(TooHumanGuestThreadStartupTests PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(TooHumanGuestThreadStartupTests PRIVATE /UNDEBUG)
+    else()
+        target_compile_options(TooHumanGuestThreadStartupTests PRIVATE -UNDEBUG)
+    endif()
+    add_test(NAME TooHumanGuestThreadStartupTests COMMAND TooHumanGuestThreadStartupTests)
 endif()
 
 if(BUILD_TESTING)
