@@ -63,11 +63,14 @@ int main() {
         {"xboxkrnl.exe", 0x00FDu, 0, 1, 0x82001140u},
         {"xboxkrnl.exe", 0x00CFu, 0, 1, 0x82001144u},
         {"xboxkrnl.exe", 0x0135u, 0, 1, 0x82001148u},
-        {"xboxkrnl.exe", 0x012Du, 0, 1, 0x8200114Cu}
+        {"xboxkrnl.exe", 0x012Du, 0, 1, 0x8200114Cu},
+        {"xboxkrnl.exe", 0x0010u, 0, 1, 0x82001150u},
+        {"xam.xex", 0x0282u, 0, 1, 0x82001154u},
+        {"xam.xex", 0x02DCu, 0, 1, 0x82001158u}
     };
     std::size_t registered = 0;
     assert(imports.install(memory, metadata, &registered, &error));
-    assert(registered == 20);
+    assert(registered == 23);
     assert(memory.get_function<PPCFunc*>(0x82001100u) != &test_default_handler);
 
     PPCContext context{};
@@ -168,6 +171,44 @@ int main() {
     assert(guest_be32(unicode_descriptor) == 0x00020004u);
     assert(guest_be32(unicode_descriptor + 4) == unicode_source);
 
+    // XConfig values use guest-endian encoding and report the returned size.
+    constexpr std::uint32_t xconfig_value = 0x82014100u;
+    constexpr std::uint32_t xconfig_required = 0x82014110u;
+    boot_context = {};
+    boot_context.r3.u32 = 2; // Secured category.
+    boot_context.r4.u32 = 2; // AV region.
+    boot_context.r5.u32 = xconfig_value;
+    boot_context.r6.u32 = 4;
+    boot_context.r7.u32 = xconfig_required;
+    call_test_import(0x82001150u, boot_context);
+    assert(boot_context.r3.u32 == 0);
+    assert(guest_be32(xconfig_value) == 0x1000u);
+    assert(memory.base()[xconfig_required] == 0);
+    assert(memory.base()[xconfig_required + 1] == 4);
+
+    boot_context = {};
+    boot_context.r3.u32 = 3;
+    boot_context.r4.u32 = 9; // English.
+    boot_context.r5.u32 = xconfig_value;
+    boot_context.r6.u32 = 4;
+    boot_context.r7.u32 = xconfig_required;
+    call_test_import(0x82001150u, boot_context);
+    assert(boot_context.r3.u32 == 0);
+    assert(guest_be32(xconfig_value) == 1u);
+
+    boot_context = {};
+    boot_context.r3.u32 = 2;
+    boot_context.r4.u32 = 2;
+    boot_context.r5.u32 = xconfig_value;
+    boot_context.r6.u32 = 1;
+    boot_context.r7.u32 = xconfig_required;
+    call_test_import(0x82001150u, boot_context);
+    assert(boot_context.r3.u32 == 0xC0000023u);
+
+    boot_context = {};
+    call_test_import(0x82001154u, boot_context);
+    assert(boot_context.r3.u32 == 0u); // XamGetSystemVersion's startup stub.
+
     // Event create/set/clear/wait/close lifecycle, including manual vs auto reset.
     constexpr std::uint32_t handle_out = 0x82013000u;
     constexpr std::uint32_t timeout_in = 0x82013004u;
@@ -263,6 +304,46 @@ int main() {
 
     boot_context = {};
     boot_context.r3.u32 = auto_event;
+    call_test_import(0x82001144u, boot_context);
+    assert(boot_context.r3.u32 == 0);
+
+    // XAM's 9th/10th arguments are stack-spilled at SP+0x54/+0x5C in the title caller.
+    constexpr std::uint32_t message_stack = 0x82015000u;
+    constexpr std::uint32_t message_result = 0x82015100u;
+    constexpr std::uint32_t message_overlapped = 0x82015110u;
+    constexpr std::uint32_t message_event_out = 0x82015140u;
+    boot_context = {};
+    boot_context.r3.u32 = message_event_out;
+    boot_context.r5.u32 = 1; // Synchronization event.
+    boot_context.r6.u32 = 0;
+    call_test_import(0x82001134u, boot_context);
+    const auto message_event = guest_be32(message_event_out);
+    assert(message_event != 0);
+    write_be(message_overlapped + 0x0C, message_event);
+    write_be(message_stack + 0x54, message_result);
+    write_be(message_stack + 0x5C, message_overlapped);
+    boot_context = {};
+    boot_context.r1.u32 = message_stack;
+    boot_context.r3.u32 = 0xFF;
+    boot_context.r4.u32 = 0;
+    boot_context.r5.u32 = 0;
+    boot_context.r6.u32 = 1;
+    boot_context.r7.u32 = 0;
+    boot_context.r8.u32 = 0; // Focused button.
+    boot_context.r9.u32 = 1;
+    boot_context.r10.u32 = 0;
+    call_test_import(0x82001158u, boot_context);
+    assert(boot_context.r3.u32 == 997u); // ERROR_IO_PENDING.
+    assert(guest_be32(message_result) == 0u);
+    assert(guest_be32(message_overlapped) == 0u);
+    assert(guest_be32(message_overlapped + 0x18) == 0u);
+    boot_context = {};
+    boot_context.r3.u32 = message_event;
+    boot_context.r6.u32 = timeout_in;
+    call_test_import(0x82001140u, boot_context);
+    assert(boot_context.r3.u32 == 0u); // XAM completion signaled its event.
+    boot_context = {};
+    boot_context.r3.u32 = message_event;
     call_test_import(0x82001144u, boot_context);
     assert(boot_context.r3.u32 == 0);
 

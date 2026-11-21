@@ -21,6 +21,9 @@ namespace boot_hle {
 PPCFunc KeGetCurrentProcessType;
 PPCFunc XGetLanguage;
 PPCFunc XGetAVPack;
+PPCFunc ExGetXConfigSetting;
+PPCFunc XamGetSystemVersion;
+PPCFunc XamShowMessageBoxUIEx;
 PPCFunc RtlInitAnsiString;
 PPCFunc RtlInitUnicodeString;
 PPCFunc RtlMultiByteToUnicodeN;

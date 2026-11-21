@@ -87,6 +87,15 @@ bool close_event(std::uint32_t handle) {
     return g_events.erase(handle) != 0;
 }
 
+void signal_event(const std::shared_ptr<GuestEvent>& event) {
+    {
+        std::lock_guard lock(event->mutex);
+        event->signaled = true;
+    }
+    if (event->manual_reset) event->condition.notify_all();
+    else event->condition.notify_one();
+}
+
 std::optional<std::chrono::milliseconds> decode_guest_timeout(
     std::uint8_t* base, std::uint32_t timeout_address) {
     if (timeout_address == 0) return std::nullopt; // Infinite wait.
@@ -224,6 +233,118 @@ PPC_FUNC(XGetAVPack) {
 
 // xboxkrnl #0x12C. RtlInitAnsiString(ANSI_STRING* dest /*r3*/, const char* src /*r4*/).
 // ANSI_STRING (big-endian): u16 Length, u16 MaximumLength, u32 Buffer. The source is NOT copied.
+// xboxkrnl #0x10. Covers the common stable XConfig settings reached during
+// title startup; unsupported categories/settings fail with parameter-specific NTSTATUS.
+PPC_FUNC(ExGetXConfigSetting) {
+    const auto category = static_cast<std::uint16_t>(ctx.r3.u32);
+    const auto setting = static_cast<std::uint16_t>(ctx.r4.u32);
+    const auto buffer = ctx.r5.u32;
+    const auto buffer_size = static_cast<std::uint16_t>(ctx.r6.u32);
+    const auto required_size = ctx.r7.u32;
+
+    std::uint8_t value[4]{};
+    std::uint16_t value_size = 0;
+    switch (category) {
+    case 0x0002: // XCONFIG_SECURED_CATEGORY
+        if (setting == 0x0002) { // XCONFIG_SECURED_AV_REGION
+            value_size = 4;
+            put_be32(value, 0x00001000u);
+        } else {
+            ctx.r3.u32 = 0xC00000F0u; // STATUS_INVALID_PARAMETER_2
+            if (required_size != 0) put_be16(at(base, required_size), 0);
+            return;
+        }
+        break;
+    case 0x0003: // XCONFIG_USER_CATEGORY
+        switch (setting) {
+        case 0x0001: case 0x0002: case 0x0003: case 0x0004:
+        case 0x0005: case 0x0006: case 0x0007: // Time zone values.
+        case 0x000C: // Retail flags.
+            value_size = 4;
+            put_be32(value, 0);
+            break;
+        case 0x0009: // User language (English).
+            value_size = 4;
+            put_be32(value, 1);
+            break;
+        case 0x000A: // Video flags.
+            value_size = 4;
+            put_be32(value, 0x00040000u);
+            break;
+        case 0x000E: // User country: Xenia's default US configuration.
+            value_size = 1;
+            value[0] = 103;
+            break;
+        default:
+            ctx.r3.u32 = 0xC00000F0u; // STATUS_INVALID_PARAMETER_2
+            if (required_size != 0) put_be16(at(base, required_size), 0);
+            return;
+        }
+        break;
+    default:
+        ctx.r3.u32 = 0xC00000EFu; // STATUS_INVALID_PARAMETER_1
+        if (required_size != 0) put_be16(at(base, required_size), 0);
+        return;
+    }
+
+    if (buffer != 0) {
+        if (buffer_size < value_size) {
+            ctx.r3.u32 = 0xC0000023u; // STATUS_BUFFER_TOO_SMALL
+            if (required_size != 0) put_be16(at(base, required_size), 0);
+            return;
+        }
+        std::memcpy(at(base, buffer), value, value_size);
+    } else if (buffer_size != 0) {
+        ctx.r3.u32 = 0xC00000F1u; // STATUS_INVALID_PARAMETER_3
+        if (required_size != 0) put_be16(at(base, required_size), 0);
+        return;
+    }
+
+    if (required_size != 0) put_be16(at(base, required_size), value_size);
+    ctx.r3.u32 = kStatusSuccess;
+}
+
+// xam.xex #0x282. Returning zero is Xenia's compatibility behavior.
+PPC_FUNC(XamGetSystemVersion) {
+    ctx.r3.u32 = 0;
+}
+
+// xam.xex #0x2DC. The caller passes ten arguments: args 9 and 10 are spilled
+// at caller SP+0x54 and SP+0x5C. Those exact stores are present at 0x82A46860
+// in the generated title code. Complete the overlapped result immediately,
+// auto-selecting the focused button in this headless runtime.
+PPC_FUNC(XamShowMessageBoxUIEx) {
+    constexpr std::uint32_t kErrorIoPending = 997u;
+    const auto result_pointer = get_be32(at(base, ctx.r1.u32 + 0x54));
+    const auto overlapped = get_be32(at(base, ctx.r1.u32 + 0x5C));
+
+    if (result_pointer != 0) put_be32(at(base, result_pointer), ctx.r8.u32);
+    if (overlapped == 0) {
+        ctx.r3.u32 = kStatusSuccess;
+        return;
+    }
+
+    put_be32(at(base, overlapped + 0x00), kStatusSuccess);
+    put_be32(at(base, overlapped + 0x04), 0);
+    put_be32(at(base, overlapped + 0x18), 0);
+    const auto event_handle = get_be32(at(base, overlapped + 0x0C));
+    if (event_handle == 0) {
+        ctx.r3.u32 = kStatusSuccess;
+        return;
+    }
+
+    const auto event = lookup_event(event_handle);
+    if (!event) {
+        put_be32(at(base, overlapped + 0x00), kStatusInvalidHandle);
+        put_be32(at(base, overlapped + 0x18), kStatusInvalidHandle);
+        ctx.r3.u32 = kStatusInvalidHandle;
+        return;
+    }
+
+    signal_event(event);
+    ctx.r3.u32 = kErrorIoPending;
+}
+
 PPC_FUNC(RtlInitAnsiString) {
     auto* dest = at(base, ctx.r3.u32);
     const auto src = ctx.r4.u32;
@@ -410,11 +531,9 @@ PPC_FUNC(NtSetEvent) {
     {
         std::lock_guard lock(event->mutex);
         previous = event->signaled ? 1u : 0u;
-        event->signaled = true;
     }
+    signal_event(event);
     if (ctx.r4.u32 != 0) put_be32(at(base, ctx.r4.u32), previous);
-    if (event->manual_reset) event->condition.notify_all();
-    else event->condition.notify_one();
     ctx.r3.u32 = kStatusSuccess;
 }
 PPC_FUNC(NtClearEvent) {

@@ -6,6 +6,7 @@ bool register_boot_imports(PpcImportRegistry& imports, std::string* error) {
     struct Entry { const char* library; std::uint16_t ordinal; PPCFunc* fn; };
     const Entry entries[] = {
         {"xboxkrnl.exe", 0x0003, &boot_hle::DbgPrint},
+        {"xboxkrnl.exe", 0x0010, &boot_hle::ExGetXConfigSetting},
         {"xboxkrnl.exe", 0x0021, &boot_hle::FscSetCacheElementCount},
         {"xboxkrnl.exe", 0x0028, &boot_hle::HalReturnToFirmware},
         {"xboxkrnl.exe", 0x0052, &boot_hle::KeBugCheck},
@@ -31,6 +32,8 @@ bool register_boot_imports(PpcImportRegistry& imports, std::string* error) {
         {"xboxkrnl.exe", 0x00F6, &boot_hle::NtSetEvent},
         {"xboxkrnl.exe", 0x00FD, &boot_hle::NtWaitForSingleObjectEx},
         {"xam.xex",      0x0001, &boot_hle::NetDll_WSAStartup},
+        {"xam.xex",      0x0282, &boot_hle::XamGetSystemVersion},
+        {"xam.xex",      0x02DC, &boot_hle::XamShowMessageBoxUIEx},
         {"xam.xex",      0x0033, &boot_hle::NetDll_XNetStartup},
         {"xam.xex",      0x03CB, &boot_hle::XGetAVPack},
         {"xam.xex",      0x03CD, &boot_hle::XGetLanguage},
