@@ -97,12 +97,12 @@ void test_critical_sections() {
 }
 
 void test_tls() {
-    constexpr std::uint32_t slot_count = 2048;
+    constexpr std::uint32_t slot_count = 256;
     constexpr std::uint32_t out_of_indexes = 0xFFFFFFFFu;
     std::vector<std::uint32_t> allocated;
     allocated.reserve(slot_count);
 
-    // The kernel TLS bitmap is process-wide and exposes 2,048 indices.
+    // The Xbox process TLS bitmap contains 256 indices.
     PPCContext context{};
     for (std::uint32_t i = 0; i < slot_count; ++i) {
         context = {};

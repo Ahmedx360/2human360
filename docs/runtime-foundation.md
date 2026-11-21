@@ -78,7 +78,7 @@ import log remains the source of truth.
 `runtime/ppc/boot_hle.*` provides a host-backed compatibility subset for the imports currently reached or
 prioritized by Too Human startup. It includes process/time queries; selected XConfig values; ANSI/Unicode string
 initialization and Latin-1 conversions; FILETIME/TIME_FIELDS conversions; XEX header/module/privilege queries;
-critical sections; 2,048 process-wide kernel TLS indices with host-thread-local values; unnamed dispatcher events; selected
+critical sections; 256 per-process kernel TLS indices with host-thread-local values; unnamed dispatcher events; selected
 XAM startup/message-box behavior; and diagnostic, exit, and networking-startup handlers. Register the handlers with
 `register_boot_imports(registry)` before `initialize_title_runtime`.
 
