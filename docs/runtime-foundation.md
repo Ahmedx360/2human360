@@ -95,18 +95,23 @@ Thread stacks and both guard regions use the host's native page size, with a 16 
 
 Guest thread context initialization now has a matching release path. It validates that KTHREAD, PCR, TLS and stack allocations still belong to the expected heaps, restores protected stack guard pages to read/write, clears per-thread state, and releases those allocations. Only the thread record that originally created the process-wide ProcessInfoBlock may release it; worker contexts leave the shared block intact. Regression tests verify malformed records are rejected without freeing memory and that a released worker stack can be reused.
 
-GuestThreadManager is a separately testable host-side lifecycle primitive. When constructed with
-`process_kernel_objects()`, it registers thread-completion objects in the same process handle table as events. The
-existing `NtWaitForSingleObjectEx` and `NtClose` handlers can therefore operate on either type. Closing the guest
-handle removes lookup access but does not cancel or destroy a live worker. The manager owns executor workers,
-models initial suspension/resume counts, provides finite/infinite completion waits and exit-code queries, and
-keeps a live worker alive after its public handle is closed. An optional exactly-once cleanup callback is deferred
-until both the worker has completed and its public handle has closed; in-flight waiters are allowed to finish before
-cleanup runs. Manager shutdown joins workers and waits for any cleanup callback already in progress before its runtime
-owners can be destroyed. Executors receive a stop token and must cooperate with shutdown. The shared handle layer now lets the existing NtWaitForSingleObjectEx and NtClose imports wait on and close
-thread-completion objects when the manager is constructed with process_kernel_objects(). Event-only operations
-continue to reject thread handles. ExCreateThread, NtResumeThread, actual PPC worker execution and the generated PPC
-bridge remain unimplemented; the game's real worker-thread ABI and safe concurrent import dispatch remain outstanding.
+GuestThreadManager owns host workers and registers thread-completion objects in the shared process handle table.
+`NtWaitForSingleObjectEx` and `NtClose` therefore operate on both event and thread objects; event set/clear handlers
+remain event-only. The manager models initial suspension/resume counts, finite/infinite completion waits, exit codes,
+and handle closure without cancelling a live worker. Its optional exactly-once cleanup callback is deferred until
+the worker has completed, the handle is closed, and in-flight waiters have returned. Manager shutdown stops and joins
+workers and waits for cleanup callbacks before the runtime heaps can be destroyed.
+
+`GuestThreadRuntime` implements the first guest-worker execution path. `ExCreateThread` builds a separate KTHREAD,
+PCR, TLS and stack context, then invokes the selected entry through `invoke_recompiled_function`. The API startup
+routine receives the user start address and context in r3/r4; without a startup routine, the start function receives
+its context in r3. Creation flag bit 0 requests initial suspension; bit 0x80 selects the native KTHREAD address as the
+guest handle. `NtResumeThread` and `KeResumeThread` resume the same typed thread object. `ExTerminateThread` unwinds
+the current worker using a guest-thread exit signal. Registry shutdown requests cancellation, observed at the next
+HLE/import dispatch boundary; pure PPC loops that never cross an HLE boundary are not preemptible yet.
+
+This is not a complete Xbox scheduler. APCs, alertable waits, arbitrary-thread suspend/terminate, processor affinity,
+priority semantics, and fully synchronized concurrent access to shared guest memory remain incomplete. `TooHumanGuestThreadRuntimeTests` exercises the PPC execution bridge and its guest register/context setup.
 
 `XamShowMessageBoxUIEx` auto-selects the focused choice in this headless runtime. XConfig support is limited to the
 explicit categories/settings in the handler. `DbgPrint` logs the format string without expanding guest varargs;
@@ -127,13 +132,12 @@ manager destruction.
 This is intentionally a generic lifecycle layer rather than a claim of Xbox thread support. The callback must
 cooperate with its stop token. It does not initialize guest context, execute PPC by itself, update guest
 KTHREAD state on transitions, implement suspend beyond the initial gate, or register any kernel import.
-ExCreateThread, NtResumeThread, APCs, termination, and concurrent PPC import-registry safety remain future work. TooHumanGuestThreadManagerTests exercises
-suspend/resume, timeout/completion, exit codes, invalid handles, and closing a live handle without cancelling it.
+TooHumanGuestThreadManagerTests exercises suspend/resume, timeout/completion, exit codes, invalid handles, deferred cleanup and closing a live handle without cancelling it.
 
 ## Next implementation sequence
 
 1. Add explicit MMIO ranges and aliases without exposing them as ordinary RAM.
-2. Implement only the imports proven to be called during Too Human startup, beginning with memory, synchronization and thread creation. Keep unknown ordinals fail-fast and document each ABI.
+2. Extend the now-connected thread foundation with the next imports actually reached by Too Human startup. Keep unknown ordinals fail-fast and document each ABI.
 3. Establish Too Human's real startup stack, TLS, register state and guest-thread lifecycle from XEX metadata and observed call sites.
 4. Add virtual file access and save-data isolation.
 5. Add GPU command capture/decoding before attempting a renderer; then add XMA and controller services.

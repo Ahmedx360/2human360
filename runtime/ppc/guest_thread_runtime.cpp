@@ -7,7 +7,6 @@
 #include <utility>
 namespace toohuman::runtime {
 namespace {
-constexpr std::uint32_t kStatusSuccess = 0x00000000u;
 constexpr std::uint32_t kStatusUnsuccessful = 0xC0000001u;
 constexpr std::uint32_t kStatusAccessViolation = 0xC0000005u;
 constexpr std::uint32_t kStatusInvalidHandle = 0xC0000008u;
