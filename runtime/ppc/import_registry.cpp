@@ -654,6 +654,7 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
         };
 
         if (import.ordinal == 0x00CC) { // NtAllocateVirtualMemory
+            std::lock_guard region_lock(virtual_memory_regions_mutex_);
             const auto base_pointer = context.r3.u32;
             const auto size_pointer = context.r4.u32;
             if (!valid_guest_buffer(base_pointer, 4) ||
@@ -744,6 +745,7 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
         }
 
         if (import.ordinal == 0x00DC) { // NtFreeVirtualMemory
+            std::lock_guard region_lock(virtual_memory_regions_mutex_);
             const auto base_pointer = context.r3.u32;
             const auto size_pointer = context.r4.u32;
             if (!valid_guest_buffer(base_pointer, 4) ||
@@ -818,7 +820,6 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
                 return;
             }
 
-            std::lock_guard region_lock(virtual_memory_regions_mutex_);
             const auto allocation = virtual_heap_->allocation_containing(requested_base);
             if (!allocation) {
                 context.r3.u32 = kStatusMemoryNotAllocated;
@@ -934,7 +935,6 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
                 context.r3.u32 = kStatusAccessViolation;
                 return;
             }
-            std::lock_guard region_lock(virtual_memory_regions_mutex_);
             const auto allocation = virtual_heap_->allocation_containing(guest_address);
             if (!allocation) {
                 context.r3.u32 = kStatusInvalidParameter;
