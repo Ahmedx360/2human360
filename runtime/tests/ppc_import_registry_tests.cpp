@@ -158,7 +158,7 @@ int main() {
     boot_context.r3.u32 = unicode_descriptor;
     boot_context.r4.u32 = unicode_source;
     call_test_import(0x8200114Cu, boot_context);
-    assert(guest_be32(unicode_descriptor) == 0x00040000u);
+    assert(guest_be32(unicode_descriptor) == 0x00020004u);
     assert(guest_be32(unicode_descriptor + 4) == unicode_source);
 
     // Event create/set/clear/wait/close lifecycle, including manual vs auto reset.
