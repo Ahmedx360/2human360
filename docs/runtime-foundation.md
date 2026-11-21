@@ -95,7 +95,10 @@ Thread stacks and both guard regions use the host's native page size, with a 16 
 
 Guest thread context initialization now has a matching release path. It validates that KTHREAD, PCR, TLS and stack allocations still belong to the expected heaps, restores protected stack guard pages to read/write, clears per-thread state, and releases those allocations. Only the thread record that originally created the process-wide ProcessInfoBlock may release it; worker contexts leave the shared block intact. Regression tests verify malformed records are rejected without freeing memory and that a released worker stack can be reused.
 
-GuestThreadManager is a separately testable host-side lifecycle primitive. It owns executor workers,
+GuestThreadManager is a separately testable host-side lifecycle primitive. When constructed with
+`process_kernel_objects()`, it registers thread-completion objects in the same process handle table as events. The
+existing `NtWaitForSingleObjectEx` and `NtClose` handlers can therefore operate on either type. Closing the guest
+handle removes lookup access but does not cancel or destroy a live worker. The manager owns executor workers,
 models initial suspension/resume counts, provides finite/infinite completion waits and exit-code queries, and
 keeps a live worker alive after its public handle is closed. Executors receive a stop token and must cooperate
 with shutdown. The manager is deliberately not yet connected to ExCreateThread, NtResumeThread,
@@ -121,8 +124,7 @@ manager destruction.
 This is intentionally a generic lifecycle layer rather than a claim of Xbox thread support. The callback must
 cooperate with its stop token. It does not initialize guest context, execute PPC by itself, update guest
 KTHREAD state on transitions, implement suspend beyond the initial gate, or register any kernel import.
-ExCreateThread, NtResumeThread, thread-object dispatch waits/close integration, APCs, termination, and
-concurrent PPC import-registry safety remain future work. TooHumanGuestThreadManagerTests exercises
+ExCreateThread, NtResumeThread, APCs, termination, and concurrent PPC import-registry safety remain future work. TooHumanGuestThreadManagerTests exercises
 suspend/resume, timeout/completion, exit codes, invalid handles, and closing a live handle without cancelling it.
 
 ## Next implementation sequence

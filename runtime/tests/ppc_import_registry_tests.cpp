@@ -1,6 +1,7 @@
 #include "memory/guest_address_space.hpp"
 #include "ppc/import_registry.hpp"
 #include "ppc/boot_hle.hpp"
+#include "ppc/guest_thread_manager.hpp"
 #include <ppc_config.h>
 
 #include <atomic>
@@ -522,6 +523,27 @@ int main() {
     boot_context.r3.u32 = auto_event;
     call_test_import(0x82001144u, boot_context);
     assert(boot_context.r3.u32 == 0);
+
+    // Thread completion handles share the event dispatcher table.
+    toohuman::runtime::GuestThreadManager guest_threads(
+        toohuman::runtime::process_kernel_objects());
+    const auto completed_thread = guest_threads.create(
+        toohuman::runtime::GuestThreadStartup{},
+        [](toohuman::runtime::GuestThreadStartup&, std::stop_token) { return 0x12345678u; },
+        false, &error);
+    assert(completed_thread.has_value());
+    assert(guest_threads.wait(*completed_thread, std::chrono::seconds(2)) ==
+           toohuman::runtime::GuestThreadWaitResult::Signaled);
+    boot_context = {};
+    boot_context.r3.u32 = *completed_thread;
+    call_test_import(0x82001140u, boot_context); // NtWaitForSingleObjectEx.
+    assert(boot_context.r3.u32 == 0u);
+    boot_context = {};
+    boot_context.r3.u32 = *completed_thread;
+    call_test_import(0x82001144u, boot_context); // NtClose.
+    assert(boot_context.r3.u32 == 0u);
+    std::uint32_t closed_thread_exit = 0;
+    assert(!guest_threads.get_exit_code(*completed_thread, closed_thread_exit));
 
     // XAM's 9th/10th arguments are stack-spilled at SP+0x54/+0x5C in the title caller.
     constexpr std::uint32_t message_stack = 0x82015000u;
