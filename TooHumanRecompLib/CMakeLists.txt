@@ -27,22 +27,21 @@ set(TH_PPC_SOURCES)
 set(TH_PREPARED_DIR "${CMAKE_CURRENT_BINARY_DIR}/prepared_ppc")
 foreach(TH_SOURCE IN LISTS TH_PPC_INPUTS)
     get_filename_component(TH_NAME "${TH_SOURCE}" NAME)
-    if(TH_NAME STREQUAL "ppc_recomp.125.cpp" OR TH_NAME STREQUAL "ppc_recomp.191.cpp" OR TH_NAME STREQUAL "ppc_recomp.372.cpp")
-        set(TH_PREPARED_SOURCE "${TH_PREPARED_DIR}/${TH_NAME}")
-        add_custom_command(
-            OUTPUT "${TH_PREPARED_SOURCE}"
-            COMMAND "${CMAKE_COMMAND}" -E make_directory "${TH_PREPARED_DIR}"
-            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/fix_generated_cpp.py"
-                "${TH_SOURCE}" --output "${TH_PREPARED_SOURCE}"
-            DEPENDS "${TH_SOURCE}" "${CMAKE_SOURCE_DIR}/tools/fix_generated_cpp.py"
-            COMMENT "Normalizing legacy XenonRecomp output: ${TH_NAME}"
-            VERBATIM
-        )
-        set_source_files_properties("${TH_PREPARED_SOURCE}" PROPERTIES GENERATED TRUE)
-        list(APPEND TH_PPC_SOURCES "${TH_PREPARED_SOURCE}")
-    else()
-        list(APPEND TH_PPC_SOURCES "${TH_SOURCE}")
-    endif()
+    # Run the normalizer over every generated unit. It is idempotent and
+    # repairs both known historical units and newly discovered emitter defects
+    # (for example scalar PPC scratch registers emitted with vector indexing).
+    set(TH_PREPARED_SOURCE "${TH_PREPARED_DIR}/${TH_NAME}")
+    add_custom_command(
+        OUTPUT "${TH_PREPARED_SOURCE}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${TH_PREPARED_DIR}"
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/fix_generated_cpp.py"
+            "${TH_SOURCE}" --output "${TH_PREPARED_SOURCE}"
+        DEPENDS "${TH_SOURCE}" "${CMAKE_SOURCE_DIR}/tools/fix_generated_cpp.py"
+        COMMENT "Normalizing XenonRecomp output: ${TH_NAME}"
+        VERBATIM
+    )
+    set_source_files_properties("${TH_PREPARED_SOURCE}" PROPERTIES GENERATED TRUE)
+    list(APPEND TH_PPC_SOURCES "${TH_PREPARED_SOURCE}")
 endforeach()
 
 list(APPEND TH_PPC_SOURCES "${TH_MAPPING_FILE}")
