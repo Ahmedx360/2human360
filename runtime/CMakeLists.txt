@@ -26,15 +26,47 @@ set_target_properties(TooHumanRuntimeCore PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
 
+# Stateless startup HLE. The handlers need only the generated ppc_context.h/ppc_config.h and SIMDe,
+# not the 375-unit game library, so they build and test without it.
+if(NOT DEFINED TH_SIMDE_DIR)
+    set(TH_SIMDE_DIR "${CMAKE_SOURCE_DIR}/tools/XenonRecomp/thirdparty/simde")
+endif()
+if(EXISTS "${TH_SIMDE_DIR}/x86/avx.h")
+    add_library(TooHumanBootHle STATIC ppc/boot_hle.cpp)
+    target_include_directories(TooHumanBootHle PUBLIC
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/TooHumanRecompLib/ppc"
+        "${TH_SIMDE_DIR}"
+    )
+    target_link_libraries(TooHumanBootHle PUBLIC TooHumanRuntimeCore)
+    target_compile_features(TooHumanBootHle PUBLIC cxx_std_20)
+    if(BUILD_TESTING)
+        add_executable(TooHumanBootHleTests tests/boot_hle_tests.cpp)
+        target_link_libraries(TooHumanBootHleTests PRIVATE TooHumanBootHle)
+        if(MSVC)
+            target_compile_options(TooHumanBootHleTests PRIVATE /UNDEBUG)
+        else()
+            target_compile_options(TooHumanBootHleTests PRIVATE -UNDEBUG)
+        endif()
+        add_test(NAME TooHumanBootHleTests COMMAND TooHumanBootHleTests)
+    endif()
+else()
+    message(STATUS "SIMDe not found (${TH_SIMDE_DIR}); skipping TooHumanBootHle. Run: git submodule update --init --recursive")
+endif()
+
 if(TH_BUILD_RECOMP_LIB)
     add_library(TooHumanPpcRuntime STATIC
         ppc/function_table.cpp
         ppc/import_registry.cpp
+        ppc/boot_hle_register.cpp
         ppc/title_runtime.cpp
     )
     target_link_libraries(TooHumanPpcRuntime
         PUBLIC TooHumanRuntimeCore TooHumanRecompLib
     )
+    if(TARGET TooHumanBootHle)
+        target_link_libraries(TooHumanPpcRuntime PUBLIC TooHumanBootHle)
+    endif()
     target_compile_features(TooHumanPpcRuntime PUBLIC cxx_std_20)
     set_target_properties(TooHumanPpcRuntime PROPERTIES
         CXX_STANDARD 20

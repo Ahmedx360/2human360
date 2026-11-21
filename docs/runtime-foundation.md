@@ -41,6 +41,26 @@ When the generated library is enabled, `TooHumanPpcRuntime` registers every non-
 
 The PE-only workflow cannot provide this metadata. Use the optional XEX TOML configuration with the matching original `default.xex` to preserve imports when regenerating the PPC translation. The `TooHumanXexImportAudit <default.xex>` utility now loads and audits the supplied XEX directly; the two-file `<default.xex> <default.exe>` form remains available for extracted PE workflows. The audit prints library IDs/versions, descriptor records, function/IAT pairings and genuine variable imports. The supplied Too Human executable has two import libraries (`xam.xex` and `xboxkrnl.exe`), 242 function thunks and 11 genuine variable imports.
 
+## Startup import priorities and boot HLE
+
+`tools/startup_import_trace.py` walks the recompiled call graph from `_xstart` in source order and reports where each
+import is first reached (`docs/startup-imports.md`). 37 of the 242 function imports are reached by direct calls from the
+entry point; they form a recognisable CRT startup (virtual-memory setup, critical sections, system queries, TLS, network init).
+This is a static prioritisation aid: indirect calls and data-dependent branches are not followed, so the runtime's fail-fast
+import log remains the source of truth.
+
+`runtime/ppc/boot_hle.*` implements the **stateless** subset (13 imports): `KeGetCurrentProcessType`, `XGetLanguage`,
+`XGetAVPack`, `RtlInitAnsiString`, `RtlMultiByteToUnicodeN`, `RtlUnicodeToMultiByteN`, `FscSetCacheElementCount`, `DbgPrint`
+(format string logged, varargs not expanded), `KeBugCheck`/`KeBugCheckEx` (log and abort), `HalReturnToFirmware` (clean exit),
+and `NetDll_XNetStartup`/`NetDll_WSAStartup` (return success; any real socket import still fails fast). Call
+`register_boot_imports(registry)` before `initialize_title_runtime`. The handlers are tested by `TooHumanBootHleTests`
+without the generated game library (needs only `ppc_context.h` and SIMDe; set `-DTH_SIMDE_DIR=...` if the XenonRecomp
+submodule is not checked out).
+
+Deliberately **not** implemented because they need a thread/object model: `RtlInitializeCriticalSection`/`Enter`/`Leave`,
+`NtCreateEvent`/`NtWaitForSingleObjectEx`/`NtClose`, `KeTls*`, `ExGetXConfigSetting`, `XamShowMessageBoxUIEx`,
+`XamGetSystemVersion`, `XexGetModuleHandle`/`XexGetProcedureAddress`, `RtlRaiseException`, `RtlNtStatusToDosError`.
+
 ## Next implementation sequence
 
 1. Add explicit MMIO ranges and aliases without exposing them as ordinary RAM.
