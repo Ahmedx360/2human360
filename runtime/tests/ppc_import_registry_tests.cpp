@@ -113,20 +113,34 @@ int main() {
                (std::uint32_t(p[2]) << 8) | std::uint32_t(p[3]);
     };
     assert(guest_be32(critical_section + 0x10) == 0xFFFFFFFFu);
+    constexpr std::uint32_t critical_section_pcr = 0x82015200u;
+    constexpr std::uint32_t critical_section_kthread = 0x82015300u;
+    const auto write_guest_be32 = [&](std::uint32_t address, std::uint32_t value) {
+        memory.base()[address] = static_cast<std::uint8_t>(value >> 24);
+        memory.base()[address + 1] = static_cast<std::uint8_t>(value >> 16);
+        memory.base()[address + 2] = static_cast<std::uint8_t>(value >> 8);
+        memory.base()[address + 3] = static_cast<std::uint8_t>(value);
+    };
+    write_guest_be32(critical_section_pcr + 0x100, critical_section_kthread);
     boot_context = {};
+    boot_context.r13.u32 = critical_section_pcr;
     boot_context.r3.u32 = critical_section;
     call_test_import(0x82001120u, boot_context); // TryEnter
     assert(boot_context.r3.u32 == 1);
+    assert(guest_be32(critical_section + 0x18) == critical_section_kthread);
     boot_context = {};
+    boot_context.r13.u32 = critical_section_pcr;
     boot_context.r3.u32 = critical_section;
     call_test_import(0x82001120u, boot_context); // Recursive TryEnter
     assert(boot_context.r3.u32 == 1);
     assert(guest_be32(critical_section + 0x14) == 2);
     boot_context = {};
+    boot_context.r13.u32 = critical_section_pcr;
     boot_context.r3.u32 = critical_section;
     call_test_import(0x8200111Cu, boot_context); // Leave recursion level 2
     assert(guest_be32(critical_section + 0x14) == 1);
     boot_context = {};
+    boot_context.r13.u32 = critical_section_pcr;
     boot_context.r3.u32 = critical_section;
     call_test_import(0x8200111Cu, boot_context); // Final leave
     assert(guest_be32(critical_section + 0x10) == 0xFFFFFFFFu);

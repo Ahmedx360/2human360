@@ -106,13 +106,16 @@ bool close_event(std::uint32_t handle) {
     return g_events.erase(handle) != 0;
 }
 
-void signal_event(const std::shared_ptr<GuestEvent>& event) {
+bool signal_event(const std::shared_ptr<GuestEvent>& event) {
+    bool was_signaled = false;
     {
         std::lock_guard lock(event->mutex);
+        was_signaled = event->signaled;
         event->signaled = true;
     }
     if (event->manual_reset) event->condition.notify_all();
     else event->condition.notify_one();
+    return was_signaled;
 }
 
 std::optional<std::chrono::milliseconds> decode_guest_timeout(
@@ -193,6 +196,17 @@ std::uint32_t current_host_thread_token() {
     thread_local const std::uint32_t token = next.fetch_add(1, std::memory_order_relaxed);
     return token;
 }
+std::uint32_t current_guest_thread_token(const PPCContext& context,
+                                         std::uint8_t* base) {
+    if (context.r13.u32 != 0) {
+        const auto pcr = context.r13.u32;
+        const auto guest_thread = get_be32(at(base, pcr + 0x100));
+        if (guest_thread != 0) return guest_thread;
+    }
+    // Unit tests and diagnostic calls without an initialized PCR still need
+    // stable recursive ownership for the calling host thread.
+    return current_host_thread_token();
+}
 std::shared_ptr<CriticalSectionState> get_critical_section(
     std::uint8_t* base, std::uint32_t address, bool create) {
     if (address == 0) return {};
@@ -216,9 +230,10 @@ void initialize_critical_section(std::uint8_t* base, std::uint32_t address,
     cs[1] = static_cast<std::uint8_t>(spin_units);
     put_be32(cs + 0x10, 0xFFFFFFFFu);  // unlocked lock_count
 }
-void mark_critical_section_acquired(std::uint8_t* base, std::uint32_t address) {
+void mark_critical_section_acquired(std::uint8_t* base, std::uint32_t address,
+                                    const PPCContext& context) {
     auto* cs = at(base, address);
-    const auto token = current_host_thread_token();
+    const auto token = current_guest_thread_token(context, base);
     if (get_be32(cs + 0x18) == token) {
         put_be32(cs + 0x10, get_be32(cs + 0x10) + 1);
         put_be32(cs + 0x14, get_be32(cs + 0x14) + 1);
@@ -613,7 +628,7 @@ PPC_FUNC(RtlEnterCriticalSection) {
     auto state = get_critical_section(base, address, true);
     if (!state) return;
     state->mutex.lock();
-    mark_critical_section_acquired(base, address);
+    mark_critical_section_acquired(base, address, ctx);
 }
 PPC_FUNC(RtlTryEnterCriticalSection) {
     const auto address = ctx.r3.u32;
@@ -630,7 +645,7 @@ PPC_FUNC(RtlLeaveCriticalSection) {
     auto state = get_critical_section(base, address, false);
     if (!state) return;
     auto* cs = at(base, address);
-    if (get_be32(cs + 0x18) != current_host_thread_token()) return;
+    if (get_be32(cs + 0x18) != current_guest_thread_token(ctx, base)) return;
     const auto recursion = get_be32(cs + 0x14);
     if (recursion == 0) return;
     if (recursion > 1) {
@@ -718,12 +733,7 @@ PPC_FUNC(NtSetEvent) {
         ctx.r3.u32 = kStatusInvalidHandle;
         return;
     }
-    std::uint32_t previous = 0;
-    {
-        std::lock_guard lock(event->mutex);
-        previous = event->signaled ? 1u : 0u;
-    }
-    signal_event(event);
+    const auto previous = signal_event(event) ? 1u : 0u;
     if (ctx.r4.u32 != 0) put_be32(at(base, ctx.r4.u32), previous);
     ctx.r3.u32 = kStatusSuccess;
 }
