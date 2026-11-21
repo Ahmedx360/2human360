@@ -14,6 +14,7 @@ namespace toohuman::runtime {
 struct GuestMainThreadStartup {
     std::uint32_t kthread_address{};
     std::uint32_t pcr_address{};
+    std::uint32_t process_info_block_address{};
     std::uint32_t tls_static_address{};
     std::uint32_t tls_dynamic_address{};
     std::uint32_t tls_size{};

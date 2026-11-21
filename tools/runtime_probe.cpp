@@ -120,6 +120,7 @@ int main(int argc, char** argv) {
     const auto& startup = report.main_thread;
     std::cout << "Main guest thread: KTHREAD=0x" << std::hex << startup.kthread_address
               << " PCR=0x" << startup.pcr_address
+              << " PIB=0x" << startup.process_info_block_address
               << " TLS=0x" << startup.tls_static_address
               << " stack=0x" << startup.stack_limit << "-0x" << startup.stack_base
               << " (SP=0x" << startup.context.r1.u32

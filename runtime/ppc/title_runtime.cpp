@@ -44,12 +44,16 @@ bool initialize_main_thread(GuestAddressSpace& memory,
         return false;
     };
 
-    const std::uint32_t stack_size =
+    const std::uint32_t requested_stack_size =
         xex.default_stack_size != 0 ? xex.default_stack_size : 0x40000u;
-    if (stack_size < 0x1000u ||
-        stack_size > std::numeric_limits<std::uint32_t>::max() - 0x2000u) {
+    if (requested_stack_size < 0x1000u ||
+        requested_stack_size > std::numeric_limits<std::uint32_t>::max() - 0x2FFFu) {
         return fail("XEX default stack size is outside the supported range");
     }
+    // Xenia rounds the guest stack up to the page size and reserves one
+    // page on either side for guard-page support.
+    const std::uint32_t stack_size =
+        (requested_stack_size + 0xFFFu) & ~0xFFFu;
 
     const std::uint32_t tls_slots =
         xex.tls_info && xex.tls_info->slot_count != 0 ? xex.tls_info->slot_count : 1024u;
@@ -90,6 +94,7 @@ bool initialize_main_thread(GuestAddressSpace& memory,
     if (!allocate(stack_allocation_size, 0x1000, state.stack_allocation_base) ||
         !allocate(0xAB0, 16, state.kthread_address) ||
         !allocate(0x2D8, 16, state.pcr_address) ||
+        !allocate(0x60, 16, state.process_info_block_address) ||
         !allocate(tls_total_size, 16, state.tls_static_address)) {
         return fail("Runtime virtual heap could not allocate the guest main-thread state");
     }
@@ -102,12 +107,31 @@ bool initialize_main_thread(GuestAddressSpace& memory,
     state.tls_dynamic_address = state.tls_static_address + tls_data_size;
     state.thread_id = 1;
 
+    std::memset(memory.base() + state.stack_allocation_base, 0xBE,
+                state.stack_allocation_size);
+
     // Xenia's layout places the static TLS template at tls_static_address;
     // the dynamic TLS slot array is based at tls_static_address+data_size.
     if (tls_raw_size != 0) {
         std::memcpy(memory.base() + state.tls_static_address,
                     image.bytes.data() + tls_source_offset, tls_raw_size);
     }
+
+    // Match Xenia's 0x60-byte ProcessInfoBlock. Process type 1 is user/title.
+    auto* process_info = memory.base() + state.process_info_block_address;
+    store_be32(process_info + 0x04, 0);
+    store_be32(process_info + 0x08, 0);
+    store_be32(process_info + 0x0C, 0x0000007Fu);
+    store_be32(process_info + 0x10, 0x001F0000u);
+    store_be32(process_info + 0x14, 0); // Thread count is maintained by scheduler.
+    process_info[0x1B] = 0x06;
+    store_be32(process_info + 0x1C, 16u * 1024u);
+    store_be32(process_info + 0x24, tls_data_size);
+    store_be32(process_info + 0x28, tls_raw_size);
+    store_be16(process_info + 0x2C, static_cast<std::uint16_t>(tls_slots * 4u));
+    process_info[0x2F] = 1; // X_PROCTYPE_USER.
+    store_be32(process_info + 0x54, 0);
+    store_be32(process_info + 0x58, 0);
 
     auto* pcr = memory.base() + state.pcr_address;
     store_be32(pcr + 0x00, state.tls_static_address);
@@ -131,11 +155,12 @@ bool initialize_main_thread(GuestAddressSpace& memory,
     store_be32(kthread + 0x05C, state.stack_base);
     store_be32(kthread + 0x060, state.stack_limit);
     store_be32(kthread + 0x068, state.tls_static_address);
+    kthread[0x06C] = 0;
     store_be32(kthread + 0x074, state.kthread_address + 0x074);
     store_be32(kthread + 0x078, state.kthread_address + 0x074);
     store_be32(kthread + 0x07C, state.kthread_address + 0x07C);
     store_be32(kthread + 0x080, state.kthread_address + 0x07C);
-    // +0x084 process-info-block pointer remains null until a process object exists.
+    store_be32(kthread + 0x084, state.process_info_block_address);
     kthread[0x08B] = 1;
     store_be32(kthread + 0x09C, 0xFDFFD7FFu);
     store_be32(kthread + 0x0D0, state.stack_base);
