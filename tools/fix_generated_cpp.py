@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
 
 
@@ -12,6 +13,38 @@ def normalize_cpp_source(source: str) -> str:
     source = source.replace("temp.f32[0]", "temp.f32")
     source = source.replace("temp.u8[0]", "temp.u8")
     source = source.replace("* 1f;", "* 1.0f;")
+
+    # XenonRecomp can emit a direct call to a function whose weak alias is
+    # declared later in the same translation unit. C++ requires a declaration
+    # before that call. The pinned PPC context defines PPC_EXTERN_FUNC(name)
+    # as the matching declaration without changing the generated definition.
+    call_positions: dict[str, int] = {}
+    for match in re.finditer(
+        r"(?m)^\\s*(sub_[0-9A-Fa-f]{8})\\(ctx,\\s*base\\);", source
+    ):
+        call_positions.setdefault(match.group(1), match.start())
+
+    declarations = []
+    for name, call_pos in call_positions.items():
+        alias_match = re.search(
+            rf"PPC_WEAK_FUNC\\(\\s*{re.escape(name)}\\s*\\)\\s*;", source
+        )
+        if alias_match and alias_match.start() > call_pos:
+            # The declaration may already have been inserted by a prior run.
+            if not re.search(
+                rf"(?m)^PPC_EXTERN_FUNC\\(\\s*{re.escape(name)}\\s*\\);",
+                source[:call_pos],
+            ):
+                declarations.append(name)
+
+    if declarations:
+        include_end = source.find("\\n")
+        if include_end < 0:
+            raise ValueError("Generated PPC source has no include line")
+        forward_declarations = "".join(
+            f"PPC_EXTERN_FUNC({name});\\n" for name in sorted(declarations)
+        )
+        source = source[: include_end + 1] + forward_declarations + source[include_end + 1 :]
 
     # bctr forms its destination from CTR[0:29] followed by two zero bits.
     # Two historical switch entries retained nonzero low bits; restore the
