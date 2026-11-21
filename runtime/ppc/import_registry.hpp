@@ -46,7 +46,7 @@ public:
                                std::size_t* registered_count = nullptr,
                                std::string* error = nullptr);
 
-    void dispatch(PPCContext& context, std::uint8_t* base) const;
+    void dispatch(PPCContext& context, std::uint8_t* base);
 
     // Allocate runtime memory from the committed private guest virtual range.
     [[nodiscard]] std::optional<std::uint32_t> allocate_runtime_memory(

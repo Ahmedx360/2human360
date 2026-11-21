@@ -62,7 +62,7 @@ bool guest_ascii_equals_ignore_case(const std::uint8_t* base,
                                     std::uint32_t address,
                                     const char* expected) {
     std::size_t index = 0;
-    while (expected[index] != '\\0') {
+    while (expected[index] != '\0') {
         auto value = base[address + static_cast<std::uint32_t>(index)];
         if (value >= 'A' && value <= 'Z') value = static_cast<std::uint8_t>(value + ('a' - 'A'));
         auto wanted = static_cast<std::uint8_t>(expected[index]);

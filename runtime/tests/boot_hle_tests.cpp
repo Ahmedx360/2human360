@@ -24,6 +24,36 @@ void put16(std::uint32_t a, std::uint16_t v) { g_mem[a] = v >> 8; g_mem[a + 1] =
 }
 
 namespace {
+void test_executable_module_lookup() {
+    constexpr std::uint32_t output = 0x7400u;
+    constexpr std::uint32_t name = 0x7500u;
+    set_executable_module_handle(0xA1B2C3D4u);
+
+    poke(name, "DeFaUlT.XeX");
+    PPCContext context{};
+    context.r3.u32 = name;
+    context.r4.u32 = output;
+    boot_hle::XexGetModuleHandle(context, base());
+    assert(context.r3.u32 == 0);
+    assert(be32(output) == 0xA1B2C3D4u);
+
+    poke(name, "not-default.xex");
+    context = {};
+    context.r3.u32 = name;
+    context.r4.u32 = output;
+    boot_hle::XexGetModuleHandle(context, base());
+    assert(context.r3.u32 == 0x00000490u);
+    assert(be32(output) == 0);
+
+    set_executable_module_handle(0);
+    context = {};
+    context.r3.u32 = 0;
+    context.r4.u32 = output;
+    boot_hle::XexGetModuleHandle(context, base());
+    assert(context.r3.u32 == 0x00000490u);
+    assert(be32(output) == 0);
+}
+
 void test_critical_sections() {
     constexpr std::uint32_t address = 0x8000u;
     PPCContext context{};
@@ -402,6 +432,7 @@ int main() {
     boot_hle::RtlUnicodeToMultiByteN(ctx, base());
     assert(be32(0x6F04) == 1);
 
+    test_executable_module_lookup();
     test_critical_sections();
     test_tls();
     test_events();

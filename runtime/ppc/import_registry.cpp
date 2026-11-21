@@ -446,7 +446,7 @@ bool PpcImportRegistry::install(GuestAddressSpace& memory,
     return true;
 }
 
-void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) const {
+void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
     const auto thunk_address = context.ctr.u32;
     const auto import_it = imports_by_thunk_.find(thunk_address);
     if (import_it == imports_by_thunk_.end()) {
