@@ -41,6 +41,14 @@ bool initialize_guest_main_thread(GuestAddressSpace& memory,
                                   GuestHeap& runtime_heap,
                                   GuestMainThreadStartup& state,
                                   std::string* error) {
+    if (!memory.valid()) {
+        if (error) *error = "Guest address space must be reserved before thread startup";
+        return false;
+    }
+    if (image.bytes.empty() || image.bytes.size() != image.image_size) {
+        if (error) *error = "Guest thread startup requires a complete mapped-image description";
+        return false;
+    }
     const auto fail = [&](const char* message) {
         if (error) *error = message;
         return false;
@@ -111,6 +119,12 @@ bool initialize_guest_main_thread(GuestAddressSpace& memory,
 
     std::memset(memory.base() + state.stack_allocation_base, 0xBE,
                 state.stack_allocation_size);
+    if (!memory.protect_region(state.stack_allocation_base, 0x1000u,
+                               GuestMemoryProtection::NoAccess, error) ||
+        !memory.protect_region(state.stack_base, 0x1000u,
+                               GuestMemoryProtection::NoAccess, error)) {
+        return fail("Could not protect the main-thread stack guard pages");
+    }
 
     // Xenia's layout places the static TLS template at tls_static_address;
     // the dynamic TLS slot array is based at tls_static_address+data_size.

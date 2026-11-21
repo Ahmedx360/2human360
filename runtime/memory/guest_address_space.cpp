@@ -251,6 +251,41 @@ bool GuestAddressSpace::commit_region(std::uint32_t guest_address, std::size_t s
     return commit_range(guest_address, size, error);
 }
 
+bool GuestAddressSpace::protect_region(std::uint32_t guest_address, std::size_t size,
+                                       GuestMemoryProtection protection,
+                                       std::string* error) {
+    if (!valid() || size == 0 ||
+        static_cast<std::uint64_t>(guest_address) > kSize ||
+        size > kSize - static_cast<std::uint64_t>(guest_address)) {
+        set_error(error, "Guest protection range is empty or outside the 32-bit address space");
+        return false;
+    }
+
+    const auto page_size = host_page_size();
+    if (page_size == 0 || (page_size & (page_size - 1)) != 0) {
+        set_error(error, "Host page size is invalid while protecting guest pages");
+        return false;
+    }
+    const auto page_mask = static_cast<std::uint64_t>(page_size) - 1;
+    const auto page_start = static_cast<std::uint64_t>(guest_address) & ~page_mask;
+    const auto range_end = static_cast<std::uint64_t>(guest_address) + size;
+    const auto page_end = (range_end + page_mask) & ~page_mask;
+    if (page_end > kSize || page_end <= page_start) {
+        set_error(error, "Page-aligned guest protection range exceeds the address space");
+        return false;
+    }
+
+    const auto host_base = reinterpret_cast<std::uintptr_t>(reservation_);
+    const auto host_address = host_base + static_cast<std::uintptr_t>(page_start);
+    if (!protect_pages(reinterpret_cast<void*>(host_address),
+                       static_cast<std::size_t>(page_end - page_start),
+                       static_cast<std::uint8_t>(protection))) {
+        set_error(error, "Host memory API could not update guest page protection");
+        return false;
+    }
+    return true;
+}
+
 bool GuestAddressSpace::initialize_function_table(std::uint32_t code_base,
                                                   std::uint32_t code_size,
                                                   std::string* error) {

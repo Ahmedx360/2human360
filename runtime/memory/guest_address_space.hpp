@@ -12,6 +12,12 @@
 
 namespace toohuman::runtime {
 
+enum class GuestMemoryProtection : std::uint8_t {
+    NoAccess = 0,
+    ReadOnly = 1,
+    ReadWrite = 3,
+};
+
 // Reserves the 32-bit Xbox 360 virtual address space in the host process.
 // Generated XenonRecomp functions calculate guest pointers as base + guest VA,
 // so a compact image-relative vector is not a compatible execution backing.
@@ -36,6 +42,9 @@ public:
                                  std::string* error = nullptr);
     [[nodiscard]] bool commit_region(std::uint32_t guest_address, std::size_t size,
                                      std::string* error = nullptr);
+    [[nodiscard]] bool protect_region(std::uint32_t guest_address, std::size_t size,
+                                      GuestMemoryProtection protection,
+                                      std::string* error = nullptr);
     [[nodiscard]] bool initialize_function_table(std::uint32_t code_base,
                                                  std::uint32_t code_size,
                                                  std::string* error = nullptr);

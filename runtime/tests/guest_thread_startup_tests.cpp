@@ -51,8 +51,11 @@ int main() {
     assert(state.context.lr == 0);
 
     const auto* bytes = memory.base();
-    assert(bytes[state.stack_allocation_base] == 0xBEu);
-    assert(bytes[state.stack_base - 1] == 0xBEu);
+    // Guard pages can be moved between protections via the guest address-space API.
+    assert(memory.protect_region(state.stack_allocation_base, 0x1000u,
+                                 GuestMemoryProtection::ReadOnly, &error));
+    assert(memory.protect_region(state.stack_allocation_base, 0x1000u,
+                                 GuestMemoryProtection::NoAccess, &error));
 
     assert(state.tls_size == 0x550u);
     assert(state.tls_dynamic_address == state.tls_static_address + 0x450u);
