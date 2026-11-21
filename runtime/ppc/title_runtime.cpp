@@ -64,12 +64,18 @@ bool initialize_guest_thread(GuestAddressSpace& memory,
         if (error) *error = "Guest thread ID or start address is invalid";
         return false;
     }
-    if (process_info_block_address != 0 &&
-        ((process_info_block_address & 3u) != 0 ||
-         static_cast<std::uint64_t>(process_info_block_address) + 0x60u >
-             GuestAddressSpace::kSize)) {
-        if (error) *error = "Guest ProcessInfoBlock address is invalid";
-        return false;
+    if (process_info_block_address != 0) {
+        if ((process_info_block_address & 3u) != 0 ||
+            static_cast<std::uint64_t>(process_info_block_address) + 0x60u >
+                GuestAddressSpace::kSize) {
+            if (error) *error = "Guest ProcessInfoBlock address is invalid";
+            return false;
+        }
+        const auto allocation_size = runtime_heap.allocation_size(process_info_block_address);
+        if (!allocation_size || *allocation_size < 0x60u) {
+            if (error) *error = "Guest ProcessInfoBlock must reference an allocated 0x60-byte heap object";
+            return false;
+        }
     }
     state = GuestThreadStartup{};
     const auto fail = [&](const char* message) {

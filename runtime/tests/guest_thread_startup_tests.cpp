@@ -145,6 +145,12 @@ int main() {
         0x20000u, 0u, image.image_base + 0x1800u, 0u,
         state.process_info_block_address, 0u, invalid_worker, &error));
 
+    GuestThreadStartup invalid_process_block{};
+    assert(!initialize_guest_thread(
+        memory, image, xex, heap, stack_heap,
+        0x20000u, 3u, image.image_base + 0x1800u, 0u,
+        0xA1000000u, 0u, invalid_process_block, &error));
+
     auto invalid_xex = xex;
     invalid_xex.tls_info->slot_count = 0x4000u;
     GuestMainThreadStartup invalid_state{};

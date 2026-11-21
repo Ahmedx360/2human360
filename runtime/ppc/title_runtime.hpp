@@ -77,8 +77,8 @@ struct TitleRuntimeInitReport {
 // Initializes the memory, generated PPC lookup table, XEX IATs and kernel
 // variable backing from a LoadedPeImage (either direct XEX reconstruction or
 // extracted PE) plus its matching original XEX. Register custom HLE handlers
-// before calling. Initializes one guest main-thread KTHREAD/PCR/TLS/stack
-// context, but does not start the entry point or create a guest scheduler.
+// before calling. Builds the main-thread context, but does not invoke the entry
+// point or create a guest scheduler.
 [[nodiscard]] bool initialize_title_runtime(
     GuestAddressSpace& memory,
     const LoadedPeImage& image,
