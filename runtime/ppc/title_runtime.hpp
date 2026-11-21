@@ -27,6 +27,7 @@ struct GuestThreadStartup {
     std::uint32_t start_address{};
     std::uint32_t start_context{};
     std::uint32_t creation_flags{};
+    bool owns_process_info_block{};
     PPCContext context{};
 };
 
@@ -65,6 +66,15 @@ struct TitleRuntimeInitReport {
 
 // Initializes the main thread and creates the process-wide ProcessInfoBlock.
 // The caller supplies separate process-state and stack heaps for independent testing.
+// Releases per-thread KTHREAD/PCR/TLS/stack allocations. The ProcessInfoBlock is
+// freed only when this context created it; worker contexts share the process block.
+[[nodiscard]] bool release_guest_thread_context(
+    GuestAddressSpace& memory,
+    GuestHeap& runtime_heap,
+    GuestHeap& stack_heap,
+    GuestThreadStartup& state,
+    std::string* error = nullptr);
+
 [[nodiscard]] bool initialize_guest_main_thread(
     GuestAddressSpace& memory,
     const LoadedPeImage& image,

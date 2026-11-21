@@ -91,6 +91,8 @@ Named-object lookup, generic object-manager semantics, APC delivery/alertable co
 are not implemented. Kernel TLS values are per host thread, matching the intended one-host-thread-per-guest-thread
 execution model.
 
+Guest thread context initialization now has a matching release path. It validates that KTHREAD, PCR, TLS and stack allocations still belong to the expected heaps, restores protected stack guard pages to read/write, clears per-thread state, and releases those allocations. Only the thread record that originally created the process-wide ProcessInfoBlock may release it; worker contexts leave the shared block intact. Regression tests verify malformed records are rejected without freeing memory and that a released worker stack can be reused.
+
 GuestThreadManager is a separately testable host-side lifecycle primitive. It owns executor workers,
 models initial suspension/resume counts, provides finite/infinite completion waits and exit-code queries, and
 keeps a live worker alive after its public handle is closed. Executors receive a stop token and must cooperate

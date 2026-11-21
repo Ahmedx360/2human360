@@ -134,6 +134,7 @@ bool initialize_guest_thread(GuestAddressSpace& memory,
     if (!stack_allocation) return fail("Guest stack heap could not allocate the guest thread stack");
     state.stack_allocation_base = *stack_allocation;
     const bool create_process_info_block = process_info_block_address == 0;
+    state.owns_process_info_block = create_process_info_block;
     if (!allocate(0xAB0, 16, state.kthread_address) ||
         !allocate(0x2D8, 16, state.pcr_address) ||
         (create_process_info_block &&
@@ -236,6 +237,85 @@ bool initialize_guest_thread(GuestAddressSpace& memory,
     state.context.r3.u32 = start_context;
     state.context.r13.u32 = state.pcr_address;
     state.context.lr = 0;
+    return true;
+}
+
+bool release_guest_thread_context(GuestAddressSpace& memory,
+                                    GuestHeap& runtime_heap,
+                                    GuestHeap& stack_heap,
+                                    GuestThreadStartup& state,
+                                    std::string* error) {
+    const auto fail = [&](const char* message) {
+        if (error) *error = message;
+        return false;
+    };
+    if (!memory.valid() || state.kthread_address == 0 ||
+        state.pcr_address == 0 || state.tls_static_address == 0 ||
+        state.process_info_block_address == 0 || state.tls_size == 0 ||
+        state.stack_allocation_base == 0 || state.stack_allocation_size == 0 ||
+        state.stack_size == 0 ||
+        state.stack_limit != state.stack_allocation_base + 0x1000u ||
+        static_cast<std::uint64_t>(state.stack_allocation_base) +
+                state.stack_allocation_size > GuestAddressSpace::kSize ||
+        static_cast<std::uint64_t>(state.stack_limit) + state.stack_size != state.stack_base ||
+        static_cast<std::uint64_t>(state.stack_base) + 0x1000u !=
+                static_cast<std::uint64_t>(state.stack_allocation_base) +
+                    state.stack_allocation_size) {
+        return fail("Guest thread context is incomplete or internally inconsistent");
+    }
+
+    const auto has_allocation = [](const GuestHeap& heap, std::uint32_t address,
+                                   std::size_t expected_size) {
+        const auto actual = heap.allocation_size(address);
+        return actual && *actual == expected_size;
+    };
+    if (!has_allocation(runtime_heap, state.kthread_address, 0xAB0u) ||
+        !has_allocation(runtime_heap, state.pcr_address, 0x2D8u) ||
+        !has_allocation(runtime_heap, state.tls_static_address, state.tls_size) ||
+        !has_allocation(stack_heap, state.stack_allocation_base,
+                        state.stack_allocation_size)) {
+        return fail("Guest thread allocations no longer match the startup record");
+    }
+    if (state.owns_process_info_block) {
+        if (!has_allocation(runtime_heap, state.process_info_block_address, 0x60u))
+            return fail("Owned ProcessInfoBlock allocation is missing or has the wrong size");
+    } else {
+        const auto process_info_size =
+            runtime_heap.allocation_size(state.process_info_block_address);
+        if (!process_info_size || *process_info_size < 0x60u)
+            return fail("Shared ProcessInfoBlock allocation is missing");
+    }
+
+    // Stack guard pages were protected during initialization. Restore the full
+    // allocation before returning it to the heap so a later owner can reuse it.
+    if (!memory.protect_region(state.stack_allocation_base,
+                               state.stack_allocation_size,
+                               GuestMemoryProtection::ReadWrite, error)) {
+        return fail("Could not restore guest stack permissions before release");
+    }
+
+    std::memset(memory.base() + state.tls_static_address, 0, state.tls_size);
+    std::memset(memory.base() + state.pcr_address, 0, 0x2D8u);
+    std::memset(memory.base() + state.kthread_address, 0, 0xAB0u);
+    if (state.owns_process_info_block)
+        std::memset(memory.base() + state.process_info_block_address, 0, 0x60u);
+    std::memset(memory.base() + state.stack_allocation_base, 0,
+                state.stack_allocation_size);
+
+    // Exact allocation ownership was checked above. The ProcessInfoBlock is
+    // released only by the thread context that created it.
+    const bool tls_released = runtime_heap.deallocate(state.tls_static_address);
+    const bool pcr_released = runtime_heap.deallocate(state.pcr_address);
+    const bool kthread_released = runtime_heap.deallocate(state.kthread_address);
+    const bool process_released = !state.owns_process_info_block ||
+        runtime_heap.deallocate(state.process_info_block_address);
+    const bool stack_released = stack_heap.deallocate(state.stack_allocation_base);
+    if (!tls_released || !pcr_released || !kthread_released ||
+        !process_released || !stack_released) {
+        return fail("Guest thread heap metadata changed during context release");
+    }
+
+    state = GuestThreadStartup{};
     return true;
 }
 

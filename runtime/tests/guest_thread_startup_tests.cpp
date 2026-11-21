@@ -139,6 +139,38 @@ int main() {
     for (std::uint32_t i = 0; i < 0x100u; ++i)
         assert(bytes[worker.tls_dynamic_address + i] == 0);
 
+    assert(state.owns_process_info_block);
+    assert(!worker.owns_process_info_block);
+
+    const auto runtime_available_with_main_and_worker = heap.available_bytes();
+    const auto stack_available_with_main_and_worker = stack_heap.available_bytes();
+    auto malformed_worker = worker;
+    --malformed_worker.tls_size;
+    assert(!release_guest_thread_context(memory, heap, stack_heap,
+                                         malformed_worker, &error));
+    assert(heap.available_bytes() == runtime_available_with_main_and_worker);
+    assert(stack_heap.available_bytes() == stack_available_with_main_and_worker);
+
+    const auto released_worker_stack = worker.stack_allocation_base;
+    const auto released_worker_kthread = worker.kthread_address;
+    assert(release_guest_thread_context(memory, heap, stack_heap, worker, &error));
+    assert(worker.kthread_address == 0);
+    assert(!heap.allocation_size(released_worker_kthread));
+    assert(stack_heap.available_bytes() ==
+           0x00100000u - state.stack_allocation_size);
+    // Guard pages are writable again after release, allowing allocator reuse.
+    memory.base()[released_worker_stack] = 0x5Au;
+
+    GuestThreadStartup recycled_worker{};
+    assert(initialize_guest_thread(
+        memory, image, xex, heap, stack_heap,
+        0x20000u, 3u, image.image_base + 0x1800u, 0x1234u,
+        state.process_info_block_address, 0x80u, recycled_worker, &error));
+    assert(!recycled_worker.owns_process_info_block);
+    assert(recycled_worker.stack_allocation_base == released_worker_stack);
+    assert(release_guest_thread_context(memory, heap, stack_heap,
+                                        recycled_worker, &error));
+
     GuestThreadStartup invalid_worker{};
     assert(!initialize_guest_thread(
         memory, image, xex, heap, stack_heap,
@@ -161,5 +193,10 @@ int main() {
     invalid_image.entry_point = 0x83000000u;
     assert(!initialize_guest_main_thread(
         memory, invalid_image, xex, heap, stack_heap, invalid_state, &error));
+
+    assert(state.owns_process_info_block);
+    assert(release_guest_thread_context(memory, heap, stack_heap, state, &error));
+    assert(heap.available_bytes() == heap.size());
+    assert(stack_heap.available_bytes() == stack_heap.size());
     return 0;
 }
