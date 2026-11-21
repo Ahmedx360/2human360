@@ -24,6 +24,16 @@ void put16(std::vector<std::uint8_t>& b, std::size_t o, std::uint16_t v) {
 void put32(std::vector<std::uint8_t>& b, std::size_t o, std::uint32_t v) {
     for (unsigned i = 0; i < 4; ++i) b[o + i] = static_cast<std::uint8_t>(v >> (i * 8));
 }
+void put_be16(std::vector<std::uint8_t>& b, std::size_t o, std::uint16_t v) {
+    b[o] = static_cast<std::uint8_t>(v >> 8);
+    b[o + 1] = static_cast<std::uint8_t>(v);
+}
+void put_be32(std::vector<std::uint8_t>& b, std::size_t o, std::uint32_t v) {
+    b[o] = static_cast<std::uint8_t>(v >> 24);
+    b[o + 1] = static_cast<std::uint8_t>(v >> 16);
+    b[o + 2] = static_cast<std::uint8_t>(v >> 8);
+    b[o + 3] = static_cast<std::uint8_t>(v);
+}
 std::vector<std::uint8_t> make_pe() {
     std::vector<std::uint8_t> b(0x2400, 0);
     b[0] = 'M'; b[1] = 'Z';
@@ -62,38 +72,38 @@ std::vector<std::uint8_t> make_pe() {
 
 std::vector<std::uint8_t> make_xex_imports() {
     std::vector<std::uint8_t> b(0x300, 0);
-    put32(b, 0, 0x58455832); // XEX2
-    put32(b, 0x14, 6);       // Import, image-base, entry, stack, heap and TLS headers.
-    put32(b, 0x18, 0x000103FF);
-    put32(b, 0x1C, 0x50);    // Import header file offset.
-    put32(b, 0x20, 0x00010201);
-    put32(b, 0x24, 0x82000000);
-    put32(b, 0x28, 0x00010100);
-    put32(b, 0x2C, 0x82001000);
-    put32(b, 0x30, 0x00020200);
-    put32(b, 0x34, 0x00100000);
-    put32(b, 0x38, 0x00020401);
-    put32(b, 0x3C, 0x02000000);
-    put32(b, 0x40, 0x00020104);
-    put32(b, 0x44, 0xC0);
-    put32(b, 0x50, 0x4C);    // Header size.
-    put32(b, 0x54, 16);      // Padded library-name table.
-    put32(b, 0x58, 1);       // One import library.
+    put_be32(b, 0, 0x58455832); // XEX2
+    put_be32(b, 0x14, 6);       // Import, image-base, entry, stack, heap and TLS headers.
+    put_be32(b, 0x18, 0x000103FF);
+    put_be32(b, 0x1C, 0x50);    // Import header file offset.
+    put_be32(b, 0x20, 0x00010201);
+    put_be32(b, 0x24, 0x82000000);
+    put_be32(b, 0x28, 0x00010100);
+    put_be32(b, 0x2C, 0x82001000);
+    put_be32(b, 0x30, 0x00020200);
+    put_be32(b, 0x34, 0x00100000);
+    put_be32(b, 0x38, 0x00020401);
+    put_be32(b, 0x3C, 0x02000000);
+    put_be32(b, 0x40, 0x00020104);
+    put_be32(b, 0x44, 0xC0);
+    put_be32(b, 0x50, 0x4C);    // Header size.
+    put_be32(b, 0x54, 16);      // Padded library-name table.
+    put_be32(b, 0x58, 1);       // One import library.
     const char name[] = "xboxkrnl.exe";
     for (std::size_t i = 0; i < sizeof(name); ++i) b[0x5C + i] = name[i];
     const std::size_t library = 0x6C;
-    put32(b, library, 0x30);
-    put32(b, library + 0x18, 0x12345678);
-    put32(b, library + 0x1C, 0x00010002);
-    put32(b, library + 0x20, 0x00010001);
-    put16(b, library + 0x24, 0);
-    put16(b, library + 0x26, 2);
-    put32(b, library + 0x28, 0x82001000);
-    put32(b, library + 0x2C, 0x82001004);
-    put32(b, 0xC0, 64);
-    put32(b, 0xC4, 0x82004000);
-    put32(b, 0xC8, 0x40);
-    put32(b, 0xCC, 0x20);
+    put_be32(b, library, 0x30);
+    put_be32(b, library + 0x18, 0x12345678);
+    put_be32(b, library + 0x1C, 0x00010002);
+    put_be32(b, library + 0x20, 0x00010001);
+    put_be16(b, library + 0x24, 0);
+    put_be16(b, library + 0x26, 2);
+    put_be32(b, library + 0x28, 0x82001000);
+    put_be32(b, library + 0x2C, 0x82001004);
+    put_be32(b, 0xC0, 64);
+    put_be32(b, 0xC4, 0x82004000);
+    put_be32(b, 0xC8, 0x40);
+    put_be32(b, 0xCC, 0x20);
     return b;
 }
 
@@ -169,17 +179,17 @@ int main() {
     put32(mismatched_base, 0x24, 0x83000000);
     assert(!toohuman::runtime::parse_xex2_imports(mismatched_base, import_image));
     auto security_base = xex;
-    put32(security_base, 0x10, 0x100);
-    put32(security_base, 0x14, 5);
-    put32(security_base, 0x20, 0x00010100);
-    put32(security_base, 0x24, 0x82001000);
-    put32(security_base, 0x28, 0x00020200);
-    put32(security_base, 0x2C, 0x00100000);
-    put32(security_base, 0x30, 0x00020401);
-    put32(security_base, 0x34, 0x02000000);
-    put32(security_base, 0x38, 0x00020104);
-    put32(security_base, 0x3C, 0xC0);
-    put32(security_base, 0x210, 0x82000000);
+    put_be32(security_base, 0x10, 0x100);
+    put_be32(security_base, 0x14, 5);
+    put_be32(security_base, 0x20, 0x00010100);
+    put_be32(security_base, 0x24, 0x82001000);
+    put_be32(security_base, 0x28, 0x00020200);
+    put_be32(security_base, 0x2C, 0x00100000);
+    put_be32(security_base, 0x30, 0x00020401);
+    put_be32(security_base, 0x34, 0x02000000);
+    put_be32(security_base, 0x38, 0x00020104);
+    put_be32(security_base, 0x3C, 0xC0);
+    put_be32(security_base, 0x210, 0x82000000);
     const auto security_base_result = toohuman::runtime::parse_xex2_imports(security_base, import_image);
     assert(security_base_result);
     assert(security_base_result.default_stack_size == 0x00100000);
