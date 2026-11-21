@@ -787,7 +787,7 @@ int main() {
     const auto stack_io = variable_registry.stack_heap()->allocate(0x40, 16);
     assert(stack_io && *stack_io == 0x70000000u);
     write_be(*stack_io, 0);
-    write_be(*stack_io + 4, 0x1000);
+    write_be(*stack_io + 4, vm_page_size + 1u);
     write_be(io_buffer + 4, vm_page_size + 1u);
     PPCContext vm_context{};
     vm_context.r3.u32 = *stack_io;
