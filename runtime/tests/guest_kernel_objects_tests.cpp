@@ -2,6 +2,10 @@
 #include <cassert>
 #include <chrono>
 #include <memory>
+#include <mutex>
+#include <thread>
+#include <unordered_set>
+#include <vector>
 using namespace std::chrono_literals;
 int main() {
     using namespace toohuman::runtime;
@@ -30,6 +34,30 @@ int main() {
     assert(retained->type() == GuestKernelObjectType::Event);
     assert(objects.close(*synchronization_handle));
     assert(objects.size() == 0);
+    // Concurrent insert/lookup/close must not allocate duplicate live handles
+    // or leave closed records in the process table.
+    std::mutex seen_mutex;
+    std::unordered_set<GuestKernelHandle> seen_handles;
+    std::vector<std::thread> workers;
+    for (std::uint32_t worker = 0; worker < 8u; ++worker) {
+        workers.emplace_back([&] {
+            for (std::uint32_t i = 0; i < 128u; ++i) {
+                auto event = std::make_shared<GuestEventObject>(false, false);
+                const auto handle = objects.insert(event);
+                assert(handle.has_value());
+                {
+                    std::lock_guard lock(seen_mutex);
+                    assert(seen_handles.insert(*handle).second);
+                }
+                assert(objects.lookup(*handle) == event);
+                assert(objects.close(*handle));
+                assert(!objects.lookup(*handle));
+            }
+        });
+    }
+    for (auto& worker : workers) worker.join();
+    assert(objects.size() == 0);
+
     assert(!objects.insert(nullptr));
     return 0;
 }
