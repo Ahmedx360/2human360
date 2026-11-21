@@ -391,6 +391,80 @@ PPC_FUNC(XexGetModuleHandle) {
     ctx.r3.u32 = kStatusSuccess;
 }
 
+PPC_FUNC(RtlImageXexHeaderField) {
+    const auto header = ctx.r3.u32;
+    const auto requested_key = ctx.r4.u32;
+    if (header == 0) {
+        ctx.r3.u32 = 0;
+        return;
+    }
+
+    const auto header_size = get_be32(at(base, header + 8));
+    const auto optional_count = get_be32(at(base, header + 0x14));
+    if (header_size < 0x18u || header_size > 0x100000u ||
+        optional_count > (header_size - 0x18u) / 8u) {
+        ctx.r3.u32 = 0;
+        return;
+    }
+
+    ctx.r3.u32 = 0;
+    for (std::uint32_t i = 0; i < optional_count; ++i) {
+        const auto entry = header + 0x18u + i * 8u;
+        if (get_be32(at(base, entry)) != requested_key) continue;
+
+        const auto value = get_be32(at(base, entry + 4));
+        switch (requested_key & 0xFFu) {
+        case 0x00:
+            ctx.r3.u32 = value; // Value is stored inline in the XEX header.
+            break;
+        case 0x01:
+            ctx.r3.u32 = entry + 4; // Pointer to the inline value field.
+            break;
+        default:
+            ctx.r3.u32 = value < header_size ? header + value : 0;
+            break;
+        }
+        return;
+    }
+}
+
+PPC_FUNC(RtlCompareMemoryUlong) {
+    const auto source = ctx.r3.u32;
+    const auto length = ctx.r4.u32;
+    const auto pattern = ctx.r5.u32;
+    if (source == 0 || (source & 3u) != 0 || (length & 3u) != 0) {
+        ctx.r3.u32 = 0;
+        return;
+    }
+
+    std::uint32_t matches = 0;
+    for (std::uint32_t offset = 0; offset < length; offset += 4) {
+        if (get_be32(at(base, source + offset)) == pattern) ++matches;
+    }
+    ctx.r3.u32 = matches;
+}
+
+PPC_FUNC(RtlRaiseException) {
+    const auto record = ctx.r3.u32;
+    if (record == 0) {
+        std::fprintf(stderr, "[TooHuman] RtlRaiseException received a null record\\n");
+        std::abort();
+    }
+
+    const auto code = get_be32(at(base, record));
+    if (code == 0x406D1388u) {
+        // MSVC's 0x406D1388 exception is the conventional thread-name marker.
+        // There is no guest scheduler yet, so preserve execution without naming
+        // a nonexistent host/guest thread object.
+        return;
+    }
+
+    std::fprintf(stderr, "[TooHuman] Unsupported guest exception 0x%08X at 0x%08X\\n",
+                 code, get_be32(at(base, record + 0x0C)));
+    std::fflush(stderr);
+    std::abort(); // SEH/C++ exception unwinding is not implemented yet.
+}
+
 PPC_FUNC(XexCheckExecutablePrivilege) {
     const auto privilege = ctx.r3.u32;
     if (privilege >= 32u) {

@@ -73,11 +73,14 @@ int main() {
         {"xam.xex", 0x02DCu, 0, 1, 0x82001158u},
         {"xboxkrnl.exe", 0x0195u, 0, 1, 0x8200115Cu},
         {"xboxkrnl.exe", 0x0197u, 0, 1, 0x82001160u},
-        {"xboxkrnl.exe", 0x0194u, 0, 1, 0x82001164u}
+        {"xboxkrnl.exe", 0x0194u, 0, 1, 0x82001164u},
+        {"xboxkrnl.exe", 0x012Bu, 0, 1, 0x82001168u},
+        {"xboxkrnl.exe", 0x011Bu, 0, 1, 0x8200116Cu},
+        {"xboxkrnl.exe", 0x0136u, 0, 1, 0x82001170u}
     };
     std::size_t registered = 0;
     assert(imports.install(memory, metadata, &registered, &error));
-    assert(registered == 26);
+    assert(registered == 29);
     assert(memory.get_function<PPCFunc*>(0x82001100u) != &test_default_handler);
 
     PPCContext context{};
@@ -226,9 +229,49 @@ int main() {
     // LDR_DATA_TABLE_ENTRY +0x58 points to the copied XEX header.
     set_guest_be32(fake_module_handle + 0x58, synthetic_xex_header);
     set_guest_be32(synthetic_xex_header + 8, 0x40);
-    set_guest_be32(synthetic_xex_header + 0x14, 1);
+    set_guest_be32(synthetic_xex_header + 0x14, 2);
     set_guest_be32(synthetic_xex_header + 0x18, 0x00030000u);
     set_guest_be32(synthetic_xex_header + 0x1C, 0x00000600u);
+    set_guest_be32(synthetic_xex_header + 0x20, 0x00020104u);
+    set_guest_be32(synthetic_xex_header + 0x24, 0x00000030u);
+
+    // RtlImageXexHeaderField returns inline values or pointers based on key type.
+    boot_context = {};
+    boot_context.r3.u32 = synthetic_xex_header;
+    boot_context.r4.u32 = 0x00030000u;
+    call_test_import(0x82001168u, boot_context);
+    assert(boot_context.r3.u32 == 0x600u);
+    boot_context = {};
+    boot_context.r3.u32 = synthetic_xex_header;
+    boot_context.r4.u32 = 0x00020104u;
+    call_test_import(0x82001168u, boot_context);
+    assert(boot_context.r3.u32 == synthetic_xex_header + 0x30u);
+
+    // RtlCompareMemoryUlong returns the number of matching ULONGs.
+    constexpr std::uint32_t compare_source = 0x82014380u;
+    set_guest_be32(compare_source + 0, 0x11223344u);
+    set_guest_be32(compare_source + 4, 0xAABBCCDDu);
+    set_guest_be32(compare_source + 8, 0x11223344u);
+    boot_context = {};
+    boot_context.r3.u32 = compare_source;
+    boot_context.r4.u32 = 12;
+    boot_context.r5.u32 = 0x11223344u;
+    call_test_import(0x8200116Cu, boot_context);
+    assert(boot_context.r3.u32 == 2u);
+    boot_context = {};
+    boot_context.r3.u32 = compare_source;
+    boot_context.r4.u32 = 10; // Length must be ULONG-aligned.
+    boot_context.r5.u32 = 0x11223344u;
+    call_test_import(0x8200116Cu, boot_context);
+    assert(boot_context.r3.u32 == 0u);
+
+    // RtlRaiseException recognizes MSVC's thread-name marker without unwinding.
+    constexpr std::uint32_t exception_record = 0x82014480u;
+    set_guest_be32(exception_record, 0x406D1388u);
+    boot_context = {};
+    boot_context.r3.u32 = exception_record;
+    call_test_import(0x82001170u, boot_context);
+
     boot_context = {};
     boot_context.r3.u32 = 9; // XEX system flag bit 9.
     call_test_import(0x82001164u, boot_context);
