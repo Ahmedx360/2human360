@@ -88,6 +88,16 @@ int main() {
     assert(reentrant->callback_called);
     assert(reentrant->remaining_handles == 0u);
 
+    // ABI-specific handles may expose a native KTHREAD address, but must
+    // reject the null value and collisions with existing objects.
+    auto native_object = std::make_shared<GuestEventObject>(true, false);
+    constexpr GuestKernelHandle native_thread_address = 0xA0123000u;
+    assert(objects.insert_at(native_thread_address, native_object));
+    assert(objects.lookup(native_thread_address) == native_object);
+    assert(!objects.insert_at(native_thread_address, notification));
+    assert(!objects.insert_at(0u, notification));
+    assert(objects.close(native_thread_address));
+
     assert(!objects.insert(nullptr));
     return 0;
 }

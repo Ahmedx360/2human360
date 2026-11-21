@@ -41,6 +41,9 @@ public:
     GuestKernelObjectTable(const GuestKernelObjectTable&) = delete;
     GuestKernelObjectTable& operator=(const GuestKernelObjectTable&) = delete;
     [[nodiscard]] std::optional<GuestKernelHandle> insert(std::shared_ptr<GuestKernelObject> object);
+    // Insert at a guest ABI-visible value (e.g. a native KTHREAD address).
+    [[nodiscard]] bool insert_at(GuestKernelHandle handle,
+                                 std::shared_ptr<GuestKernelObject> object);
     [[nodiscard]] std::shared_ptr<GuestKernelObject> lookup(GuestKernelHandle handle) const;
     [[nodiscard]] bool close(GuestKernelHandle handle);
     [[nodiscard]] GuestKernelObjectWaitResult wait(

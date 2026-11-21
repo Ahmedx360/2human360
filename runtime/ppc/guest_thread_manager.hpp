@@ -31,7 +31,8 @@ public:
     GuestThreadManager& operator=(const GuestThreadManager&) = delete;
     [[nodiscard]] std::optional<GuestThreadHandle> create(
         GuestThreadStartup startup, Entry entry, bool initially_suspended = false,
-        std::string* error = nullptr, Cleanup cleanup = {});
+        std::string* error = nullptr, Cleanup cleanup = {},
+        std::optional<GuestKernelHandle> requested_handle = std::nullopt);
     [[nodiscard]] bool resume(GuestThreadHandle handle,
                               std::uint32_t* previous_count = nullptr,
                               std::string* error = nullptr);

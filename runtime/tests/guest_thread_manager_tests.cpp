@@ -161,6 +161,20 @@ int main() {
     assert(!suspended_entry_called.load(std::memory_order_acquire));
     assert(shutdown_cleanup_calls.load() == 1u);
 
+    // The manager can expose a thread object at the guest KTHREAD address.
+    GuestKernelObjectTable native_table;
+    GuestThreadManager native_manager(native_table);
+    constexpr GuestKernelHandle native_kthread = 0xA0009000u;
+    const auto native_thread = native_manager.create(
+        GuestThreadStartup{},
+        [](GuestThreadStartup&, std::stop_token) { return 13u; },
+        false, &error, {}, native_kthread);
+    assert(native_thread && *native_thread == native_kthread);
+    assert(native_table.lookup(native_kthread));
+    assert(native_manager.wait(native_kthread, 2s) == GuestThreadWaitResult::Signaled);
+    assert(native_manager.close_handle(native_kthread));
+    assert(!native_table.lookup(native_kthread));
+
     assert(!manager.resume(0xFFFFFFFFu, nullptr, &error));
     assert(manager.wait(0xFFFFFFFFu, 0ms) == GuestThreadWaitResult::InvalidHandle);
     return 0;

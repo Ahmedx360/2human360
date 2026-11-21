@@ -201,7 +201,8 @@ void GuestThreadManager::reap_completed_workers() {
 
 std::optional<GuestThreadHandle> GuestThreadManager::create(
     GuestThreadStartup startup, Entry entry, bool initially_suspended,
-    std::string* error, Cleanup cleanup) {
+    std::string* error, Cleanup cleanup,
+    std::optional<GuestKernelHandle> requested_handle) {
     if (!entry) {
         set_error(error, "Guest thread requires a non-empty executor");
         run_cleanup(std::move(cleanup), startup);
@@ -219,7 +220,10 @@ std::optional<GuestThreadHandle> GuestThreadManager::create(
         return std::nullopt; // Record destructor invokes cleanup.
     }
 
-    const auto handle = object_table_->insert(record);
+    const auto handle = requested_handle
+        ? (object_table_->insert_at(*requested_handle, record)
+               ? requested_handle : std::nullopt)
+        : object_table_->insert(record);
     if (!handle) {
         set_error(error, "Guest kernel object handle space is exhausted");
         return std::nullopt; // Record destructor invokes cleanup.

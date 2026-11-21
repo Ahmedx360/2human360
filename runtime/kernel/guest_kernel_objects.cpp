@@ -40,6 +40,12 @@ std::optional<GuestKernelHandle> GuestKernelObjectTable::insert(std::shared_ptr<
     }
     return std::nullopt;
 }
+bool GuestKernelObjectTable::insert_at(
+    GuestKernelHandle handle, std::shared_ptr<GuestKernelObject> object) {
+    if (handle == 0 || !object) return false;
+    std::lock_guard lock(mutex_);
+    return objects_.emplace(handle, std::move(object)).second;
+}
 std::shared_ptr<GuestKernelObject> GuestKernelObjectTable::lookup(GuestKernelHandle handle) const {
     std::lock_guard lock(mutex_);
     const auto it = objects_.find(handle);
