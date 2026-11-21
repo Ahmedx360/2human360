@@ -433,6 +433,14 @@ bool initialize_title_runtime(GuestAddressSpace& memory,
         return false;
     }
 
+    if (!imports.initialize_thread_runtime(
+            memory, mapped_image, import_result, main_thread, error)) {
+        std::string ignored;
+        (void)release_guest_thread_context(memory, *runtime_heap, *stack_heap,
+                                           main_thread, &ignored);
+        return false;
+    }
+
     if (report) {
         report->translated_functions = translated_count;
         report->function_imports = registered_count;

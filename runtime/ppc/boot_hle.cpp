@@ -1,4 +1,6 @@
 #include "ppc/boot_hle.hpp"
+#include "ppc/import_registry.hpp"
+#include "ppc/guest_thread_execution.hpp"
 #include "kernel/guest_kernel_objects.hpp"
 
 #include <algorithm>
@@ -797,6 +799,24 @@ PPC_FUNC(KeTlsSetValue) {
 // The early title path uses unnamed dispatcher events. Event type 0 is notification
 // (manual-reset); type 1 is synchronization (auto-reset). Wait timeout pointers carry
 // signed 100 ns intervals, with negative values relative to now and positive FILETIME values.
+// Xbox worker-thread imports backed by per-thread guest PPC contexts.
+PPC_FUNC(ExCreateThread) {
+    auto* registry = PpcImportRegistry::active();
+    ctx.r3.u32 = registry ? registry->create_guest_thread(ctx, base) : kStatusUnsuccessful;
+}
+PPC_FUNC(NtResumeThread) {
+    auto* registry = PpcImportRegistry::active();
+    ctx.r3.u32 = registry ? registry->resume_guest_thread(ctx, base) : kStatusUnsuccessful;
+}
+PPC_FUNC(KeResumeThread) {
+    auto* registry = PpcImportRegistry::active();
+    ctx.r3.u32 = registry ? registry->resume_guest_kernel_thread(ctx) : 0xFFFFFFFFu;
+}
+PPC_FUNC(ExTerminateThread) {
+    if (!terminate_current_guest_thread(ctx.r3.u32))
+        ctx.r3.u32 = kStatusUnsuccessful;
+}
+
 PPC_FUNC(NtCreateEvent) {
     if (ctx.r3.u32 == 0) {
         ctx.r3.u32 = kStatusInvalidParameter;

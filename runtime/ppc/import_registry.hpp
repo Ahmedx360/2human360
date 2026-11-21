@@ -18,12 +18,15 @@
 
 namespace toohuman::runtime {
 
+class GuestThreadRuntime;
+struct GuestThreadStartup;
+
 // Routes XEX2 function-import thunks through one generic PPC trampoline.
 // Handlers are keyed by the exact library name and ordinal; unknown imports
 // are reported with thunk, LR and argument registers, then fail fast.
 class PpcImportRegistry final {
 public:
-    PpcImportRegistry() = default;
+    PpcImportRegistry();
     ~PpcImportRegistry();
 
     PpcImportRegistry(const PpcImportRegistry&) = delete;
@@ -46,6 +49,17 @@ public:
                                std::span<const XexImport> imports,
                                std::size_t* registered_count = nullptr,
                                std::string* error = nullptr);
+
+    [[nodiscard]] static PpcImportRegistry* active() noexcept;
+    [[nodiscard]] bool initialize_thread_runtime(
+        GuestAddressSpace& memory, const LoadedPeImage& image,
+        const XexImportResult& xex, const GuestThreadStartup& main_thread,
+        std::string* error = nullptr);
+    [[nodiscard]] std::uint32_t create_guest_thread(PPCContext& context,
+                                                    std::uint8_t* base);
+    [[nodiscard]] std::uint32_t resume_guest_thread(PPCContext& context,
+                                                    std::uint8_t* base);
+    [[nodiscard]] std::uint32_t resume_guest_kernel_thread(PPCContext& context);
 
     void dispatch(PPCContext& context, std::uint8_t* base);
 
@@ -92,6 +106,8 @@ private:
     std::uint32_t image_base_{};
     std::uint32_t image_size_{};
     std::jthread timestamp_thread_;
+    mutable std::mutex thread_runtime_mutex_;
+    std::unique_ptr<GuestThreadRuntime> thread_runtime_;
     std::uint32_t xex_header_guest_address_{};
     std::uint32_t xex_header_size_{};
     std::uint32_t executable_module_handle_{};

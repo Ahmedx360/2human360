@@ -1,4 +1,7 @@
 #include "ppc/import_registry.hpp"
+#include "ppc/guest_thread_execution.hpp"
+#include "ppc/guest_thread_runtime.hpp"
+#include "ppc/title_runtime.hpp"
 
 #include "ppc/title_import_manifest.hpp"
 #include <ppc_config.h>
@@ -140,7 +143,60 @@ std::optional<std::uint32_t> PpcImportRegistry::allocate_runtime_memory(
     return virtual_heap_->allocate(bytes, alignment);
 }
 
+PpcImportRegistry::PpcImportRegistry() = default;
+
+PpcImportRegistry* PpcImportRegistry::active() noexcept {
+    return g_active_registry.load(std::memory_order_acquire);
+}
+
+bool PpcImportRegistry::initialize_thread_runtime(
+    GuestAddressSpace& memory, const LoadedPeImage& image,
+    const XexImportResult& xex, const GuestThreadStartup& main_thread,
+    std::string* error) {
+    std::lock_guard lock(thread_runtime_mutex_);
+    if (!installed_ || thread_runtime_) {
+        if (error) *error = "Thread runtime requires one installed registry and may only be initialized once";
+        return false;
+    }
+    if (memory_ != &memory || !virtual_heap_ || !stack_heap_ ||
+        !virtual_heap_->allocation_size(main_thread.process_info_block_address).has_value()) {
+        if (error) *error = "Thread runtime requires the installed memory, heaps and process information block";
+        return false;
+    }
+    try {
+        thread_runtime_ = std::make_unique<GuestThreadRuntime>(
+            memory, image, xex, *virtual_heap_, *stack_heap_, guest_heap_.get(), main_thread);
+    } catch (...) {
+        if (error) *error = "Could not allocate the guest thread runtime";
+        return false;
+    }
+    return true;
+}
+
+std::uint32_t PpcImportRegistry::create_guest_thread(PPCContext& context,
+                                                     std::uint8_t* base) {
+    std::lock_guard lock(thread_runtime_mutex_);
+    return thread_runtime_ ? thread_runtime_->create_thread(context, base) : 0xC0000002u;
+}
+std::uint32_t PpcImportRegistry::resume_guest_thread(PPCContext& context,
+                                                     std::uint8_t* base) {
+    std::lock_guard lock(thread_runtime_mutex_);
+    return thread_runtime_ ? thread_runtime_->resume_thread(context, base) : 0xC0000002u;
+}
+std::uint32_t PpcImportRegistry::resume_guest_kernel_thread(PPCContext& context) {
+    std::lock_guard lock(thread_runtime_mutex_);
+    return thread_runtime_ ? thread_runtime_->resume_kernel_thread(context) : 0xFFFFFFFFu;
+}
+
 PpcImportRegistry::~PpcImportRegistry() {
+    // Move the service out under the mutex, then join it without holding the
+    // mutex: a worker already inside an HLE handler must be allowed to finish.
+    std::unique_ptr<GuestThreadRuntime> stopping_threads;
+    {
+        std::lock_guard lock(thread_runtime_mutex_);
+        stopping_threads = std::move(thread_runtime_);
+    }
+    stopping_threads.reset();
     // Join before releasing registry-owned state. The worker holds a raw
     // pointer into GuestAddressSpace, whose lifetime is managed by the caller.
     timestamp_thread_.request_stop();
@@ -447,6 +503,7 @@ bool PpcImportRegistry::install(GuestAddressSpace& memory,
 }
 
 void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
+    throw_if_guest_thread_stop_requested();
     const auto thunk_address = context.ctr.u32;
     const auto import_it = imports_by_thunk_.find(thunk_address);
     if (import_it == imports_by_thunk_.end()) {
