@@ -72,11 +72,12 @@ int main() {
         {"xam.xex", 0x0282u, 0, 1, 0x82001154u},
         {"xam.xex", 0x02DCu, 0, 1, 0x82001158u},
         {"xboxkrnl.exe", 0x0195u, 0, 1, 0x8200115Cu},
-        {"xboxkrnl.exe", 0x0197u, 0, 1, 0x82001160u}
+        {"xboxkrnl.exe", 0x0197u, 0, 1, 0x82001160u},
+        {"xboxkrnl.exe", 0x0194u, 0, 1, 0x82001164u}
     };
     std::size_t registered = 0;
     assert(imports.install(memory, metadata, &registered, &error));
-    assert(registered == 25);
+    assert(registered == 26);
     assert(memory.get_function<PPCFunc*>(0x82001100u) != &test_default_handler);
 
     PPCContext context{};
@@ -216,11 +217,35 @@ int main() {
     assert(boot_context.r3.u32 == 0u); // XamGetSystemVersion's startup stub.
 
     // The XEX executable module has an LDR record; the uploaded PE has no exports.
-    constexpr std::uint32_t fake_module_handle = 0x86001000u;
+    constexpr std::uint32_t fake_module_handle = 0x82014500u;
+    constexpr std::uint32_t synthetic_xex_header = 0x82014300u;
     constexpr std::uint32_t module_name = 0x82014200u;
     constexpr std::uint32_t module_handle_out = 0x82014220u;
     constexpr std::uint32_t procedure_out = 0x82014224u;
     set_executable_module_handle(fake_module_handle);
+    // LDR_DATA_TABLE_ENTRY +0x58 points to the copied XEX header.
+    set_guest_be32(fake_module_handle + 0x58, synthetic_xex_header);
+    set_guest_be32(synthetic_xex_header + 8, 0x40);
+    set_guest_be32(synthetic_xex_header + 0x14, 1);
+    set_guest_be32(synthetic_xex_header + 0x18, 0x00030000u);
+    set_guest_be32(synthetic_xex_header + 0x1C, 0x00000600u);
+    boot_context = {};
+    boot_context.r3.u32 = 9; // XEX system flag bit 9.
+    call_test_import(0x82001164u, boot_context);
+    assert(boot_context.r3.u32 == 1u);
+    boot_context = {};
+    boot_context.r3.u32 = 10; // XEX system flag bit 10.
+    call_test_import(0x82001164u, boot_context);
+    assert(boot_context.r3.u32 == 1u);
+    boot_context = {};
+    boot_context.r3.u32 = 11;
+    call_test_import(0x82001164u, boot_context);
+    assert(boot_context.r3.u32 == 0u);
+    boot_context = {};
+    boot_context.r3.u32 = 32; // Invalid bit index.
+    call_test_import(0x82001164u, boot_context);
+    assert(boot_context.r3.u32 == 0u);
+
     boot_context = {};
     boot_context.r3.u32 = 0; // Null name selects executable module.
     boot_context.r4.u32 = module_handle_out;

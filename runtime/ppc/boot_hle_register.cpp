@@ -7,8 +7,10 @@ bool register_boot_imports(PpcImportRegistry& imports, std::string* error) {
     const Entry entries[] = {
         {"xboxkrnl.exe", 0x0003, &boot_hle::DbgPrint},
         {"xboxkrnl.exe", 0x0010, &boot_hle::ExGetXConfigSetting},
+        {"xboxkrnl.exe", 0x0194, &boot_hle::XexCheckExecutablePrivilege},
         {"xboxkrnl.exe", 0x0195, &boot_hle::XexGetModuleHandle},
         {"xboxkrnl.exe", 0x0197, &boot_hle::XexGetProcedureAddress},
+        {"xam.xex",      0x01A9, &boot_hle::XamLoaderTerminateTitle},
         {"xboxkrnl.exe", 0x0021, &boot_hle::FscSetCacheElementCount},
         {"xboxkrnl.exe", 0x0028, &boot_hle::HalReturnToFirmware},
         {"xboxkrnl.exe", 0x0052, &boot_hle::KeBugCheck},

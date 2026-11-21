@@ -391,6 +391,51 @@ PPC_FUNC(XexGetModuleHandle) {
     ctx.r3.u32 = kStatusSuccess;
 }
 
+PPC_FUNC(XexCheckExecutablePrivilege) {
+    const auto privilege = ctx.r3.u32;
+    if (privilege >= 32u) {
+        ctx.r3.u32 = 0;
+        return;
+    }
+
+    const auto module_handle =
+        g_executable_module_handle.load(std::memory_order_acquire);
+    if (module_handle == 0) {
+        ctx.r3.u32 = 0;
+        return;
+    }
+
+    const auto xex_header = get_be32(at(base, module_handle + 0x58));
+    if (xex_header == 0) {
+        ctx.r3.u32 = 0;
+        return;
+    }
+
+    const auto header_size = get_be32(at(base, xex_header + 8));
+    const auto optional_count = get_be32(at(base, xex_header + 0x14));
+    if (header_size < 0x18u || header_size > 0x100000u ||
+        optional_count > (header_size - 0x18u) / 8u) {
+        ctx.r3.u32 = 0;
+        return;
+    }
+
+    std::uint32_t system_flags = 0;
+    for (std::uint32_t i = 0; i < optional_count; ++i) {
+        const auto offset = xex_header + 0x18u + i * 8u;
+        if (get_be32(at(base, offset)) == 0x00030000u) {
+            system_flags = get_be32(at(base, offset + 4));
+            break;
+        }
+    }
+    ctx.r3.u32 = (system_flags & (std::uint32_t{1} << privilege)) != 0 ? 1u : 0u;
+}
+
+PPC_FUNC(XamLoaderTerminateTitle) {
+    std::fprintf(stderr, "[TooHuman] XamLoaderTerminateTitle: guest requested title termination\\n");
+    std::fflush(stderr);
+    std::exit(0);
+}
+
 PPC_FUNC(XexGetProcedureAddress) {
     constexpr std::uint32_t kStatusDriverEntrypointNotFound = 0xC0000263u;
     const auto module_handle = ctx.r3.u32;

@@ -29,6 +29,8 @@ PPCFunc XamGetSystemVersion;
 PPCFunc XamShowMessageBoxUIEx;
 PPCFunc XexGetModuleHandle;
 PPCFunc XexGetProcedureAddress;
+PPCFunc XexCheckExecutablePrivilege;
+PPCFunc XamLoaderTerminateTitle;
 PPCFunc RtlInitAnsiString;
 PPCFunc RtlInitUnicodeString;
 PPCFunc RtlMultiByteToUnicodeN;
