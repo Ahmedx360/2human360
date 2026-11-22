@@ -1,6 +1,8 @@
 #pragma once
+
 #include "kernel/guest_kernel_objects.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -21,31 +23,49 @@ enum class GuestVfsStatus : std::uint32_t {
     Unsuccessful = 0xC0000001u,
     NotADirectory = 0xC0000103u,
     FileIsADirectory = 0xC00000BAu,
+    InvalidParameter = 0xC000000Du,
 };
 
-// A host file or directory opened through the guest VFS.
+// A host file or directory opened through the guest VFS. Volume permissions
+// are inherited by directory-relative opens; per-handle data rights are
+// separately enforced by read/write/resize.
 class GuestFile final : public GuestKernelObject {
 public:
-    GuestFile(std::filesystem::path path, bool directory, bool writable);
-    [[nodiscard]] GuestKernelObjectType type() const noexcept override { return GuestKernelObjectType::File; }
-    [[nodiscard]] GuestKernelObjectWaitResult wait(std::optional<std::chrono::milliseconds>) override {
+    GuestFile(std::filesystem::path path, bool directory,
+              bool readable, bool writable, bool volume_writable);
+
+    [[nodiscard]] GuestKernelObjectType type() const noexcept override {
+        return GuestKernelObjectType::File;
+    }
+    [[nodiscard]] GuestKernelObjectWaitResult wait(
+        std::optional<std::chrono::milliseconds>) override {
         return GuestKernelObjectWaitResult::Signaled;
     }
     [[nodiscard]] bool is_directory() const noexcept { return directory_; }
+    [[nodiscard]] bool can_read() const noexcept { return readable_; }
+    [[nodiscard]] bool can_write() const noexcept { return writable_ && volume_writable_; }
+    [[nodiscard]] bool volume_writable() const noexcept { return volume_writable_; }
+    [[nodiscard]] bool is_open() const;
     [[nodiscard]] const std::filesystem::path& path() const noexcept { return path_; }
     [[nodiscard]] std::uint64_t size() const;
-    // Reads at `offset` (or the current position when nullopt). Returns bytes read.
-    [[nodiscard]] std::size_t read(void* out, std::size_t length, std::optional<std::uint64_t> offset);
-    [[nodiscard]] std::size_t write(const void* data, std::size_t length, std::optional<std::uint64_t> offset);
+    [[nodiscard]] std::size_t read(void* out, std::size_t length,
+                                   std::optional<std::uint64_t> offset);
+    [[nodiscard]] std::size_t write(const void* data, std::size_t length,
+                                    std::optional<std::uint64_t> offset);
     [[nodiscard]] std::uint64_t position() const;
     void set_position(std::uint64_t position);
     [[nodiscard]] bool resize(std::uint64_t new_size);
+    [[nodiscard]] bool flush();
+
     // Directory enumeration cursor (index into sorted entry names).
     std::size_t dir_cursor{};
 
 private:
     std::filesystem::path path_;
-    bool directory_;
+    bool directory_{};
+    bool readable_{};
+    bool writable_{};
+    bool volume_writable_{};
     mutable std::mutex mutex_;
     mutable std::fstream stream_;
     std::uint64_t position_{};
@@ -58,26 +78,29 @@ struct GuestVfsOpenResult {
 };
 
 // Maps Xbox 360 device paths onto a host directory tree.
-//   game:\, d:\, \Device\Cdrom0\, \Device\Harddisk0\Partition1\Game  -> game root (read-only)
-//   every other volume (cache:, hdd:, \Device\Harddisk0\...)         -> save root (read/write)
+// game:/d:/Cdrom0 and the title partition map read-only to game_root;
+// other volumes map read/write to save_root.
 class GuestVfs {
 public:
     GuestVfs(std::filesystem::path game_root, std::filesystem::path save_root);
-    // Reads TH_GAME_ROOT / TH_SAVE_ROOT, defaulting to ./game and ./th_save.
     [[nodiscard]] static GuestVfs from_environment();
 
-    // Returns the host path for `guest_name` (relative to `root_dir` when given), or nullopt
-    // if it escapes the root. `writable` reports whether the volume accepts writes.
+    // root_dir is an already-open directory handle's host path. root_writable
+    // carries the volume's write policy into relative opens.
     [[nodiscard]] std::optional<std::filesystem::path> resolve(
-        const std::string& guest_name, const std::filesystem::path* root_dir, bool* writable) const;
+        const std::string& guest_name, const std::filesystem::path* root_dir,
+        bool* writable, bool root_writable = true) const;
 
-    // disposition uses NT values: 0 supersede, 1 open, 2 create, 3 open_if, 4 overwrite, 5 overwrite_if.
-    [[nodiscard]] GuestVfsOpenResult open(const std::string& guest_name,
-                                          const std::filesystem::path* root_dir,
-                                          std::uint32_t disposition, bool want_write,
-                                          bool directory_only) const;
+    // disposition: 0 supersede, 1 open, 2 create, 3 open_if,
+    // 4 overwrite, 5 overwrite_if.
+    [[nodiscard]] GuestVfsOpenResult open(
+        const std::string& guest_name, const std::filesystem::path* root_dir,
+        std::uint32_t disposition, bool want_write, bool directory_only,
+        bool root_writable = true, bool want_read = true) const;
 
-    [[nodiscard]] const std::filesystem::path& game_root() const noexcept { return game_root_; }
+    [[nodiscard]] const std::filesystem::path& game_root() const noexcept {
+        return game_root_;
+    }
 
 private:
     std::filesystem::path game_root_;
