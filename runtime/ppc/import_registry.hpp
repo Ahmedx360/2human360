@@ -4,6 +4,7 @@
 #include "ppc_context.h"
 #include "memory/guest_address_space.hpp"
 #include "memory/guest_heap.hpp"
+#include "gpu/xenos_command_processor.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -68,6 +69,9 @@ public:
         std::size_t bytes, std::size_t alignment = 16);
     [[nodiscard]] GuestHeap* runtime_heap() noexcept { return virtual_heap_.get(); }
     [[nodiscard]] GuestHeap* stack_heap() noexcept { return stack_heap_.get(); }
+    [[nodiscard]] XenosCommandProcessor& xenos_command_processor() noexcept {
+        return xenos_command_processor_;
+    }
 
     // Guest LDR_DATA_TABLE_ENTRY address backing XexExecutableModuleHandle.
     [[nodiscard]] std::uint32_t executable_module_handle() const noexcept {
@@ -101,6 +105,7 @@ private:
     std::unique_ptr<GuestHeap> guest_heap_;
     std::unique_ptr<GuestHeap> virtual_heap_;
     std::unique_ptr<GuestHeap> stack_heap_;
+    XenosCommandProcessor xenos_command_processor_;
     GuestAddressSpace* memory_{};
     std::unordered_map<std::uint32_t, VirtualMemoryRegion> virtual_memory_regions_;
     mutable std::mutex virtual_memory_regions_mutex_;
