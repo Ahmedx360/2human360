@@ -17,7 +17,7 @@ This runtime foundation includes a bounded guest-memory view, a standalone PE lo
 - reads and writes unsigned PPC scalar values in big-endian order;
 - avoids alignment assumptions by operating on bytes.
 
-The owner remains responsible for retaining the `GuestMemory` backing storage. The address-space reservation is owned by `GuestAddressSpace` and released with it. Sparse region tracking, aliases, guard-page policy and MMIO dispatch are future work.
+The owner remains responsible for retaining the `GuestMemory` backing storage. The address-space reservation is owned by `GuestAddressSpace` and released with it. `GuestAddressSpace` tracks committed/protected regions and supports guard-page protections. Scalar accesses to the Xenos and XMA apertures are intercepted by `GuestMmioBus`; this is not yet a device emulator.
 
 ## Build and test
 
@@ -66,6 +66,25 @@ current `Protect` rather than assuming every page is read/write. The guest
 allocator uses the native host page size as a minimum protection granularity
 on hosts whose pages are larger than 4 KiB. Decommit and guard-page faults are
 not modelled yet.
+
+
+## Implemented: scalar MMIO interception and PM4 packet framing
+
+`GuestMmioBus` intercepts scalar accesses to the current 64 KiB Xenos aperture
+at `0x7FC80000` and XMA aperture at `0x7FEA0000`. It preserves guest
+big-endian byte lanes, keeps independent register-file readback for each
+aperture, rejects out-of-window accesses, and records a bounded 4096-entry
+access trace. This is deliberately a storage/diagnostic foundation: writes do
+not yet trigger GPU command processing, XMA decoding, interrupts, fences, or
+other device side effects.
+
+The PM4 framing helper decodes one guest-logical dword stream packet at a time.
+It handles the zero-word NOP, type-0 sequential/single-register writes, type-1
+two-register writes, type-2 no-payload packets, and type-3 opcode/predicate
+headers. It validates payload bounds before returning a packet view. It does
+not execute opcodes, follow indirect buffers, consume a GPU ring buffer, or
+translate shaders. The helper is kept independent of a graphics backend so
+packet framing can be regression-tested before command execution is added.
 
 ## Startup import priorities and boot HLE
 
