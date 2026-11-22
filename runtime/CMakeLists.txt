@@ -2,6 +2,7 @@ find_package(Threads REQUIRED)
 
 add_library(TooHumanRuntimeCore STATIC
     kernel/guest_kernel_objects.cpp
+    fs/guest_vfs.cpp
     memory/guest_memory.cpp
     memory/guest_heap.cpp
     memory/guest_address_space.cpp
@@ -33,7 +34,7 @@ if(NOT DEFINED TH_SIMDE_DIR)
     set(TH_SIMDE_DIR "${CMAKE_SOURCE_DIR}/tools/XenonRecomp/thirdparty/simde")
 endif()
 if(EXISTS "${TH_SIMDE_DIR}/x86/avx.h")
-    add_library(TooHumanBootHle STATIC ppc/boot_hle.cpp)
+    add_library(TooHumanBootHle STATIC ppc/boot_hle.cpp ppc/file_hle.cpp)
     target_include_directories(TooHumanBootHle PUBLIC
         "${CMAKE_CURRENT_SOURCE_DIR}"
         "${CMAKE_SOURCE_DIR}/TooHumanRecompLib/ppc"
@@ -65,6 +66,13 @@ if(BUILD_TESTING)
         target_compile_options(TooHumanGuestKernelObjectTests PRIVATE -UNDEBUG)
     endif()
     add_test(NAME TooHumanGuestKernelObjectTests COMMAND TooHumanGuestKernelObjectTests)
+endif()
+
+if(BUILD_TESTING)
+    add_executable(TooHumanGuestVfsTests tests/guest_vfs_tests.cpp)
+    target_link_libraries(TooHumanGuestVfsTests PRIVATE TooHumanRuntimeCore)
+    target_compile_options(TooHumanGuestVfsTests PRIVATE $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG> $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG>)
+    add_test(NAME TooHumanGuestVfsTests COMMAND TooHumanGuestVfsTests)
 endif()
 
 if(TH_BUILD_RECOMP_LIB)

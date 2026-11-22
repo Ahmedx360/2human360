@@ -15,6 +15,17 @@ namespace toohuman::runtime {
 // Calling convention (Xbox 360 PPC ABI): arguments in r3..r10, result in r3, guest memory big-endian.
 //
 // Register before initialize_title_runtime(); returns false (and sets *error) on a duplicate.
+namespace boot_hle {
+PPCFunc NtCreateFile;
+PPCFunc NtOpenFile;
+PPCFunc NtReadFile;
+PPCFunc NtWriteFile;
+PPCFunc NtQueryInformationFile;
+PPCFunc NtSetInformationFile;
+PPCFunc NtQueryFullAttributesFile;
+PPCFunc NtFlushBuffersFile;
+} // namespace boot_hle
+
 [[nodiscard]] bool register_boot_imports(PpcImportRegistry& imports,
                                          std::string* error = nullptr,
                                          std::size_t* registered_count = nullptr);

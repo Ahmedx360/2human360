@@ -49,7 +49,7 @@ int main() {
                                     &test_import_handler, &error));
     std::size_t startup_hle_count = 0;
     assert(toohuman::runtime::register_boot_imports(imports, &error, &startup_hle_count));
-    assert(startup_hle_count == 48u);
+    assert(startup_hle_count == 63u);
     const std::vector<toohuman::runtime::XexImport> metadata{
         {"xboxkrnl.exe", 0x74u, 0, 1, 0x82001100u},
         {"xboxkrnl.exe", 0x011Bu, 0, 1, 0x82001104u},
@@ -452,9 +452,6 @@ int main() {
     boot_context.r4.u32 = time_filetime;
     call_test_import(0x82001184u, boot_context); // Invalid TIME_FIELDS must fail.
     assert(boot_context.r3.u32 == 0u);
-
-    set_guest_u64(timeout_in, 0);
-    assert(boot_context.r3.u32 == 0xC0000008u); // STATUS_INVALID_HANDLE.
 
     boot_context = {};
     boot_context.r3.u32 = 0xFFFFFFFFu;

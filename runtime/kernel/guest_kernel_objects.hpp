@@ -9,7 +9,7 @@
 #include <unordered_map>
 namespace toohuman::runtime {
 using GuestKernelHandle = std::uint32_t;
-enum class GuestKernelObjectType { Event, Thread };
+enum class GuestKernelObjectType { Event, Thread, File };
 enum class GuestKernelObjectWaitResult { Signaled, Timeout, InvalidHandle };
 class GuestKernelObject {
 public:
