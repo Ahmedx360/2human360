@@ -23,7 +23,7 @@ if(BUILD_TESTING)
         NAME TooHumanRecompPythonTests
         COMMAND "${Python3_EXECUTABLE}" -m unittest discover
             -s "${CMAKE_SOURCE_DIR}/tools/tests"
-            -p "test_recomp_validation.py"
+            -p "test_*.py"
     )
 endif()
 

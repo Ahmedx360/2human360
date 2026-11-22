@@ -68,7 +68,8 @@ std::vector<std::uint8_t> make_basic_xex() {
     put32be(xex, 0x2C, 0x82000000);
 
     put32be(xex, 0x100, 0x200);
-    put32be(xex, 0x104, 0x2000);
+    // Model Too Human's valid short basic-compression output.
+    put32be(xex, 0x104, 0x2800);
     put32be(xex, 0x210, 0x82000000);
 
     put32be(xex, format_info, 0x10);
@@ -88,7 +89,7 @@ int main() {
     assert(loaded);
     assert(loaded.compression_type == 1);
     assert(loaded.encryption_type == 0);
-    assert(loaded.security_image_size == 0x2000);
+    assert(loaded.security_image_size == 0x2800);
     assert(loaded.decompressed_size == 0x2000);
     assert(loaded.image->image_base == 0x82000000);
     assert(loaded.image->entry_point == 0x82001000);

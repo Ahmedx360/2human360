@@ -45,6 +45,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang ninja-build
 
+      - name: Build the pinned XenonRecomp tools and verify the title patch
+        run: python tools/recompile.py build-tools --generator Ninja
+
       - name: Configure Clang build
         run: >-
           cmake -S . -B build/clang -G Ninja

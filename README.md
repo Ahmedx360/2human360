@@ -108,26 +108,45 @@ cmake --build build --target TooHumanPpcRuntime --parallel
 
 ## Reproduce the recompilation
 
-1. Initialize tools/XenonRecomp and its recursive submodules.
-2. Apply the Too Human PE and instruction-support patch to the pinned XenonRecomp checkout:
+Initialize the pinned generator and its recursive dependencies:
 
-   ~~~sh
-   git -C tools/XenonRecomp apply ../../tools/patches/xenonrecomp-pe-loader.patch
-   ~~~
+~~~sh
+git submodule update --init --recursive
+~~~
 
-3. Place your legally obtained, extracted default.exe at the repository-root path private/default.exe.
-4. From the repository root, run XenonAnalyse with the input image and switch-table configuration:
+Place your own decrypted game image in the repository-root `private/` directory. Prefer `private/default.xex`; the matching extracted `private/default.exe` remains supported for PE-only analysis. The XEX is preferable because it preserves the original import metadata.
 
-   ~~~sh
-   XenonAnalyse private/default.exe TooHumanRecompLib/config/switch_tables.toml
-   ~~~
+Build the patched XenonRecomp tools:
 
-5. Run XenonRecomp with TooHumanRecompLib/config/TooHumanRecomp.toml and the PPC context header from the XenonRecomp checkout. **Paths inside the TOML are relative to the TOML file's directory**, not the shell's current directory. If you have the original matching `default.xex`, prefer `TooHumanRecompLib/config/TooHumanRecomp.XEX.toml` and re-run analysis/recompilation from that XEX so its import metadata is retained.
-6. Run the artifact checks and build commands above.
+~~~sh
+python tools/recompile.py build-tools --generator Ninja
+~~~
 
-The configuration points to ../../private/default.exe, ../ppc, and switch_tables.toml relative to TooHumanRecompLib/config/.
+This applies `tools/patches/xenonrecomp-pe-loader.patch` to the pinned submodule only when the patch applies cleanly. Re-running the command is safe. If the submodule contains partial or conflicting edits, the helper stops without resetting or overwriting them.
 
-The checked-in XenonRecomp patch corrects the known scalar-scratch code-emission mistakes, and the NOP-padded switch-table scanner now aligns computed bctr destinations to PowerPC instruction boundaries. The build has a non-destructive fallback normalizer for three already-generated legacy translation units, so the tracked PPC output is not rewritten by CMake.
+Generate jump-table analysis into a separate review file:
+
+~~~sh
+python tools/recompile.py analyze
+~~~
+
+The output is `TooHumanRecompLib/config/switch_tables.generated.toml`. Review it and merge any new tables into `switch_tables.toml` yourself, preserving the manually recovered entries already checked in. The analysis command never overwrites the maintained table by default.
+
+Regenerate the translated PPC code:
+
+~~~sh
+python tools/recompile.py generate
+~~~
+
+The helper selects `TooHumanRecomp.XEX.toml` when `private/default.xex` exists, otherwise `TooHumanRecomp.toml`. Pass `--config` to choose explicitly. Paths in these TOML files remain relative to the config file. Generation occurs in a temporary sibling directory; the current `TooHumanRecompLib/ppc` tree is replaced only after the required generated files, contiguous translation-unit numbering, error sidecars and repository artifact validator all pass. A failed run leaves the previous generated tree in place.
+
+Run the artifact and Python regression checks:
+
+~~~sh
+python tools/recompile.py validate
+~~~
+
+The existing CMake validation-only preset remains available for the host-side runtime tests. The checked-in XenonRecomp patch fixes title-specific PE loading, PPC instruction emission and NOP-padded switch-table handling. The CMake game-code target still normalizes legacy generated files in build-directory copies; it does not rewrite the checked-in PPC output during an ordinary runtime build.
 
 ## Why the PE loader patch is needed
 
