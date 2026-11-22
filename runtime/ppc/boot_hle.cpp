@@ -2,6 +2,7 @@
 #include "ppc/import_registry.hpp"
 #include "ppc/guest_thread_execution.hpp"
 #include "kernel/guest_kernel_objects.hpp"
+#include "memory/guest_address_space.hpp"
 
 #include <algorithm>
 #include <array>
@@ -30,6 +31,12 @@ constexpr std::uint32_t kStatusSuccess = 0;
 constexpr std::uint32_t kStatusUnsuccessful = 0xC0000001u;
 
 inline std::uint8_t* at(std::uint8_t* base, std::uint32_t guest) { return base + guest; }
+
+inline bool guest_range_valid(
+    std::uint8_t* base, std::uint32_t guest, std::size_t size,
+    GuestMemoryAccess access) noexcept {
+    return GuestAddressSpace::is_accessible_range(base, guest, size, access);
+}
 
 inline void put_be16(std::uint8_t* p, std::uint16_t v) {
     p[0] = static_cast<std::uint8_t>(v >> 8);
@@ -536,29 +543,90 @@ PPC_FUNC(RtlImageXexHeaderField) {
 // Looks the named resource up in the XEX resource-info header (key 0x000002FF).
 PPC_FUNC(XexGetModuleSection) {
     constexpr std::uint32_t kNotFound = 0xC0000225u;
+    constexpr std::uint32_t kAccessViolation = 0xC0000005u;
+    constexpr std::uint32_t kInvalidParameter = 0xC000000Du;
+
     const auto module_handle = g_executable_module_handle.load(std::memory_order_acquire);
-    const auto xex_header = module_handle ? get_be32(at(base, module_handle + 0x58)) : 0u;
-    if (xex_header == 0) { ctx.r3.u32 = kNotFound; return; }
-    const char* name = reinterpret_cast<const char*>(at(base, ctx.r4.u32));
-    if (std::getenv("TH_TRACE_IMPORTS"))
-        std::fprintf(stderr, "    XexGetModuleSection('%.8s')\n", name);
-    const auto header_size = get_be32(at(base, xex_header + 8));
-    const auto count = get_be32(at(base, xex_header + 0x14));
-    if (header_size < 0x18u || header_size > 0x100000u || count > (header_size - 0x18u) / 8u) {
-        ctx.r3.u32 = kNotFound; return;
+    if (module_handle == 0 ||
+        !guest_range_valid(base, module_handle + 0x58u, 4u, GuestMemoryAccess::Read)) {
+        ctx.r3.u32 = kNotFound;
+        return;
     }
+    const auto xex_header = get_be32(at(base, module_handle + 0x58u));
+    if (xex_header == 0 ||
+        !guest_range_valid(base, xex_header, 0x18u, GuestMemoryAccess::Read)) {
+        ctx.r3.u32 = kNotFound;
+        return;
+    }
+    const auto header_size = get_be32(at(base, xex_header + 8u));
+    const auto count = get_be32(at(base, xex_header + 0x14u));
+    if (header_size < 0x18u || header_size > 0x100000u ||
+        static_cast<std::uint64_t>(xex_header) + header_size >
+            GuestAddressSpace::kSize ||
+        !guest_range_valid(base, xex_header, header_size, GuestMemoryAccess::Read) ||
+        count > (header_size - 0x18u) / 8u) {
+        ctx.r3.u32 = kNotFound;
+        return;
+    }
+
+    const auto name_address = ctx.r4.u32;
+    const auto data_out = ctx.r5.u32;
+    const auto size_out = ctx.r6.u32;
+    if (name_address == 0 || data_out == 0 || size_out == 0) {
+        ctx.r3.u32 = kInvalidParameter;
+        return;
+    }
+    if (!guest_range_valid(base, name_address, 8u, GuestMemoryAccess::Read) ||
+        !guest_range_valid(base, data_out, 4u, GuestMemoryAccess::Write) ||
+        !guest_range_valid(base, size_out, 4u, GuestMemoryAccess::Write)) {
+        ctx.r3.u32 = kAccessViolation;
+        return;
+    }
+
+    const auto* name = at(base, name_address);
+    if (std::getenv("TH_TRACE_IMPORTS"))
+        std::fprintf(stderr, "    XexGetModuleSection('%.8s')\n",
+                     reinterpret_cast<const char*>(name));
+
     for (std::uint32_t i = 0; i < count; ++i) {
-        const auto entry = xex_header + 0x18 + i * 8;
+        const auto entry64 = static_cast<std::uint64_t>(xex_header) +
+                             0x18u + static_cast<std::uint64_t>(i) * 8u;
+        if (entry64 + 8u > static_cast<std::uint64_t>(xex_header) + header_size) {
+            ctx.r3.u32 = kNotFound;
+            return;
+        }
+        const auto entry = static_cast<std::uint32_t>(entry64);
         if (get_be32(at(base, entry)) != 0x000002FFu) continue;
-        const auto offset = get_be32(at(base, entry + 4));
-        if (offset + 4 > header_size) break;
-        const auto records = (get_be32(at(base, xex_header + offset)) - 4u) / 16u;
-        for (std::uint32_t r = 0; r < records && offset + 4 + (r + 1) * 16 <= header_size; ++r) {
-            const auto rec = xex_header + offset + 4 + r * 16;
-            if (std::strncmp(reinterpret_cast<const char*>(at(base, rec)), name, 8) != 0) continue;
-            put_be32(at(base, ctx.r5.u32), get_be32(at(base, rec + 8)));
-            put_be32(at(base, ctx.r6.u32), get_be32(at(base, rec + 12)));
-            ctx.r3.u32 = 0;
+
+        const auto offset = get_be32(at(base, entry + 4u));
+        if (offset > header_size || header_size - offset < 4u) {
+            ctx.r3.u32 = kNotFound;
+            return;
+        }
+        const auto section_bytes = get_be32(at(base, xex_header + offset));
+        if (section_bytes < 4u || section_bytes > header_size - offset) {
+            ctx.r3.u32 = kNotFound;
+            return;
+        }
+        const auto records = (section_bytes - 4u) / 16u;
+        if (4u + records * 16u > section_bytes) {
+            ctx.r3.u32 = kNotFound;
+            return;
+        }
+
+        for (std::uint32_t record_index = 0; record_index < records; ++record_index) {
+            const auto record64 = static_cast<std::uint64_t>(xex_header) + offset +
+                                  4u + static_cast<std::uint64_t>(record_index) * 16u;
+            if (record64 + 16u >
+                static_cast<std::uint64_t>(xex_header) + offset + section_bytes) {
+                ctx.r3.u32 = kNotFound;
+                return;
+            }
+            const auto record = static_cast<std::uint32_t>(record64);
+            if (std::memcmp(at(base, record), name, 8u) != 0) continue;
+            put_be32(at(base, data_out), get_be32(at(base, record + 8u)));
+            put_be32(at(base, size_out), get_be32(at(base, record + 12u)));
+            ctx.r3.u32 = kStatusSuccess;
             return;
         }
     }
@@ -906,32 +974,46 @@ PPC_FUNC(NtWaitForSingleObjectEx) {
 // xboxkrnl #0xDA. NtDuplicateObject(HANDLE src /*r3*/, HANDLE* out /*r4*/, ULONG options /*r5*/).
 // Pseudo-handles (-1 process, -2 thread) are given a placeholder signaled event object.
 PPC_FUNC(NtDuplicateObject) {
+    constexpr std::uint32_t kNotSupported = 0xC00000BBu;
     const auto source = ctx.r3.u32;
     const auto out = ctx.r4.u32;
     const auto options = ctx.r5.u32;
-    std::shared_ptr<GuestKernelObject> object;
-    if (source == 0xFFFFFFFEu || source == 0xFFFFFFFFu) {
-        object = std::make_shared<GuestEventObject>(true, true);
-    } else {
-        object = process_kernel_objects().lookup(source);
+    if (out == 0) { ctx.r3.u32 = kStatusInvalidParameter; return; }
+    if (!guest_range_valid(base, out, 4u, GuestMemoryAccess::Write)) {
+        ctx.r3.u32 = 0xC0000005u;
+        return;
     }
-    if (!object) { ctx.r3.u32 = kStatusInvalidHandle; return; }
-    const auto handle = process_kernel_objects().insert(object);
-    if (!handle) { ctx.r3.u32 = kStatusUnsuccessful; return; }
-    if (out != 0) put_be32(at(base, out), *handle);
-    if ((options & 1u) != 0 && source < 0xFFFFFFF0u)
-        (void)process_kernel_objects().close(source);
+    if ((options & ~0x3u) != 0) {
+        ctx.r3.u32 = kStatusInvalidParameter;
+        return;
+    }
+    // Process/thread pseudo-handles need real process and current-thread
+    // kernel objects. Do not fabricate a signaled event for either.
+    if (source == 0xFFFFFFFEu || source == 0xFFFFFFFFu) {
+        ctx.r3.u32 = kNotSupported;
+        return;
+    }
+    const auto handle = process_kernel_objects().duplicate(
+        source, (options & 0x1u) != 0);
+    if (!handle) { ctx.r3.u32 = kStatusInvalidHandle; return; }
+    put_be32(at(base, out), *handle);
     ctx.r3.u32 = kStatusSuccess;
 }
 
 // xboxkrnl #0x110. ObReferenceObjectByHandle(HANDLE /*r3*/, POBJECT_TYPE /*r4*/, PVOID* out /*r5*/).
 // Thread handles resolve to the guest KTHREAD; other objects fail with STATUS_OBJECT_TYPE_MISMATCH.
 PPC_FUNC(ObReferenceObjectByHandle) {
+    const auto output = ctx.r5.u32;
+    if (output == 0) { ctx.r3.u32 = kStatusInvalidParameter; return; }
+    if (!guest_range_valid(base, output, 4u, GuestMemoryAccess::Write)) {
+        ctx.r3.u32 = 0xC0000005u;
+        return;
+    }
     const auto object = process_kernel_objects().lookup(ctx.r3.u32);
     if (!object) { ctx.r3.u32 = kStatusInvalidHandle; return; }
     const auto address = object->guest_object_address();
     if (address == 0) { ctx.r3.u32 = 0xC0000024u; return; }
-    if (ctx.r5.u32 != 0) put_be32(at(base, ctx.r5.u32), address);
+    put_be32(at(base, output), address);
     ctx.r3.u32 = kStatusSuccess;
 }
 
@@ -939,7 +1021,18 @@ PPC_FUNC(ObReferenceObjectByHandle) {
 // Host scheduling decides placement; report a six-core affinity as the previous value.
 PPC_FUNC(KeSetAffinityThread) {
     constexpr std::uint32_t kAllCores = 0x3Fu;
-    if (ctx.r5.u32 != 0) put_be32(at(base, ctx.r5.u32), kAllCores);
+    // The PKTHREAD is a guest object body (KTHREAD is 0xAB0 bytes).
+    if (!guest_range_valid(base, ctx.r3.u32, 0xAB0u, GuestMemoryAccess::Read)) {
+        ctx.r3.u32 = 0xC0000005u;
+        return;
+    }
+    if (ctx.r5.u32 != 0) {
+        if (!guest_range_valid(base, ctx.r5.u32, 4u, GuestMemoryAccess::Write)) {
+            ctx.r3.u32 = 0xC0000005u;
+            return;
+        }
+        put_be32(at(base, ctx.r5.u32), kAllCores);
+    }
     ctx.r3.u32 = kAllCores;
 }
 

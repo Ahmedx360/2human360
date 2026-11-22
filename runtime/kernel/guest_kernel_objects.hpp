@@ -49,6 +49,9 @@ public:
                                  std::shared_ptr<GuestKernelObject> object);
     [[nodiscard]] std::shared_ptr<GuestKernelObject> lookup(GuestKernelHandle handle) const;
     [[nodiscard]] bool close(GuestKernelHandle handle);
+    // Atomically duplicate a handle; optionally close its source in the same operation.
+    [[nodiscard]] std::optional<GuestKernelHandle> duplicate(
+        GuestKernelHandle source, bool close_source = false);
     // Removes every handle that refers to the supplied object, used by owner teardown.
     [[nodiscard]] bool close_object(const std::shared_ptr<GuestKernelObject>& object);
     // Close every remaining object during process teardown. Callbacks run unlocked.

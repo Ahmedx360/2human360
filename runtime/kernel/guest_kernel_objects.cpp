@@ -125,6 +125,41 @@ bool GuestKernelObjectTable::close(GuestKernelHandle handle) {
     return true;
 }
 
+std::optional<GuestKernelHandle> GuestKernelObjectTable::duplicate(
+    GuestKernelHandle source, bool close_source) {
+    std::lock_guard lock(mutex_);
+    const auto source_it = objects_.find(source);
+    if (source_it == objects_.end()) return std::nullopt;
+    const auto object = source_it->second;
+
+    std::optional<GuestKernelHandle> duplicate_handle;
+    for (std::uint64_t attempts = 0; attempts < 0x3FFF0000ull; ++attempts) {
+        const auto candidate = next_handle_;
+        next_handle_ += 4u;
+        if (next_handle_ < 0x1000u) next_handle_ = 0x1000u;
+        if (candidate == 0 || objects_.contains(candidate)) continue;
+        if (!add_handle_reference_locked(object)) return std::nullopt;
+        objects_.emplace(candidate, object);
+        duplicate_handle = candidate;
+        break;
+    }
+    if (!duplicate_handle) return std::nullopt;
+
+    if (close_source) {
+        objects_.erase(source_it);
+        const auto state = object_handle_states_.find(object.get());
+        if (state != object_handle_states_.end() &&
+            state->second.open_handles != 0) {
+            --state->second.open_handles;
+            // The just-created duplicate keeps at least one table handle open.
+            if (state->second.open_handles == 0 && !state->second.closed)
+                state->second.closed = true;
+        }
+    }
+    return duplicate_handle;
+}
+
+
 bool GuestKernelObjectTable::close_object(
     const std::shared_ptr<GuestKernelObject>& object) {
     if (!object) return false;
