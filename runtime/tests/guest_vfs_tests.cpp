@@ -27,7 +27,7 @@ int main() {
     // Missing files, traversal, and read-only game volume.
     assert(vfs.open("game:\\nope.bin", nullptr, 1, false, false).status == GuestVfsStatus::ObjectNameNotFound);
     assert(vfs.open("game:\\..\\x", nullptr, 1, false, false).status == GuestVfsStatus::ObjectNameNotFound);
-    assert(vfs.open("game:\\new.bin", nullptr, 2, true, false).status == GuestVfsStatus::ObjectNameNotFound);
+    assert(vfs.open("game:\\new.bin", nullptr, 2, true, false).status == GuestVfsStatus::AccessDenied);
     // Save volume: create, write, read back, collision.
     auto w = vfs.open("cache:\\save\\slot0.bin", nullptr, 2, true, false);
     assert(w.status == GuestVfsStatus::Success && w.information == 2);
@@ -41,6 +41,19 @@ int main() {
     assert(open_if.status == GuestVfsStatus::Success && open_if.information == 1u);
     char preserved[4]{};
     assert(open_if.file->read(preserved, 3, 0) == 3 && !std::memcmp(preserved, "abc", 3));
+    // A read-only handle cannot request a mutating open disposition.
+    auto denied_overwrite = vfs.open("cache:\\save\\slot0.bin", nullptr, 4, false, false);
+    assert(denied_overwrite.status == GuestVfsStatus::AccessDenied);
+    auto still_preserved = vfs.open("cache:\\save\\slot0.bin", nullptr, 1, false, false);
+    char still_abc[4]{};
+    assert(still_preserved.status == GuestVfsStatus::Success);
+    assert(still_preserved.file->read(still_abc, 3, 0) == 3);
+    assert(!std::memcmp(still_abc, "abc", 3));
+    auto denied_create = vfs.open("cache:\\save\\read_only_create.bin",
+                                  nullptr, 2, false, false);
+    assert(denied_create.status == GuestVfsStatus::AccessDenied);
+    assert(!fs::exists(tmp / "save" / "save" / "read_only_create.bin"));
+
     auto overwrite = vfs.open("cache:\\save\\slot0.bin", nullptr, 4, true, false);
     assert(overwrite.status == GuestVfsStatus::Success && overwrite.information == 3u);
     assert(overwrite.file->size() == 0u);
@@ -51,6 +64,7 @@ int main() {
     assert(!read_only_file.file->can_write());
     assert(read_only_file.file->write("x", 1, 0) == 0u);
     assert(!read_only_file.file->resize(10u));
+    assert(read_only_file.file->flush()); // No pending output on a read-only handle.
 
     // A root-directory handle preserves the read-only game-volume policy.
     auto game_dir = vfs.open("game:\\", nullptr, 1, false, true);
