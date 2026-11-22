@@ -903,6 +903,27 @@ PPC_FUNC(NtWaitForSingleObjectEx) {
     case GuestKernelObjectWaitResult::InvalidHandle: ctx.r3.u32 = kStatusInvalidHandle; break;
     }
 }
+// xboxkrnl #0xDA. NtDuplicateObject(HANDLE src /*r3*/, HANDLE* out /*r4*/, ULONG options /*r5*/).
+// Pseudo-handles (-1 process, -2 thread) are given a placeholder signaled event object.
+PPC_FUNC(NtDuplicateObject) {
+    const auto source = ctx.r3.u32;
+    const auto out = ctx.r4.u32;
+    const auto options = ctx.r5.u32;
+    std::shared_ptr<GuestKernelObject> object;
+    if (source == 0xFFFFFFFEu || source == 0xFFFFFFFFu) {
+        object = std::make_shared<GuestEventObject>(true, true);
+    } else {
+        object = process_kernel_objects().lookup(source);
+    }
+    if (!object) { ctx.r3.u32 = kStatusInvalidHandle; return; }
+    const auto handle = process_kernel_objects().insert(object);
+    if (!handle) { ctx.r3.u32 = kStatusUnsuccessful; return; }
+    if (out != 0) put_be32(at(base, out), *handle);
+    if ((options & 1u) != 0 && source < 0xFFFFFFF0u)
+        (void)process_kernel_objects().close(source);
+    ctx.r3.u32 = kStatusSuccess;
+}
+
 PPC_FUNC(NtClose) {
     ctx.r3.u32 = process_kernel_objects().close(ctx.r3.u32)
         ? kStatusSuccess : kStatusInvalidHandle;
