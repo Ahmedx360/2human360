@@ -543,21 +543,20 @@ void PpcImportRegistry::handle_xenos_mmio_write(
 
     if (!xenos_command_processor_.ring_initialized()) {
         std::fprintf(stderr,
-            "[TooHuman][Xenos] CP_RB_WPTR written before VdInitializeRingBuffer (wptr=0x%08X)\\n",
+            "[TooHuman][Xenos] CP_RB_WPTR written before VdInitializeRingBuffer (wptr=0x%08X)\n",
             static_cast<std::uint32_t>(value));
         return;
     }
     if (!memory_) {
         std::fprintf(stderr,
-            "[TooHuman][Xenos] CP_RB_WPTR ignored: no guest address space is attached\\n");
+            "[TooHuman][Xenos] CP_RB_WPTR ignored: no guest address space is attached\n");
         return;
     }
 
-    std::string error;
     if (!xenos_command_processor_.update_write_pointer(
-            static_cast<std::uint32_t>(value), &error)) {
-        std::fprintf(stderr, "[TooHuman][Xenos] invalid CP_RB_WPTR: %s\\n",
-                     error.c_str());
+            static_cast<std::uint32_t>(value), nullptr)) {
+        std::fprintf(stderr, "[TooHuman][Xenos] invalid CP_RB_WPTR value=0x%08X\n",
+                     static_cast<std::uint32_t>(value));
         return;
     }
 
@@ -570,7 +569,7 @@ void PpcImportRegistry::handle_xenos_mmio_write(
         *memory_, callbacks, 4096u);
     if (!result) {
         std::fprintf(stderr,
-            "[TooHuman][Xenos] PM4 pump stopped (error=%u packet_error=%u opcode_context=CP_RB_WPTR packets=%zu dwords=%zu rptr=0x%08X wptr=0x%08X)\\n",
+            "[TooHuman][Xenos] PM4 pump stopped (error=%u packet_error=%u opcode_context=CP_RB_WPTR packets=%zu dwords=%zu rptr=0x%08X wptr=0x%08X)\n",
             static_cast<unsigned>(result.error),
             static_cast<unsigned>(result.ring.error),
             result.ring.dispatch.packets,
@@ -600,7 +599,7 @@ bool PpcImportRegistry::reject_xenos_type3(
     const auto preview = std::min<std::size_t>(payload.size(), 4u);
     for (std::size_t i = 0; i < preview; ++i)
         std::fprintf(stderr, " %08X", payload[i]);
-    std::fprintf(stderr, "\\n");
+    std::fprintf(stderr, "\n");
     return false;
 }
 
