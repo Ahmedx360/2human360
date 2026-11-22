@@ -146,7 +146,8 @@ std::optional<GuestKernelHandle> GuestKernelObjectTable::duplicate(
     if (!duplicate_handle) return std::nullopt;
 
     if (close_source) {
-        objects_.erase(source_it);
+        // emplace() may rehash the unordered_map and invalidate source_it.
+        objects_.erase(source);
         const auto state = object_handle_states_.find(object.get());
         if (state != object_handle_states_.end() &&
             state->second.open_handles != 0) {

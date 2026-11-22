@@ -106,6 +106,27 @@ int main() {
     assert(duplicated->callback_count == 1u);
     assert(duplicated->remaining_handles == 0u);
 
+    // The table's duplicate operation can atomically close the source after
+    // inserting its replacement without firing the final-close callback.
+    auto atomic_duplicate_object = std::make_shared<ReentrantCloseObject>(objects);
+    const auto source_handle = objects.insert(atomic_duplicate_object);
+    assert(source_handle);
+    const auto same_access_handle = objects.duplicate(*source_handle, false);
+    assert(same_access_handle && *same_access_handle != *source_handle);
+    assert(objects.lookup(*source_handle) == atomic_duplicate_object);
+    assert(objects.close(*source_handle));
+    assert(!atomic_duplicate_object->callback_called);
+
+    const auto close_source = objects.duplicate(*same_access_handle, true);
+    assert(close_source);
+    assert(!objects.lookup(*same_access_handle));
+    assert(objects.lookup(*close_source) == atomic_duplicate_object);
+    assert(!atomic_duplicate_object->callback_called);
+    assert(objects.close(*close_source));
+    assert(atomic_duplicate_object->callback_called);
+    assert(atomic_duplicate_object->callback_count == 1u);
+    assert(!objects.duplicate(0xDEADBEEFu, false));
+
     // ABI-specific handles may expose a native KTHREAD address, but must
     // reject the null value and collisions with existing objects.
     auto native_object = std::make_shared<GuestEventObject>(true, false);
