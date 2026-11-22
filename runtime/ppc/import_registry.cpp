@@ -148,6 +148,22 @@ std::optional<std::uint32_t> PpcImportRegistry::allocate_runtime_memory(
 
 PpcImportRegistry::PpcImportRegistry() = default;
 
+bool PpcImportRegistry::initialize_xenos_ring(
+    std::uint32_t physical_base, std::uint32_t size_log2,
+    std::string* error) noexcept {
+    std::lock_guard lock(xenos_command_processor_mutex_);
+    return xenos_command_processor_.initialize_ring(
+        physical_base, size_log2, error);
+}
+
+bool PpcImportRegistry::enable_xenos_read_pointer_writeback(
+    std::uint32_t physical_address, std::uint32_t block_size_log2,
+    std::string* error) noexcept {
+    std::lock_guard lock(xenos_command_processor_mutex_);
+    return xenos_command_processor_.enable_read_pointer_writeback(
+        physical_address, block_size_log2, error);
+}
+
 PpcImportRegistry* PpcImportRegistry::active() noexcept {
     return g_active_registry.load(std::memory_order_acquire);
 }
@@ -540,6 +556,8 @@ void PpcImportRegistry::handle_xenos_mmio_write(
         kXenosMmioBase + 0x01C5u * sizeof(std::uint32_t);
     if (address != kCpRingWritePointer || width != sizeof(std::uint32_t))
         return;
+
+    std::lock_guard lock(xenos_command_processor_mutex_);
 
     if (!xenos_command_processor_.ring_initialized()) {
         std::fprintf(stderr,
