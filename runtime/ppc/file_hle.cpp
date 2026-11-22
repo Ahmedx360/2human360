@@ -475,6 +475,11 @@ PPC_FUNC(NtQueryVolumeInformationFile) {
     constexpr std::uint32_t kSizeInformationClass = 3u;
     constexpr std::uint64_t kAllocationUnitBytes = 0x1000u;
 
+    if (!valid_iosb(base, ctx.r4.u32)) {
+        ctx.r3.u32 = kAccessViolation;
+        return;
+    }
+
     const auto info_class = ctx.r7.u32;
     if (info_class != kVolumeInformationClass &&
         info_class != kSizeInformationClass) {
