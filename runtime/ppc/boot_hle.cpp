@@ -532,6 +532,39 @@ PPC_FUNC(RtlImageXexHeaderField) {
     }
 }
 
+// xboxkrnl #0x196. XexGetModuleSection(HMODULE, const char* name, PVOID* data, ULONG* size) -> NTSTATUS.
+// Looks the named resource up in the XEX resource-info header (key 0x000002FF).
+PPC_FUNC(XexGetModuleSection) {
+    constexpr std::uint32_t kNotFound = 0xC0000225u;
+    const auto module_handle = g_executable_module_handle.load(std::memory_order_acquire);
+    const auto xex_header = module_handle ? get_be32(at(base, module_handle + 0x58)) : 0u;
+    if (xex_header == 0) { ctx.r3.u32 = kNotFound; return; }
+    const char* name = reinterpret_cast<const char*>(at(base, ctx.r4.u32));
+    if (std::getenv("TH_TRACE_IMPORTS"))
+        std::fprintf(stderr, "    XexGetModuleSection('%.8s')\n", name);
+    const auto header_size = get_be32(at(base, xex_header + 8));
+    const auto count = get_be32(at(base, xex_header + 0x14));
+    if (header_size < 0x18u || header_size > 0x100000u || count > (header_size - 0x18u) / 8u) {
+        ctx.r3.u32 = kNotFound; return;
+    }
+    for (std::uint32_t i = 0; i < count; ++i) {
+        const auto entry = xex_header + 0x18 + i * 8;
+        if (get_be32(at(base, entry)) != 0x000002FFu) continue;
+        const auto offset = get_be32(at(base, entry + 4));
+        if (offset + 4 > header_size) break;
+        const auto records = (get_be32(at(base, xex_header + offset)) - 4u) / 16u;
+        for (std::uint32_t r = 0; r < records && offset + 4 + (r + 1) * 16 <= header_size; ++r) {
+            const auto rec = xex_header + offset + 4 + r * 16;
+            if (std::strncmp(reinterpret_cast<const char*>(at(base, rec)), name, 8) != 0) continue;
+            put_be32(at(base, ctx.r5.u32), get_be32(at(base, rec + 8)));
+            put_be32(at(base, ctx.r6.u32), get_be32(at(base, rec + 12)));
+            ctx.r3.u32 = 0;
+            return;
+        }
+    }
+    ctx.r3.u32 = kNotFound;
+}
+
 PPC_FUNC(RtlCompareMemoryUlong) {
     const auto source = ctx.r3.u32;
     const auto length = ctx.r4.u32;

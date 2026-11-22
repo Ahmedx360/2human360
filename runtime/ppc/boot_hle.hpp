@@ -38,6 +38,7 @@ PPCFunc XamShowMessageBoxUIEx;
 PPCFunc XexGetModuleHandle;
 PPCFunc XexGetProcedureAddress;
 PPCFunc XexCheckExecutablePrivilege;
+PPCFunc XexGetModuleSection;
 PPCFunc RtlImageXexHeaderField;
 PPCFunc RtlCompareMemoryUlong;
 PPCFunc RtlRaiseException;
