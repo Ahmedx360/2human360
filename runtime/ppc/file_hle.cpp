@@ -1,127 +1,256 @@
-// File-system HLE: NtCreateFile/NtOpenFile/NtReadFile/NtWriteFile and query/set information,
-// backed by the host-directory GuestVfs (see fs/guest_vfs.hpp).
+// File-system HLE backed by the host-directory GuestVfs.
 #include "ppc/boot_hle.hpp"
 #include "fs/guest_vfs.hpp"
 #include "kernel/guest_kernel_objects.hpp"
+#include "memory/guest_address_space.hpp"
 
-#include <algorithm>
+#include <cstdint>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <memory>
+#include <optional>
+#include <string>
 #include <ppc_context.h>
 
 namespace toohuman::runtime::boot_hle {
 namespace {
 
-constexpr std::uint32_t kSuccess = 0;
+constexpr std::uint32_t kSuccess = 0x00000000u;
 constexpr std::uint32_t kInvalidHandle = 0xC0000008u;
 constexpr std::uint32_t kInvalidParameter = 0xC000000Du;
+constexpr std::uint32_t kAccessViolation = 0xC0000005u;
 constexpr std::uint32_t kEndOfFile = 0xC0000011u;
+constexpr std::uint32_t kFileIsADirectory = 0xC00000BAu;
 constexpr std::uint32_t kNotImplemented = 0xC0000002u;
 constexpr std::uint32_t kAccessDenied = 0xC0000022u;
 constexpr std::uint32_t kInfoLengthMismatch = 0xC0000004u;
-constexpr std::uint32_t kNoMoreFiles = 0x80000006u;
 
-std::uint8_t* at(std::uint8_t* base, std::uint32_t a) { return base + a; }
-std::uint32_t rd32(std::uint8_t* base, std::uint32_t a) {
-    std::uint32_t v; std::memcpy(&v, base + a, 4); return __builtin_bswap32(v);
+enum class NameReadResult { Success, InvalidParameter, AccessViolation };
+
+bool guest_range(std::uint8_t* base, std::uint32_t address,
+                 std::size_t size, GuestMemoryAccess access) noexcept {
+    return GuestAddressSpace::is_accessible_range(base, address, size, access);
 }
-void wr32(std::uint8_t* base, std::uint32_t a, std::uint32_t v) {
-    v = __builtin_bswap32(v); std::memcpy(base + a, &v, 4);
+
+std::uint8_t* at(std::uint8_t* base, std::uint32_t address) noexcept {
+    return base + address;
 }
-void wr64(std::uint8_t* base, std::uint32_t a, std::uint64_t v) {
-    v = __builtin_bswap64(v); std::memcpy(base + a, &v, 8);
+
+std::uint32_t rd32(std::uint8_t* base, std::uint32_t address) noexcept {
+    const auto* p = at(base, address);
+    return (std::uint32_t(p[0]) << 24) |
+           (std::uint32_t(p[1]) << 16) |
+           (std::uint32_t(p[2]) << 8) |
+           std::uint32_t(p[3]);
 }
-std::uint64_t rd64(std::uint8_t* base, std::uint32_t a) {
-    std::uint64_t v; std::memcpy(&v, base + a, 8); return __builtin_bswap64(v);
+
+void wr32(std::uint8_t* base, std::uint32_t address, std::uint32_t value) noexcept {
+    auto* p = at(base, address);
+    p[0] = static_cast<std::uint8_t>(value >> 24);
+    p[1] = static_cast<std::uint8_t>(value >> 16);
+    p[2] = static_cast<std::uint8_t>(value >> 8);
+    p[3] = static_cast<std::uint8_t>(value);
 }
-void set_iosb(std::uint8_t* base, std::uint32_t iosb, std::uint32_t status, std::uint32_t info) {
+
+void wr64(std::uint8_t* base, std::uint32_t address, std::uint64_t value) noexcept {
+    auto* p = at(base, address);
+    for (unsigned i = 0; i < 8; ++i)
+        p[i] = static_cast<std::uint8_t>(value >> ((7u - i) * 8u));
+}
+
+std::uint64_t rd64(std::uint8_t* base, std::uint32_t address) noexcept {
+    const auto* p = at(base, address);
+    std::uint64_t value = 0;
+    for (unsigned i = 0; i < 8; ++i)
+        value = (value << 8) | p[i];
+    return value;
+}
+
+void set_iosb(std::uint8_t* base, std::uint32_t iosb,
+              std::uint32_t status, std::uint32_t information) noexcept {
     if (iosb == 0) return;
     wr32(base, iosb, status);
-    wr32(base, iosb + 4, info);
+    wr32(base, iosb + 4u, information);
 }
 
-// OBJECT_ATTRIBUTES: {root_dir, ANSI_STRING* name, attributes}; ANSI_STRING: {u16 len, u16 max, char* buf}.
-bool read_object_name(std::uint8_t* base, std::uint32_t attrs, std::string& name,
-                      std::uint32_t& root_handle) {
-    if (attrs == 0) return false;
+// Xbox OBJECT_ATTRIBUTES starts with RootDirectory and ObjectName. The object
+// name is an 8-byte big-endian ANSI_STRING descriptor (Length, MaximumLength,
+// Buffer). Validate each guest range before dereferencing it.
+NameReadResult read_object_name(std::uint8_t* base, std::uint32_t attrs,
+                                std::string& name, std::uint32_t& root_handle,
+                                bool& root_writable) {
+    if (attrs == 0) return NameReadResult::InvalidParameter;
+    if (!guest_range(base, attrs, 8u, GuestMemoryAccess::Read))
+        return NameReadResult::AccessViolation;
+
     root_handle = rd32(base, attrs);
-    if (root_handle >= 0xFFFFFFF0u) root_handle = 0; // pseudo-handle sentinel: no root directory
-    const auto str = rd32(base, attrs + 4);
-    if (str == 0) return false;
-    const auto len = (static_cast<std::uint32_t>(*at(base, str)) << 8) | *at(base, str + 1);
-    const auto buf = rd32(base, str + 4);
-    name.assign(reinterpret_cast<const char*>(at(base, buf)), len);
-    return true;
+    if (root_handle >= 0xFFFFFFF0u) root_handle = 0;
+    root_writable = true;
+
+    const auto string_address = rd32(base, attrs + 4u);
+    if (string_address == 0) return NameReadResult::InvalidParameter;
+    if (!guest_range(base, string_address, 8u, GuestMemoryAccess::Read))
+        return NameReadResult::AccessViolation;
+
+    const auto length = (std::uint32_t(*at(base, string_address)) << 8) |
+                        std::uint32_t(*at(base, string_address + 1u));
+    const auto buffer = rd32(base, string_address + 4u);
+    if (length == 0 || length > 0x8000u || buffer == 0)
+        return NameReadResult::InvalidParameter;
+    if (!guest_range(base, buffer, length, GuestMemoryAccess::Read))
+        return NameReadResult::AccessViolation;
+
+    name.assign(reinterpret_cast<const char*>(at(base, buffer)), length);
+    if (name.find('\0') != std::string::npos)
+        return NameReadResult::InvalidParameter;
+    return NameReadResult::Success;
 }
 
 std::shared_ptr<GuestFile> file_from_handle(std::uint32_t handle) {
-    auto object = process_kernel_objects().lookup(handle);
-    if (!object || object->type() != GuestKernelObjectType::File) return nullptr;
-    return std::static_pointer_cast<GuestFile>(object);
+    return std::dynamic_pointer_cast<GuestFile>(
+        process_kernel_objects().lookup(handle));
 }
 
-std::uint32_t open_common(PPCContext& ctx, std::uint8_t* base, std::uint32_t out_handle,
-                          std::uint32_t access, std::uint32_t attrs, std::uint32_t iosb,
-                          std::uint32_t disposition, std::uint32_t options) {
+std::uint32_t open_common(std::uint8_t* base, std::uint32_t out_handle,
+                          std::uint32_t access, std::uint32_t attrs,
+                          std::uint32_t iosb, std::uint32_t disposition,
+                          std::uint32_t options) {
+    if (base == nullptr || out_handle == 0 ||
+        !guest_range(base, out_handle, 4u, GuestMemoryAccess::Write) ||
+        (iosb != 0 && !guest_range(base, iosb, 8u, GuestMemoryAccess::Write))) {
+        return kAccessViolation;
+    }
+
     std::string name;
     std::uint32_t root_handle = 0;
-    if (std::getenv("TH_TRACE_FILES")) std::fprintf(stderr, "    [file] open attrs=%08X access=%08X\n", attrs, access);
-    if (!read_object_name(base, attrs, name, root_handle)) return kInvalidParameter;
+    bool root_writable = true;
+    const auto name_status = read_object_name(
+        base, attrs, name, root_handle, root_writable);
+    if (name_status != NameReadResult::Success) {
+        const auto status = name_status == NameReadResult::AccessViolation
+            ? kAccessViolation : kInvalidParameter;
+        set_iosb(base, iosb, status, 0);
+        return status;
+    }
+
     std::filesystem::path root;
     const std::filesystem::path* root_ptr = nullptr;
     if (root_handle != 0) {
-        const auto dir = file_from_handle(root_handle);
-        if (!dir) return kInvalidHandle;
-        root = dir->path();
+        const auto directory = file_from_handle(root_handle);
+        if (!directory) {
+            set_iosb(base, iosb, kInvalidHandle, 0);
+            return kInvalidHandle;
+        }
+        if (!directory->is_directory()) {
+            set_iosb(base, iosb, kInvalidParameter, 0);
+            return kInvalidParameter;
+        }
+        root = directory->path();
         root_ptr = &root;
+        root_writable = directory->volume_writable();
     }
-    constexpr std::uint32_t kWriteMask = 0x40000002u | 0x00000002u | 0x00000004u | 0x40000000u | 0x10000000u;
+
+    constexpr std::uint32_t kGenericRead = 0x80000000u;
+    constexpr std::uint32_t kGenericWrite = 0x40000000u;
+    constexpr std::uint32_t kGenericAll = 0x10000000u;
+    constexpr std::uint32_t kReadMask =
+        kGenericRead | kGenericAll | 0x00000001u | 0x00000008u | 0x00000080u;
+    constexpr std::uint32_t kWriteMask =
+        kGenericWrite | kGenericAll | 0x00000002u | 0x00000004u |
+        0x00000010u | 0x00000100u | 0x00010000u | 0x00040000u | 0x00080000u;
+    const bool want_read = (access & kReadMask) != 0;
     const bool want_write = (access & kWriteMask) != 0;
     const bool directory_only = (options & 0x1u) != 0; // FILE_DIRECTORY_FILE
-    auto result = process_vfs().open(name, root_ptr, disposition, want_write, directory_only);
+
     if (std::getenv("TH_TRACE_FILES"))
-        std::fprintf(stderr, "    [file] open '%s' disp=%u -> %08X\n", name.c_str(), disposition,
-                     static_cast<unsigned>(result.status));
+        std::fprintf(stderr, "    [file] open '%s' access=%08X disp=%u\n",
+                     name.c_str(), access, disposition);
+
+    auto result = process_vfs().open(
+        name, root_ptr, disposition, want_write, directory_only,
+        root_writable, want_read);
     if (result.status != GuestVfsStatus::Success) {
-        set_iosb(base, iosb, static_cast<std::uint32_t>(result.status), 0);
-        return static_cast<std::uint32_t>(result.status);
+        const auto status = static_cast<std::uint32_t>(result.status);
+        set_iosb(base, iosb, status, 0);
+        return status;
     }
+    if (!result.file) {
+        set_iosb(base, iosb, kAccessDenied, 0);
+        return kAccessDenied;
+    }
+
     const auto handle = process_kernel_objects().insert(result.file);
-    if (!handle) return 0xC0000001u;
-    if (out_handle != 0) wr32(base, out_handle, *handle);
+    if (!handle) {
+        set_iosb(base, iosb, kAccessDenied, 0);
+        return kAccessDenied;
+    }
+    wr32(base, out_handle, *handle);
     set_iosb(base, iosb, kSuccess, result.information);
     return kSuccess;
 }
 
+bool valid_iosb(std::uint8_t* base, std::uint32_t iosb) noexcept {
+    return iosb == 0 || guest_range(base, iosb, 8u, GuestMemoryAccess::Write);
+}
+
+void signal_optional_event(std::uint32_t handle) {
+    if (handle == 0) return;
+    if (auto event = std::dynamic_pointer_cast<GuestEventObject>(
+            process_kernel_objects().lookup(handle))) {
+        (void)event->set();
+    }
+}
+
 } // namespace
 
-// xboxkrnl #0xD2. NtCreateFile(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES, PIO_STATUS_BLOCK,
-// PLARGE_INTEGER alloc, ULONG attrs, ULONG share, ULONG disposition, [stack] ULONG options).
+// xboxkrnl #0xD2. NtCreateFile(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES,
+// PIO_STATUS_BLOCK, PLARGE_INTEGER alloc, ULONG attrs, ULONG share,
+// ULONG disposition, [stack] ULONG options).
 PPC_FUNC(NtCreateFile) {
-    const auto options = rd32(base, ctx.r1.u32 + 0x54);
-    ctx.r3.u32 = open_common(ctx, base, ctx.r3.u32, ctx.r4.u32, ctx.r5.u32, ctx.r6.u32,
-                             ctx.r10.u32, options);
+    const auto stack_options64 = static_cast<std::uint64_t>(ctx.r1.u32) + 0x54u;
+    if (stack_options64 > 0xFFFFFFFFull ||
+        !guest_range(base, static_cast<std::uint32_t>(stack_options64),
+                    4u, GuestMemoryAccess::Read)) {
+        ctx.r3.u32 = kAccessViolation;
+        return;
+    }
+    const auto options = rd32(base, static_cast<std::uint32_t>(stack_options64));
+    ctx.r3.u32 = open_common(base, ctx.r3.u32, ctx.r4.u32, ctx.r5.u32,
+                             ctx.r6.u32, ctx.r10.u32, options);
 }
 
-// xboxkrnl #0xDF. NtOpenFile(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES, PIO_STATUS_BLOCK, share, options).
+// xboxkrnl #0xDF. NtOpenFile(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES,
+// PIO_STATUS_BLOCK, share, options).
 PPC_FUNC(NtOpenFile) {
-    ctx.r3.u32 = open_common(ctx, base, ctx.r3.u32, ctx.r4.u32, ctx.r5.u32, ctx.r6.u32, 1u,
-                             ctx.r8.u32);
+    ctx.r3.u32 = open_common(base, ctx.r3.u32, ctx.r4.u32, ctx.r5.u32,
+                             ctx.r6.u32, 1u, ctx.r8.u32);
 }
 
-// xboxkrnl #0xF0. NtReadFile(h, event, apc, apcctx, iosb, buf, len, PLARGE_INTEGER offset).
+// xboxkrnl #0xF0. NtReadFile(h, event, apc, apcctx, iosb, buf, len, offset).
 PPC_FUNC(NtReadFile) {
     const auto file = file_from_handle(ctx.r3.u32);
+    if (!file) { ctx.r3.u32 = kInvalidHandle; return; }
+    if (file->is_directory()) { ctx.r3.u32 = kFileIsADirectory; return; }
+    if (!file->can_read()) { ctx.r3.u32 = kAccessDenied; return; }
+
     const auto iosb = ctx.r7.u32;
-    if (!file || file->is_directory()) { ctx.r3.u32 = kInvalidHandle; return; }
-    std::optional<std::uint64_t> offset;
-    if (ctx.r10.u32 != 0) {
-        const auto value = rd64(base, ctx.r10.u32);
-        if (value != 0xFFFFFFFFFFFFFFFFull) offset = value; // -1 means "current position"
-    }
+    const auto buffer = ctx.r8.u32;
     const auto length = ctx.r9.u32;
-    const auto got = file->read(base + ctx.r8.u32, length, offset);
+    const auto offset_ptr = ctx.r10.u32;
+    if (!valid_iosb(base, iosb) ||
+        (length != 0 && !guest_range(base, buffer, length, GuestMemoryAccess::Write)) ||
+        (offset_ptr != 0 && !guest_range(base, offset_ptr, 8u, GuestMemoryAccess::Read))) {
+        ctx.r3.u32 = kAccessViolation;
+        return;
+    }
+    std::optional<std::uint64_t> offset;
+    if (offset_ptr != 0) {
+        const auto value = rd64(base, offset_ptr);
+        if (value != 0xFFFFFFFFFFFFFFFFull) offset = value;
+    }
+
+    const auto got = file->read(length ? at(base, buffer) : nullptr, length, offset);
     if (got == 0 && length != 0) {
         set_iosb(base, iosb, kEndOfFile, 0);
         ctx.r3.u32 = kEndOfFile;
@@ -130,56 +259,97 @@ PPC_FUNC(NtReadFile) {
         ctx.r3.u32 = kSuccess;
     }
     if (ctx.r4.u32 != 0) {
-        if (auto event = std::dynamic_pointer_cast<GuestEventObject>(
-                process_kernel_objects().lookup(ctx.r4.u32))) (void)event->set();
+        const auto event = std::dynamic_pointer_cast<GuestEventObject>(
+            process_kernel_objects().lookup(ctx.r4.u32));
+        if (!event) {
+            ctx.r3.u32 = kInvalidHandle;
+            return;
+        }
+        (void)event->set();
     }
 }
 
-// xboxkrnl #0xFF. NtWriteFile(h, event, apc, apcctx, iosb, buf, len, PLARGE_INTEGER offset).
+// xboxkrnl #0xFF. NtWriteFile(h, event, apc, apcctx, iosb, buf, len, offset).
 PPC_FUNC(NtWriteFile) {
     const auto file = file_from_handle(ctx.r3.u32);
+    if (!file) { ctx.r3.u32 = kInvalidHandle; return; }
+    if (file->is_directory()) { ctx.r3.u32 = kFileIsADirectory; return; }
+    if (!file->can_write()) { ctx.r3.u32 = kAccessDenied; return; }
+
     const auto iosb = ctx.r7.u32;
-    if (!file || file->is_directory()) { ctx.r3.u32 = kInvalidHandle; return; }
+    const auto buffer = ctx.r8.u32;
+    const auto length = ctx.r9.u32;
+    const auto offset_ptr = ctx.r10.u32;
+    if (!valid_iosb(base, iosb) ||
+        (length != 0 && !guest_range(base, buffer, length, GuestMemoryAccess::Read)) ||
+        (offset_ptr != 0 && !guest_range(base, offset_ptr, 8u, GuestMemoryAccess::Read))) {
+        ctx.r3.u32 = kAccessViolation;
+        return;
+    }
     std::optional<std::uint64_t> offset;
-    if (ctx.r10.u32 != 0) {
-        const auto value = rd64(base, ctx.r10.u32);
+    if (offset_ptr != 0) {
+        const auto value = rd64(base, offset_ptr);
         if (value != 0xFFFFFFFFFFFFFFFFull) offset = value;
     }
-    const auto wrote = file->write(base + ctx.r8.u32, ctx.r9.u32, offset);
-    if (wrote != ctx.r9.u32) { set_iosb(base, iosb, kAccessDenied, 0); ctx.r3.u32 = kAccessDenied; return; }
+
+    const auto wrote = file->write(length ? at(base, buffer) : nullptr, length, offset);
+    if (wrote != length) {
+        set_iosb(base, iosb, kAccessDenied, 0);
+        ctx.r3.u32 = kAccessDenied;
+        return;
+    }
     set_iosb(base, iosb, kSuccess, static_cast<std::uint32_t>(wrote));
     ctx.r3.u32 = kSuccess;
+    signal_optional_event(ctx.r4.u32);
 }
 
 // xboxkrnl #0xE8. NtQueryInformationFile(h, iosb, info, len, class).
 PPC_FUNC(NtQueryInformationFile) {
     const auto file = file_from_handle(ctx.r3.u32);
     if (!file) { ctx.r3.u32 = kInvalidHandle; return; }
-    const auto iosb = ctx.r4.u32, info = ctx.r5.u32, length = ctx.r6.u32, cls = ctx.r7.u32;
-    const auto size = file->size();
-    const std::uint64_t alloc = (size + 0xFFFu) & ~0xFFFull;
-    std::uint32_t written = 0;
+    const auto iosb = ctx.r4.u32;
+    const auto info = ctx.r5.u32;
+    const auto length = ctx.r6.u32;
+    const auto cls = ctx.r7.u32;
+    if (!valid_iosb(base, iosb)) { ctx.r3.u32 = kAccessViolation; return; }
+
+    std::uint32_t required = 0;
     switch (cls) {
-    case 5: // FileStandardInformation: alloc, eof, links, delete_pending, directory
-        if (length < 24) { ctx.r3.u32 = kInfoLengthMismatch; return; }
-        wr64(base, info, alloc); wr64(base, info + 8, size);
-        wr32(base, info + 16, 1);
-        *at(base, info + 20) = 0; *at(base, info + 21) = file->is_directory() ? 1 : 0;
-        written = 24; break;
-    case 14: // FilePositionInformation
-        if (length < 8) { ctx.r3.u32 = kInfoLengthMismatch; return; }
-        wr64(base, info, file->position()); written = 8; break;
-    case 34: // FileNetworkOpenInformation
-        if (length < 56) { ctx.r3.u32 = kInfoLengthMismatch; return; }
-        std::memset(at(base, info), 0, 56);
-        wr64(base, info + 32, alloc); wr64(base, info + 40, size);
-        wr32(base, info + 48, file->is_directory() ? 0x10u : 0x80u);
-        written = 56; break;
+    case 5: required = 24u; break;  // FileStandardInformation
+    case 14: required = 8u; break;  // FilePositionInformation
+    case 34: required = 56u; break; // FileNetworkOpenInformation
     default:
-        std::fprintf(stderr, "[TooHuman] NtQueryInformationFile class %u not implemented\n", cls);
-        ctx.r3.u32 = kNotImplemented; return;
+        ctx.r3.u32 = kNotImplemented;
+        return;
     }
-    set_iosb(base, iosb, kSuccess, written);
+    if (length < required) { ctx.r3.u32 = kInfoLengthMismatch; return; }
+    if (!guest_range(base, info, required, GuestMemoryAccess::Write)) {
+        ctx.r3.u32 = kAccessViolation;
+        return;
+    }
+
+    const auto size = file->size();
+    const auto allocation = (size + 0xFFFu) & ~0xFFFull;
+    switch (cls) {
+    case 5:
+        std::memset(at(base, info), 0, 24u);
+        wr64(base, info, allocation);
+        wr64(base, info + 8u, size);
+        wr32(base, info + 16u, 1u);
+        *at(base, info + 20u) = 0;
+        *at(base, info + 21u) = file->is_directory() ? 1u : 0u;
+        break;
+    case 14:
+        wr64(base, info, file->position());
+        break;
+    case 34:
+        std::memset(at(base, info), 0, 56u);
+        wr64(base, info + 32u, allocation);
+        wr64(base, info + 40u, size);
+        wr32(base, info + 48u, file->is_directory() ? 0x10u : 0x80u);
+        break;
+    }
+    set_iosb(base, iosb, kSuccess, required);
     ctx.r3.u32 = kSuccess;
 }
 
@@ -187,49 +357,83 @@ PPC_FUNC(NtQueryInformationFile) {
 PPC_FUNC(NtSetInformationFile) {
     const auto file = file_from_handle(ctx.r3.u32);
     if (!file) { ctx.r3.u32 = kInvalidHandle; return; }
-    const auto iosb = ctx.r4.u32, info = ctx.r5.u32, cls = ctx.r7.u32;
+    const auto iosb = ctx.r4.u32;
+    const auto info = ctx.r5.u32;
+    const auto length = ctx.r6.u32;
+    const auto cls = ctx.r7.u32;
+    if (!valid_iosb(base, iosb)) { ctx.r3.u32 = kAccessViolation; return; }
+
+    if (length < 8u || !guest_range(base, info, 8u, GuestMemoryAccess::Read)) {
+        ctx.r3.u32 = length < 8u ? kInfoLengthMismatch : kAccessViolation;
+        return;
+    }
     switch (cls) {
-    case 14: file->set_position(rd64(base, info)); break;               // FilePositionInformation
-    case 20: if (!file->resize(rd64(base, info))) { ctx.r3.u32 = kAccessDenied; return; } break; // EndOfFile
+    case 14:
+        file->set_position(rd64(base, info));
+        break;
+    case 20:
+        if (!file->can_write()) { ctx.r3.u32 = kAccessDenied; return; }
+        if (!file->resize(rd64(base, info))) { ctx.r3.u32 = kAccessDenied; return; }
+        break;
     default:
-        std::fprintf(stderr, "[TooHuman] NtSetInformationFile class %u not implemented\n", cls);
-        ctx.r3.u32 = kNotImplemented; return;
+        ctx.r3.u32 = kNotImplemented;
+        return;
     }
     set_iosb(base, iosb, kSuccess, 0);
     ctx.r3.u32 = kSuccess;
 }
 
-// xboxkrnl #0xE7. NtQueryFullAttributesFile(POBJECT_ATTRIBUTES, PFILE_NETWORK_OPEN_INFORMATION).
+// xboxkrnl #0xE7. NtQueryFullAttributesFile(POBJECT_ATTRIBUTES, output).
 PPC_FUNC(NtQueryFullAttributesFile) {
     std::string name;
     std::uint32_t root_handle = 0;
-    if (!read_object_name(base, ctx.r3.u32, name, root_handle)) { ctx.r3.u32 = kInvalidParameter; return; }
+    bool root_writable = true;
+    const auto name_status = read_object_name(
+        base, ctx.r3.u32, name, root_handle, root_writable);
+    if (name_status != NameReadResult::Success) {
+        ctx.r3.u32 = name_status == NameReadResult::AccessViolation
+            ? kAccessViolation : kInvalidParameter;
+        return;
+    }
+    const auto out = ctx.r4.u32;
+    if (!guest_range(base, out, 56u, GuestMemoryAccess::Write)) {
+        ctx.r3.u32 = kAccessViolation;
+        return;
+    }
+
     std::filesystem::path root;
     const std::filesystem::path* root_ptr = nullptr;
     if (root_handle != 0) {
-        const auto dir = file_from_handle(root_handle);
-        if (!dir) { ctx.r3.u32 = kInvalidHandle; return; }
-        root = dir->path(); root_ptr = &root;
+        const auto directory = file_from_handle(root_handle);
+        if (!directory) { ctx.r3.u32 = kInvalidHandle; return; }
+        if (!directory->is_directory()) { ctx.r3.u32 = kInvalidParameter; return; }
+        root = directory->path();
+        root_ptr = &root;
+        root_writable = directory->volume_writable();
     }
-    auto result = process_vfs().open(name, root_ptr, 1u, false, false);
-    if (std::getenv("TH_TRACE_FILES"))
-        std::fprintf(stderr, "    [file] attrs '%s' -> %08X\n", name.c_str(),
-                     static_cast<unsigned>(result.status));
-    if (result.status != GuestVfsStatus::Success) {
-        ctx.r3.u32 = static_cast<std::uint32_t>(result.status); return;
+
+    const auto result = process_vfs().open(
+        name, root_ptr, 1u, false, false, root_writable, true);
+    if (result.status != GuestVfsStatus::Success || !result.file) {
+        ctx.r3.u32 = static_cast<std::uint32_t>(result.status);
+        return;
     }
     const auto size = result.file->size();
-    const auto out = ctx.r4.u32;
-    std::memset(at(base, out), 0, 56);
-    wr64(base, out + 32, (size + 0xFFFu) & ~0xFFFull); wr64(base, out + 40, size);
-    wr32(base, out + 48, result.file->is_directory() ? 0x10u : 0x80u);
+    std::memset(at(base, out), 0, 56u);
+    wr64(base, out + 32u, (size + 0xFFFu) & ~0xFFFull);
+    wr64(base, out + 40u, size);
+    wr32(base, out + 48u, result.file->is_directory() ? 0x10u : 0x80u);
     ctx.r3.u32 = kSuccess;
 }
 
 // xboxkrnl #0xDB. NtFlushBuffersFile(h, iosb).
 PPC_FUNC(NtFlushBuffersFile) {
-    if (!file_from_handle(ctx.r3.u32)) { ctx.r3.u32 = kInvalidHandle; return; }
-    set_iosb(base, ctx.r4.u32, kSuccess, 0);
+    const auto file = file_from_handle(ctx.r3.u32);
+    if (!file) { ctx.r3.u32 = kInvalidHandle; return; }
+    const auto iosb = ctx.r4.u32;
+    if (!valid_iosb(base, iosb)) { ctx.r3.u32 = kAccessViolation; return; }
+    if (!file->flush()) { ctx.r3.u32 = kAccessDenied; return; }
+    set_iosb(base, iosb, kSuccess, 0);
     ctx.r3.u32 = kSuccess;
 }
 
