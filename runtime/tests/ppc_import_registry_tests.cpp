@@ -55,6 +55,10 @@ int main() {
     // Reserve writable guest scratch pages after the synthetic function table.
     // The 4 GiB reservation is PROT_NONE until an explicit commit.
     assert(memory.commit_region(0x82012000u, 0x6000u, &error));
+    // Back the primary PM4 ring and its read-pointer writeback through the
+    // uncached 0xA0000000 physical alias.
+    assert(memory.commit_region(0xA0010000u, 0x1000u, &error));
+    assert(memory.commit_region(0xA0020000u, 0x1000u, &error));
 
     // Scalar generated PPC memory accessors must bypass the PROT_NONE guest
     // aperture and use the runtime bus for Xenos/XMA, while preserving direct
@@ -157,6 +161,29 @@ int main() {
     assert(imports.xenos_command_processor().read_pointer_writeback_enabled());
     assert(imports.xenos_command_processor().read_pointer_writeback_physical() == 0x00020000u);
     assert(imports.xenos_command_processor().read_pointer_writeback_block_size_log2() == 4u);
+
+    // A scalar PPC write to CP_RB_WPTR enters the configured bounded pump.
+    // Type-0 writes update the MMIO mirror without recursively firing WPTR.
+    const auto put_guest_be32 = [&](std::uint32_t address, std::uint32_t value) {
+        auto* bytes = memory.base() + address;
+        bytes[0] = static_cast<std::uint8_t>(value >> 24);
+        bytes[1] = static_cast<std::uint8_t>(value >> 16);
+        bytes[2] = static_cast<std::uint8_t>(value >> 8);
+        bytes[3] = static_cast<std::uint8_t>(value);
+    };
+    const auto read_guest_be32 = [&](std::uint32_t address) {
+        const auto* bytes = memory.base() + address;
+        return (std::uint32_t(bytes[0]) << 24) |
+               (std::uint32_t(bytes[1]) << 16) |
+               (std::uint32_t(bytes[2]) << 8) |
+               std::uint32_t(bytes[3]);
+    };
+    put_guest_be32(0xA0010000u, (1u << 16) | 0x20u); // One type-0 value to reg 0x20.
+    put_guest_be32(0xA0010004u, 0xDEADBEEFu);
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 2u);
+    assert(imports.xenos_command_processor().read_index() == 2u);
+    assert(GuestMmioBus::global().read(kXenosMmioBase + 0x20u * 4u, 4) == 0xDEADBEEFu);
+    assert(read_guest_be32(0xA0020000u) == 2u);
 
     PPCContext context{};
     context.ctr.u32 = 0x82001100u;
