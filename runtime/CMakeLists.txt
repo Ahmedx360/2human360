@@ -6,6 +6,7 @@ add_library(TooHumanRuntimeCore STATIC
     memory/guest_memory.cpp
     memory/guest_mmio.cpp
     gpu/pm4_packet.cpp
+    gpu/pm4_guest_ring.cpp
     memory/guest_heap.cpp
     memory/guest_address_space.cpp
     image/xbox360_pe.cpp
@@ -78,6 +79,16 @@ if(BUILD_TESTING)
         target_compile_options(TooHumanPm4DispatchTests PRIVATE -UNDEBUG)
     endif()
     add_test(NAME TooHumanPm4DispatchTests COMMAND TooHumanPm4DispatchTests)
+
+    add_executable(TooHumanPm4GuestRingTests tests/pm4_guest_ring_tests.cpp)
+    target_link_libraries(TooHumanPm4GuestRingTests PRIVATE TooHumanRuntimeCore)
+    target_compile_features(TooHumanPm4GuestRingTests PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(TooHumanPm4GuestRingTests PRIVATE /UNDEBUG)
+    else()
+        target_compile_options(TooHumanPm4GuestRingTests PRIVATE -UNDEBUG)
+    endif()
+    add_test(NAME TooHumanPm4GuestRingTests COMMAND TooHumanPm4GuestRingTests)
 
     add_executable(TooHumanPm4RingTests tests/pm4_ring_tests.cpp)
     target_link_libraries(TooHumanPm4RingTests PRIVATE TooHumanRuntimeCore)
