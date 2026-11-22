@@ -1022,7 +1022,7 @@ int main() {
     call_import(thunk_base + 24, reserve_context);
     assert(reserve_context.r3.u32 == 0u);
     const auto reserved_address = read_guest_be(*stack_io + 8u);
-    assert(reserved_address == 0xA0002000u);
+    assert(reserved_address == virtual_address + virtual_size);
     assert(read_guest_be(*stack_io + 12u) == vm_page_size * 2u);
 
     vm_context = {};
@@ -1055,6 +1055,19 @@ int main() {
     assert(read_guest_be(io_buffer + 20u) == vm_page_size);
     assert(read_guest_be(io_buffer + 24u) == 0x1000u);
     assert(read_guest_be(io_buffer + 28u) == 0x04u);
+
+    // Recommitting an already committed page must not wipe data already stored.
+    variable_memory.base()[reserved_address + 0x180u] = 0xA5u;
+    write_be(*stack_io + 8u, reserved_address + 0x100u);
+    write_be(*stack_io + 12u, vm_page_size);
+    commit_context = {};
+    commit_context.r3.u32 = *stack_io + 8u;
+    commit_context.r4.u32 = *stack_io + 12u;
+    commit_context.r5.u32 = 0x1000u;
+    commit_context.r6.u32 = 0x04u;
+    call_import(thunk_base + 24, commit_context);
+    assert(commit_context.r3.u32 == 0u);
+    assert(variable_memory.base()[reserved_address + 0x180u] == 0xA5u);
 
     vm_context = {};
     vm_context.r3.u32 = reserved_address + vm_page_size + 0x100u;

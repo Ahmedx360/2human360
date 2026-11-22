@@ -822,8 +822,23 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
                         return;
                     }
                     if ((allocation_type & kMemNoZero) == 0) {
-                        std::memset(base + adjusted_base, 0,
-                                    static_cast<std::size_t>(rounded_size));
+                        // MEM_COMMIT is idempotent for pages already committed.
+                        // Zero only newly committed (previously reserved) spans.
+                        for (const auto& range : region.protections) {
+                            if (range.committed) continue;
+                            const auto range_begin_old =
+                                static_cast<std::uint64_t>(range.offset);
+                            const auto range_end_old = range_begin_old + range.size;
+                            const auto zero_begin = std::max(
+                                range_begin_old, static_cast<std::uint64_t>(range_begin));
+                            const auto zero_end = std::min(
+                                range_end_old, static_cast<std::uint64_t>(range_end));
+                            if (zero_begin >= zero_end) continue;
+                            const auto guest_zero = static_cast<std::uint32_t>(
+                                static_cast<std::uint64_t>(region_base) + zero_begin);
+                            std::memset(base + guest_zero, 0,
+                                        static_cast<std::size_t>(zero_end - zero_begin));
+                        }
                     }
 
                     std::vector<VirtualMemoryProtectionRange> updated;
