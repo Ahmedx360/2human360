@@ -1,3 +1,4 @@
+import os
 import sys
 import tempfile
 import unittest
@@ -6,7 +7,23 @@ from pathlib import Path
 TOOLS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(TOOLS))
 
-from recompile import RecompileError, rewrite_output_directory, validate_generated_directory
+from recompile import (
+    RecompileError,
+    find_built_tool,
+    rewrite_output_directory,
+    validate_generated_directory,
+)
+
+
+class BuiltToolLocationTests(unittest.TestCase):
+    def test_finds_executable_in_its_cmake_target_subdirectory(self):
+        with tempfile.TemporaryDirectory() as temp:
+            build = Path(temp)
+            suffix = ".exe" if os.name == "nt" else ""
+            executable = build / "XenonRecomp" / f"XenonRecomp{suffix}"
+            executable.parent.mkdir(parents=True)
+            executable.write_bytes(b"test executable")
+            self.assertEqual(find_built_tool("XenonRecomp", build), executable)
 
 
 class RecompileConfigTests(unittest.TestCase):
