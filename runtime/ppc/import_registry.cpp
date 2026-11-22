@@ -751,10 +751,16 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
             const auto allocation_type = context.r5.u32;
             const auto protection = context.r6.u32;
             const auto debug_memory = context.r7.u32;
+            const bool reserve_requested = (allocation_type & kMemReserve) != 0;
+            const bool commit_requested = (allocation_type & kMemCommit) != 0;
             GuestMemoryProtection host_protection{};
             if (debug_memory != 0 || requested_size == 0 ||
                 (allocation_type & kMemReset) != 0 ||
-                (allocation_type & (kMemCommit | kMemReserve)) == 0) {
+                (!reserve_requested && !commit_requested)) {
+                context.r3.u32 = kStatusInvalidParameter;
+                return;
+            }
+            if (commit_requested && !reserve_requested && requested_base == 0) {
                 context.r3.u32 = kStatusInvalidParameter;
                 return;
             }
@@ -780,7 +786,7 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
                 return;
             }
 
-            if (adjusted_base != 0 && (allocation_type & kMemReserve) == 0) {
+            if (commit_requested && !reserve_requested) {
                 // MEM_COMMIT inside a region reserved by an earlier call.
                 for (auto& [region_base, region] : virtual_memory_regions_) {
                     const auto region_end =
@@ -832,7 +838,7 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
                         if (begin < range_begin) {
                             updated.push_back({range.offset,
                                 static_cast<std::uint32_t>(range_begin - begin),
-                                range.protection});
+                                range.protection, range.committed});
                         }
                         const auto overlap_begin = std::max(begin,
                             static_cast<std::uint64_t>(range_begin));
@@ -840,11 +846,11 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
                             static_cast<std::uint64_t>(range_end));
                         updated.push_back({static_cast<std::uint32_t>(overlap_begin),
                             static_cast<std::uint32_t>(overlap_end - overlap_begin),
-                            protection});
+                            protection, true});
                         if (end > range_end) {
                             updated.push_back({range_end,
                                 static_cast<std::uint32_t>(end - range_end),
-                                range.protection});
+                                range.protection, range.committed});
                         }
                     }
 
@@ -853,6 +859,7 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
                     for (const auto& range : updated) {
                         if (!merged.empty() &&
                             merged.back().protection == range.protection &&
+                            merged.back().committed == range.committed &&
                             static_cast<std::uint64_t>(merged.back().offset) +
                                 merged.back().size == range.offset) {
                             merged.back().size += range.size;
@@ -868,6 +875,8 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
                     context.r3.u32 = kStatusSuccess;
                     return;
                 }
+                context.r3.u32 = kStatusMemoryNotAllocated;
+                return;
             }
 
             std::optional<std::uint32_t> allocation;
@@ -882,14 +891,16 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
                 context.r3.u32 = kStatusNoMemory;
                 return;
             }
-            if ((allocation_type & kMemNoZero) == 0) {
+            if (commit_requested && (allocation_type & kMemNoZero) == 0) {
                 std::memset(base + *allocation, 0,
                             static_cast<std::size_t>(rounded_size));
             }
+            const auto initial_host_protection = commit_requested
+                ? host_protection : GuestMemoryProtection::NoAccess;
             if (memory_ == nullptr ||
                 !memory_->protect_region(*allocation,
                                          static_cast<std::size_t>(rounded_size),
-                                         host_protection, nullptr)) {
+                                         initial_host_protection, nullptr)) {
                 (void)virtual_heap_->deallocate(*allocation);
                 context.r3.u32 = kStatusAccessDenied;
                 return;
@@ -899,7 +910,8 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
             region.size = static_cast<std::uint32_t>(rounded_size);
             region.page_size = page_size;
             region.allocation_protect = protection;
-            region.protections.push_back({0u, region.size, protection});
+            region.protections.push_back(
+                {0u, region.size, protection, commit_requested});
             const auto [it, inserted] =
                 virtual_memory_regions_.emplace(*allocation, std::move(region));
             (void)it;
@@ -1040,6 +1052,20 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
                 context.r3.u32 = kStatusMemoryNotAllocated;
                 return;
             }
+            std::uint64_t committed_cursor = range_begin;
+            for (const auto& range : region.protections) {
+                const auto range_begin_old = static_cast<std::uint64_t>(range.offset);
+                const auto range_end_old = range_begin_old + range.size;
+                if (range_end_old <= committed_cursor) continue;
+                if (range_begin_old > committed_cursor || !range.committed) break;
+                committed_cursor = std::min<std::uint64_t>(range_end_old, range_end);
+                if (committed_cursor == range_end) break;
+            }
+            if (committed_cursor != range_end) {
+                context.r3.u32 = kStatusMemoryNotAllocated;
+                return;
+            }
+
             const auto old_protection = current->protection;
             if (memory_ == nullptr ||
                 !memory_->protect_region(static_cast<std::uint32_t>(aligned_base),
@@ -1061,7 +1087,7 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
                 if (range_begin_old < range_begin) {
                     updated.push_back({range.offset,
                         static_cast<std::uint32_t>(range_begin - range_begin_old),
-                        range.protection});
+                        range.protection, range.committed});
                 }
                 const auto overlap_begin = std::max(range_begin_old,
                                                     static_cast<std::uint64_t>(range_begin));
@@ -1069,11 +1095,11 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
                                                   static_cast<std::uint64_t>(range_end));
                 updated.push_back({static_cast<std::uint32_t>(overlap_begin),
                     static_cast<std::uint32_t>(overlap_end - overlap_begin),
-                    new_protection});
+                    new_protection, range.committed});
                 if (range_end_old > range_end) {
                     updated.push_back({static_cast<std::uint32_t>(range_end),
                         static_cast<std::uint32_t>(range_end_old - range_end),
-                        range.protection});
+                        range.protection, range.committed});
                 }
             }
 
@@ -1082,6 +1108,7 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
             for (const auto& range : updated) {
                 if (!merged.empty() &&
                     merged.back().protection == range.protection &&
+                    merged.back().committed == range.committed &&
                     static_cast<std::uint64_t>(merged.back().offset) +
                         merged.back().size == range.offset) {
                     merged.back().size += range.size;
@@ -1137,8 +1164,10 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
             store_be32(base + information_pointer + 4, allocation->first);
             store_be32(base + information_pointer + 8, region.allocation_protect);
             store_be32(base + information_pointer + 12, protection_it->size);
-            store_be32(base + information_pointer + 16, kMemCommit);
-            store_be32(base + information_pointer + 20, protection_it->protection);
+            store_be32(base + information_pointer + 16,
+                       protection_it->committed ? kMemCommit : kMemReserve);
+            store_be32(base + information_pointer + 20,
+                       protection_it->committed ? protection_it->protection : 0u);
             store_be32(base + information_pointer + 24, 0x00020000u); // MEM_PRIVATE
             context.r3.u32 = kStatusSuccess;
             return;

@@ -1010,6 +1010,82 @@ int main() {
     assert(protect_context.r3.u32 == 0);
     assert(read_guest_be(*stack_io + 16) == 0x02u);
 
+    // MEM_RESERVE and MEM_COMMIT have distinct state. Reserve two pages,
+    // commit only the first, then query/protect both sides of the boundary.
+    write_be(*stack_io + 8u, 0u);
+    write_be(*stack_io + 12u, vm_page_size * 2u);
+    PPCContext reserve_context{};
+    reserve_context.r3.u32 = *stack_io + 8u;
+    reserve_context.r4.u32 = *stack_io + 12u;
+    reserve_context.r5.u32 = 0x2000u; // MEM_RESERVE only.
+    reserve_context.r6.u32 = 0x04u;   // AllocationProtect PAGE_READWRITE.
+    call_import(thunk_base + 24, reserve_context);
+    assert(reserve_context.r3.u32 == 0u);
+    const auto reserved_address = read_guest_be(*stack_io + 8u);
+    assert(reserved_address == 0xA0002000u);
+    assert(read_guest_be(*stack_io + 12u) == vm_page_size * 2u);
+
+    vm_context = {};
+    vm_context.r3.u32 = reserved_address + 0x100u;
+    vm_context.r4.u32 = io_buffer + 8u;
+    call_import(thunk_base + 32, vm_context);
+    assert(vm_context.r3.u32 == 0u);
+    assert(read_guest_be(io_buffer + 16u) == 0x04u); // AllocationProtect.
+    assert(read_guest_be(io_buffer + 20u) == vm_page_size * 2u);
+    assert(read_guest_be(io_buffer + 24u) == 0x2000u); // MEM_RESERVE.
+    assert(read_guest_be(io_buffer + 28u) == 0u);      // No current Protect.
+
+    write_be(*stack_io + 8u, reserved_address + 0x100u);
+    write_be(*stack_io + 12u, vm_page_size);
+    PPCContext commit_context{};
+    commit_context.r3.u32 = *stack_io + 8u;
+    commit_context.r4.u32 = *stack_io + 12u;
+    commit_context.r5.u32 = 0x1000u; // MEM_COMMIT inside existing reservation.
+    commit_context.r6.u32 = 0x04u;   // PAGE_READWRITE.
+    call_import(thunk_base + 24, commit_context);
+    assert(commit_context.r3.u32 == 0u);
+    assert(read_guest_be(*stack_io + 8u) == reserved_address);
+    assert(read_guest_be(*stack_io + 12u) == vm_page_size);
+
+    vm_context = {};
+    vm_context.r3.u32 = reserved_address + 0x100u;
+    vm_context.r4.u32 = io_buffer + 8u;
+    call_import(thunk_base + 32, vm_context);
+    assert(vm_context.r3.u32 == 0u);
+    assert(read_guest_be(io_buffer + 20u) == vm_page_size);
+    assert(read_guest_be(io_buffer + 24u) == 0x1000u);
+    assert(read_guest_be(io_buffer + 28u) == 0x04u);
+
+    vm_context = {};
+    vm_context.r3.u32 = reserved_address + vm_page_size + 0x100u;
+    vm_context.r4.u32 = io_buffer + 8u;
+    call_import(thunk_base + 32, vm_context);
+    assert(vm_context.r3.u32 == 0u);
+    assert(read_guest_be(io_buffer + 20u) == vm_page_size);
+    assert(read_guest_be(io_buffer + 24u) == 0x2000u);
+    assert(read_guest_be(io_buffer + 28u) == 0u);
+
+    write_be(*stack_io + 8u, reserved_address + vm_page_size);
+    write_be(*stack_io + 12u, vm_page_size);
+    write_be(*stack_io + 16u, 0xFFFFFFFFu);
+    protect_context = {};
+    protect_context.r3.u32 = *stack_io + 8u;
+    protect_context.r4.u32 = *stack_io + 12u;
+    protect_context.r5.u32 = 0x04u;
+    protect_context.r6.u32 = *stack_io + 16u;
+    call_import(thunk_base + 36, protect_context);
+    assert(protect_context.r3.u32 == 0xC00000A0u); // MEM_RESERVE is not protectable.
+
+    write_be(*stack_io + 8u, reserved_address);
+    write_be(*stack_io + 12u, 0u);
+    vm_context = {};
+    vm_context.r3.u32 = *stack_io + 8u;
+    vm_context.r4.u32 = *stack_io + 12u;
+    vm_context.r5.u32 = 0x8000u; // MEM_RELEASE.
+    call_import(thunk_base + 28, vm_context);
+    assert(vm_context.r3.u32 == 0u);
+    assert(read_guest_be(*stack_io + 12u) == vm_page_size * 2u);
+
     // Execute permissions are denied until guest execution/fault semantics exist.
     protect_context = {};
     protect_context.r3.u32 = *stack_io + 8;

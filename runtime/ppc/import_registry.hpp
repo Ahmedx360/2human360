@@ -79,6 +79,7 @@ private:
         std::uint32_t offset{};
         std::uint32_t size{};
         std::uint32_t protection{};
+        bool committed{};
     };
     struct VirtualMemoryRegion {
         std::uint32_t size{};

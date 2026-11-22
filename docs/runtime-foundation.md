@@ -143,3 +143,6 @@ TooHumanGuestThreadManagerTests exercises suspend/resume, timeout/completion, ex
 5. Add GPU command capture/decoding before attempting a renderer; then add XMA and controller services.
 
 Every step should have game-free tests and diagnostics before integration with the title.
+
+
+The virtual-memory HLE tracks reservation state separately from current page protection. MEM_RESERVE pages are host-protected as inaccessible until MEM_COMMIT changes the committed subrange; NtProtectVirtualMemory rejects reserved pages, and NtQueryVirtualMemory reports MEM_RESERVE versus MEM_COMMIT per protection range.
