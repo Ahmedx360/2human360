@@ -4,6 +4,8 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <atomic>
+#include <thread>
 
 using namespace toohuman::runtime;
 namespace fs = std::filesystem;
@@ -32,6 +34,24 @@ int main() {
     auto w = vfs.open("cache:\\save\\slot0.bin", nullptr, 2, true, false);
     assert(w.status == GuestVfsStatus::Success && w.information == 2);
     assert(w.file->write("abc", 3, 0) == 3);
+
+    // size() and writes share the per-file lock; this catches unsynchronized
+    // metadata reads while the stream and path length are changing.
+    std::atomic<bool> concurrent_file_failed{false};
+    std::thread size_reader([&] {
+        for (unsigned i = 0; i < 256; ++i) {
+            const auto current_size = w.file->size();
+            if (current_size > 4096u)
+                concurrent_file_failed.store(true, std::memory_order_release);
+        }
+    });
+    for (unsigned i = 0; i < 256; ++i) {
+        const char value = static_cast<char>('a' + (i % 26u));
+        if (w.file->write(&value, 1, 3u + i) != 1u)
+            concurrent_file_failed.store(true, std::memory_order_release);
+    }
+    size_reader.join();
+    assert(!concurrent_file_failed.load(std::memory_order_acquire));
     assert(vfs.open("cache:\\save\\slot0.bin", nullptr, 2, true, false).status == GuestVfsStatus::ObjectNameCollision);
     auto r = vfs.open("cache:\\save\\slot0.bin", nullptr, 1, false, false);
     char b[4]{};

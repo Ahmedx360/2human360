@@ -85,6 +85,7 @@ bool GuestFile::is_open() const {
 }
 
 std::uint64_t GuestFile::size() const {
+    std::lock_guard lock(mutex_);
     std::error_code ec;
     const auto value = fs::file_size(path_, ec);
     return ec ? 0 : static_cast<std::uint64_t>(value);
