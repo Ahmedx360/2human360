@@ -465,8 +465,7 @@ PPC_FUNC(VdInitializeRingBuffer) {
         return;
     }
     std::string error;
-    if (!registry->xenos_command_processor().initialize_ring(
-            ctx.r3.u32, ctx.r4.u32, &error)) {
+    if (!registry->initialize_xenos_ring(ctx.r3.u32, ctx.r4.u32, &error)) {
         std::fprintf(stderr, "[TooHuman][Xenos] VdInitializeRingBuffer failed: %s\n",
                      error.c_str());
     }
@@ -480,8 +479,7 @@ PPC_FUNC(VdEnableRingBufferRPtrWriteBack) {
         return;
     }
     std::string error;
-    if (!registry->xenos_command_processor().enable_read_pointer_writeback(
-            ctx.r3.u32, ctx.r4.u32, &error)) {
+    if (!registry->enable_xenos_read_pointer_writeback(ctx.r3.u32, ctx.r4.u32, &error)) {
         std::fprintf(stderr, "[TooHuman][Xenos] VdEnableRingBufferRPtrWriteBack failed: %s\n",
                      error.c_str());
     }
