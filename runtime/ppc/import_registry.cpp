@@ -2,6 +2,7 @@
 #include "ppc/guest_thread_execution.hpp"
 #include "ppc/guest_thread_runtime.hpp"
 #include "ppc/title_runtime.hpp"
+#include "memory/guest_mmio.hpp"
 
 #include "ppc/title_import_manifest.hpp"
 #include <ppc_config.h>
@@ -191,6 +192,8 @@ std::uint32_t PpcImportRegistry::resume_guest_kernel_thread(PPCContext& context)
 }
 
 PpcImportRegistry::~PpcImportRegistry() {
+    // Stop new CP_RB_WPTR callbacks and wait for a callback already executing.
+    GuestMmioBus::global().clear_xenos_write_observer(this);
     // Move the service out under the mutex, then join it without holding the
     // mutex: a worker already inside an HLE handler must be allowed to finish.
     std::unique_ptr<GuestThreadRuntime> stopping_threads;
@@ -491,10 +494,27 @@ bool PpcImportRegistry::install(GuestAddressSpace& memory,
         return false;
     }
 
+    auto* const previous_memory = memory_;
+    if (memory_ && memory_ != &memory) {
+        g_active_registry.store(nullptr, std::memory_order_release);
+        set_error(error, "Import registry is already associated with a different guest address space");
+        return false;
+    }
+    memory_ = &memory;
+    if (!GuestMmioBus::global().set_xenos_write_observer(
+            this, &PpcImportRegistry::xenos_mmio_write_observer)) {
+        memory_ = previous_memory;
+        g_active_registry.store(nullptr, std::memory_order_release);
+        set_error(error, "Another title already owns the Xenos MMIO write observer");
+        return false;
+    }
+
     imports_by_thunk_ = std::move(pending);
     for (const auto& [address, binding] : imports_by_thunk_) {
         (void)binding;
         if (!memory.set_function(address, &toohuman_import_trampoline)) {
+            GuestMmioBus::global().clear_xenos_write_observer(this);
+            memory_ = previous_memory;
             g_active_registry.store(nullptr, std::memory_order_release);
             imports_by_thunk_.clear();
             set_error(error, "Could not install an XEX import thunk into the PPC function table");
@@ -505,6 +525,83 @@ bool PpcImportRegistry::install(GuestAddressSpace& memory,
     installed_ = true;
     if (registered_count) *registered_count = imports_by_thunk_.size();
     return true;
+}
+
+void PpcImportRegistry::xenos_mmio_write_observer(
+    void* context, std::uint32_t address, std::uint8_t width,
+    std::uint64_t value) noexcept {
+    auto* registry = static_cast<PpcImportRegistry*>(context);
+    if (registry) registry->handle_xenos_mmio_write(address, width, value);
+}
+
+void PpcImportRegistry::handle_xenos_mmio_write(
+    std::uint32_t address, std::uint8_t width, std::uint64_t value) noexcept {
+    constexpr std::uint32_t kCpRingWritePointer =
+        kXenosMmioBase + 0x01C5u * sizeof(std::uint32_t);
+    if (address != kCpRingWritePointer || width != sizeof(std::uint32_t))
+        return;
+
+    if (!xenos_command_processor_.ring_initialized()) {
+        std::fprintf(stderr,
+            "[TooHuman][Xenos] CP_RB_WPTR written before VdInitializeRingBuffer (wptr=0x%08X)\\n",
+            static_cast<std::uint32_t>(value));
+        return;
+    }
+    if (!memory_) {
+        std::fprintf(stderr,
+            "[TooHuman][Xenos] CP_RB_WPTR ignored: no guest address space is attached\\n");
+        return;
+    }
+
+    std::string error;
+    if (!xenos_command_processor_.update_write_pointer(
+            static_cast<std::uint32_t>(value), &error)) {
+        std::fprintf(stderr, "[TooHuman][Xenos] invalid CP_RB_WPTR: %s\\n",
+                     error.c_str());
+        return;
+    }
+
+    const Pm4DispatchCallbacks callbacks{
+        this,
+        &PpcImportRegistry::dispatch_xenos_register_write,
+        &PpcImportRegistry::reject_xenos_type3
+    };
+    const auto result = xenos_command_processor_.process_available(
+        *memory_, callbacks, 4096u);
+    if (!result) {
+        std::fprintf(stderr,
+            "[TooHuman][Xenos] PM4 pump stopped (error=%u packet_error=%u opcode_context=CP_RB_WPTR packets=%zu dwords=%zu rptr=0x%08X wptr=0x%08X)\\n",
+            static_cast<unsigned>(result.error),
+            static_cast<unsigned>(result.ring.error),
+            result.ring.dispatch.packets,
+            result.ring.dispatch.dwords_consumed,
+            xenos_command_processor_.read_index(),
+            xenos_command_processor_.write_index());
+    }
+}
+
+bool PpcImportRegistry::dispatch_xenos_register_write(
+    void* context, std::uint32_t index, std::uint32_t value) {
+    (void)context;
+    if (index >= kGuestMmioWindowSize / sizeof(std::uint32_t))
+        return false;
+    const auto address = kXenosMmioBase + index * sizeof(std::uint32_t);
+    return GuestMmioBus::global().write_unobserved(
+        address, sizeof(std::uint32_t), value);
+}
+
+bool PpcImportRegistry::reject_xenos_type3(
+    void* context, std::uint32_t opcode, bool predicate,
+    std::span<const std::uint32_t> payload) {
+    (void)context;
+    std::fprintf(stderr,
+        "[TooHuman][Xenos] unsupported PM4 Type-3 opcode=0x%02X predicate=%u payload_dwords=%zu",
+        opcode, predicate ? 1u : 0u, payload.size());
+    const auto preview = std::min<std::size_t>(payload.size(), 4u);
+    for (std::size_t i = 0; i < preview; ++i)
+        std::fprintf(stderr, " %08X", payload[i]);
+    std::fprintf(stderr, "\\n");
+    return false;
 }
 
 void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
