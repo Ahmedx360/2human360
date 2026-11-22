@@ -1,4 +1,5 @@
 #include "ppc/guest_thread_manager.hpp"
+#include "ppc/guest_thread_execution.hpp"
 
 #include <atomic>
 #include <cassert>
@@ -30,6 +31,37 @@ using namespace std::chrono_literals;
 
 int main() {
     using namespace toohuman::runtime;
+
+    // Guest termination is a non-local exit only while executing a guest
+    // thread. The scope must restore the previous thread-local token when
+    // nested scopes unwind.
+    assert(!terminate_current_guest_thread(0x12345678u));
+    {
+        GuestThreadExecutionScope outer(std::stop_token{});
+        std::stop_source requested_stop;
+        requested_stop.request_stop();
+        {
+            GuestThreadExecutionScope inner(requested_stop.get_token());
+            bool stopped = false;
+            try {
+                throw_if_guest_thread_stop_requested();
+            } catch (const GuestThreadExitSignal& exit) {
+                stopped = exit.exit_code() == GuestThreadManager::kStatusThreadIsTerminating;
+            }
+            assert(stopped);
+        }
+        // The inner stopped token must not leak into the outer guest thread.
+        throw_if_guest_thread_stop_requested();
+
+        bool terminated = false;
+        try {
+            (void)terminate_current_guest_thread(0x12345678u);
+        } catch (const GuestThreadExitSignal& exit) {
+            terminated = exit.exit_code() == 0x12345678u;
+        }
+        assert(terminated);
+    }
+    assert(!terminate_current_guest_thread(0x12345678u));
 
     GuestThreadManager manager;
     std::string error;
