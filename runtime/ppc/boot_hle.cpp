@@ -98,6 +98,7 @@ std::uint64_t current_guest_filetime_100ns() {
 
 constexpr std::uint32_t kStatusInvalidHandle = 0xC0000008u;
 constexpr std::uint32_t kStatusInvalidParameter = 0xC000000Du;
+constexpr std::uint32_t kStatusAccessViolation = 0xC0000005u;
 constexpr std::uint32_t kStatusTimeout = 0x00000102u;
 
 std::optional<std::chrono::milliseconds> decode_guest_timeout(
@@ -209,6 +210,53 @@ void mark_critical_section_acquired(std::uint8_t* base, std::uint32_t address,
         put_be32(cs + 0x14, 1);
         put_be32(cs + 0x18, token);
     }
+}
+
+void put_be_float(std::uint8_t* destination, float value) {
+    std::uint32_t bits = 0;
+    static_assert(sizeof(bits) == sizeof(value));
+    std::memcpy(&bits, &value, sizeof(bits));
+    put_be32(destination, bits);
+}
+
+bool write_video_mode(std::uint8_t* base, std::uint32_t output) {
+    constexpr std::uint32_t kSize = 0x30u;
+    if (!guest_range_valid(base, output, kSize, GuestMemoryAccess::Write)) return false;
+    std::memset(at(base, output), 0, kSize);
+    put_be32(at(base, output + 0x00u), 1280u);
+    put_be32(at(base, output + 0x04u), 720u);
+    put_be32(at(base, output + 0x08u), 0u);
+    put_be32(at(base, output + 0x0Cu), 1u);
+    put_be32(at(base, output + 0x10u), 1u);
+    put_be_float(at(base, output + 0x14u), 60.0f);
+    put_be32(at(base, output + 0x18u), 1u);
+    put_be32(at(base, output + 0x1Cu), 0x4Au);
+    put_be32(at(base, output + 0x20u), 1u);
+    return true;
+}
+
+bool write_display_information(std::uint8_t* base, std::uint32_t output) {
+    constexpr std::uint32_t kSize = 0x58u;
+    if (!guest_range_valid(base, output, kSize, GuestMemoryAccess::Write)) return false;
+    std::memset(at(base, output), 0, kSize);
+    put_be16(at(base, output + 0x00u), 1280u);
+    put_be16(at(base, output + 0x02u), 720u);
+    put_be32(at(base, output + 0x10u), 1280u);
+    put_be32(at(base, output + 0x14u), 720u);
+    put_be32(at(base, output + 0x18u), 1280u);
+    put_be32(at(base, output + 0x1Cu), 720u);
+    put_be32(at(base, output + 0x20u), 1u);
+    put_be32(at(base, output + 0x30u), 1u);
+    put_be16(at(base, output + 0x40u), 320u);
+    put_be16(at(base, output + 0x42u), 180u);
+    put_be16(at(base, output + 0x44u), 320u);
+    put_be16(at(base, output + 0x46u), 180u);
+    put_be16(at(base, output + 0x48u), 1280u);
+    put_be16(at(base, output + 0x4Au), 720u);
+    put_be_float(at(base, output + 0x4Cu), 60.0f);
+    put_be32(at(base, output + 0x50u), 0u);
+    put_be16(at(base, output + 0x56u), 1280u);
+    return true;
 }
 } // namespace
 
@@ -363,6 +411,50 @@ PPC_FUNC(XGetLanguage) {
 PPC_FUNC(XGetAVPack) {
     (void)base;
     ctx.r3.u32 = 6;
+}
+
+// xam #0x3D1. Fill X_VIDEO_MODE and return ERROR_SUCCESS.
+PPC_FUNC(XGetVideoMode) {
+    if (!write_video_mode(base, ctx.r3.u32)) {
+        ctx.r3.u32 = kStatusAccessViolation;
+        return;
+    }
+    ctx.r3.u32 = kStatusSuccess;
+}
+
+// xboxkrnl #0x1CA. X_VIDEO_MODE is a 0x30-byte big-endian record.
+PPC_FUNC(VdQueryVideoMode) {
+    if (!write_video_mode(base, ctx.r3.u32)) ctx.r3.u32 = kStatusAccessViolation;
+}
+
+// xboxkrnl #0x1C9. 720p is widescreen and at least 1024 pixels wide.
+PPC_FUNC(VdQueryVideoFlags) {
+    (void)base;
+    ctx.r3.u32 = 0x3u;
+}
+
+// xboxkrnl #0x1BA. X_DISPLAY_INFO is a 0x58-byte big-endian record.
+PPC_FUNC(VdGetCurrentDisplayInformation) {
+    if (!write_display_information(base, ctx.r3.u32))
+        ctx.r3.u32 = kStatusAccessViolation;
+}
+
+// xboxkrnl #0x1B9. Xenia's default display gamma is BT.709 (type 2).
+PPC_FUNC(VdGetCurrentDisplayGamma) {
+    const auto type_output = ctx.r3.u32;
+    const auto power_output = ctx.r4.u32;
+    if (type_output != 0 &&
+        !guest_range_valid(base, type_output, 4u, GuestMemoryAccess::Write)) {
+        ctx.r3.u32 = kStatusAccessViolation;
+        return;
+    }
+    if (power_output != 0 &&
+        !guest_range_valid(base, power_output, 4u, GuestMemoryAccess::Write)) {
+        ctx.r3.u32 = kStatusAccessViolation;
+        return;
+    }
+    if (type_output != 0) put_be32(at(base, type_output), 2u);
+    if (power_output != 0) put_be_float(at(base, power_output), 2.22222233f);
 }
 
 // xboxkrnl #0x12C. RtlInitAnsiString(ANSI_STRING* dest /*r3*/, const char* src /*r4*/).
