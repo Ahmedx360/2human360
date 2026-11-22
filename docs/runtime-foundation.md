@@ -134,13 +134,108 @@ cooperate with its stop token. It does not initialize guest context, execute PPC
 KTHREAD state on transitions, implement suspend beyond the initial gate, or register any kernel import.
 TooHumanGuestThreadManagerTests exercises suspend/resume, timeout/completion, exit codes, invalid handles, deferred cleanup and closing a live handle without cancelling it.
 
+## Implemented: guest virtual filesystem and directory enumeration
+
+The `NtQueryInformationFile` HLE supports the Xbox `FileBasicInformation`
+(class 4), `FileStandardInformation` (class 5), `FilePositionInformation`
+(class 14), and `FileNetworkOpenInformation` (class 34) records. Basic
+Basic and NetworkOpen information use the host file's last-write timestamp for
+all four time fields until the VFS tracks creation/access/change timestamps
+independently; both report VFS-derived file attributes.
+
+The host-backed `GuestVfs` maps the title's game volume read-only and save/cache
+volumes beneath a configurable save root. It normalizes Xbox device paths,
+performs case-insensitive component lookup, rejects traversal and symlink
+escapes, and enforces read/write permissions inherited from directory handles.
+`GuestFile` supports synchronous reads, writes, seeks, resize, flush, file
+metadata queries, and stateful directory enumeration. Directory enumeration
+sorts entries deterministically, supports case-insensitive `*`/`?` matching,
+retains its search expression and cursor across calls, and reports
+`STATUS_NO_SUCH_FILE` separately from `STATUS_NO_MORE_FILES`.
+
+The Xbox 360 `NtQueryDirectoryFile` export uses this title's compact ABI:
+`r3` is the directory handle, `r7` the I/O status block, `r8` the output
+buffer, `r9` its byte length, `r10` the optional 8-byte `ANSI_STRING`
+search descriptor, and the ninth `RestartScan` argument is at `r1 + 0x54`.
+It emits a single `FILE_DIRECTORY_INFORMATION` record per synchronous call.
+The record's `EndOfFile` and `AllocationSize` fields are 64-bit big-endian
+values; an undersized filename buffer returns `STATUS_BUFFER_OVERFLOW` without
+advancing the enumeration cursor, allowing the caller to retry. On successful
+queries, `IO_STATUS_BLOCK.Information` reports the supplied buffer length,
+matching Xenia's Xbox 360 kernel implementation
+([reference](https://github.com/xenia-project/xenia/blob/master/src/xenia/kernel/xboxkrnl/xboxkrnl_io.cc)).
+Optional event handles are
+signaled on completion. APC callbacks, asynchronous I/O completion, other
+directory-information classes, and multi-record batching are not implemented.
+
+## Implemented: volume-information HLE
+
+The Xbox kernel `NtQueryVolumeInformationFile` import (ordinal `0xEF`) now
+supports `FileFsVolumeInformation` (class 1) and `FileFsSizeInformation`
+(class 3). It validates the handle, I/O status block, output range, class and
+minimum buffer size; writes all multibyte fields in guest big-endian order;
+and reports the returned record size through `IO_STATUS_BLOCK.Information`.
+The volume record currently uses the generic VFS mount defaults (zero serial,
+creation time and label, no object support). The size record derives capacity
+and available space from the host filesystem containing the opened file and
+models 4 KiB allocation units (8 sectors of 512 bytes). This is a compatibility
+baseline, not an emulation of FATX volume identity, device characteristics,
+or exact Xbox media geometry. Device-information (class 4) and
+attribute-information (class 5) queries remain unsupported and return
+`STATUS_INVALID_INFO_CLASS`.
+
+## Implemented: initial Xenos/XMA MMIO register bus
+
+The runtime now recognizes the Xbox 360 Xenos register aperture at
+`0x7FC80000-0x7FC8FFFF` and the XMA aperture at
+`0x7FEA0000-0x7FEAFFFF`. The initial `GuestMmioBus` provides separate
+64 KiB, byte-addressable register files for those devices, preserving
+big-endian byte lanes for 8-, 16-, 32- and 64-bit scalar accesses. Unwritten
+register bytes read as zero; writes are retained for readback. A bounded
+4096-entry trace captures address, width, value, device and access direction.
+
+When both the generated PPC library and runtime core are enabled, scalar
+`PPC_LOAD_U*` and `PPC_STORE_U*` accessors check those apertures before
+dereferencing guest RAM. Thus scalar register accesses do not fault against
+the guest address space's default `PROT_NONE` reservation. Ordinary RAM
+retains the original direct big-endian access path. The `PPC_MM_*` aliases
+use the same checked accessors.
+
+This is an interception and diagnostics foundation, not GPU/XMA emulation.
+It does not implement register side effects, command processor state,
+interrupts, DMA, XMA decoding, vector/atomic MMIO operations, or a renderer.
+Returning zero for an untouched register is only the register-file default;
+the trace must be used to identify accesses that need real device semantics.
+`TooHumanGuestMmioTests` covers range boundaries, independent apertures,
+big-endian subword lanes, readback, invalid accesses and bounded tracing.
+`TooHumanPpcImportRegistryTests` also verifies that generated scalar loads
+and stores reach the bus without touching uncommitted guest pages.
+
+## Implemented: display-query HLE compatibility profile
+
+The runtime registers Too Human's `VdQueryVideoMode` (ordinal 0x1CA),
+`VdQueryVideoFlags` (0x1C9), `VdGetCurrentDisplayInformation` (0x1BA),
+`VdGetCurrentDisplayGamma` (0x1B9), and XAM `XGetVideoMode` (0x3D1).
+They expose a deterministic 1280x720 progressive 16:9 HD mode at 60 Hz
+(NTSC), using the Xbox/Xenia-compatible `X_VIDEO_MODE` (0x30-byte) and
+`X_DISPLAY_INFO` (0x58-byte) big-endian layouts. Video flags are 0x3
+(widescreen and at least 1024 pixels wide); gamma defaults to BT.709
+(type 2) with power 2.22222233. Output ranges are checked before writing.
+
+This is a host compatibility profile, not host-monitor enumeration or an
+implemented renderer. `VdSetDisplayMode`, `VdSwap`, GPU command processing,
+ring-buffer interrupts and Xenos register/MMIO handling remain separate work.
+The structure layouts and baseline values follow Xenia's definitions:
+[X_VIDEO_MODE layout](https://github.com/xenia-project/xenia/blob/master/src/xenia/xbox.h)
+and [video HLE](https://github.com/xenia-project/xenia/blob/master/src/xenia/kernel/xboxkrnl/xboxkrnl_video.cc).
+
 ## Next implementation sequence
 
-1. Add explicit MMIO ranges and aliases without exposing them as ordinary RAM.
-2. Extend the now-connected thread foundation with the next imports actually reached by Too Human startup. Keep unknown ordinals fail-fast and document each ABI.
-3. Establish Too Human's real startup stack, TLS, register state and guest-thread lifecycle from XEX metadata and observed call sites.
-4. Add virtual file access and save-data isolation.
-5. Add GPU command capture/decoding before attempting a renderer; then add XMA and controller services.
+1. Replace the scalar MMIO register-file stubs with device-specific Xenos/XMA side effects and add the register accesses actually observed in Too Human.
+2. Add GPU command capture/decoding and ring-buffer execution before attempting a renderer.
+3. Extend scalar interception to vector and atomic PPC memory operations used by the title.
+4. Add XMA decoding and controller services after the graphics/boot traces identify their required ABIs.
+5. Run the real XEX entry point, capture the first unsupported import/MMIO access, and implement only behavior supported by call-site evidence.
 
 Every step should have game-free tests and diagnostics before integration with the title.
 

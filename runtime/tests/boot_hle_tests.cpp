@@ -1,11 +1,15 @@
 // Unit tests for the stateless startup HLE. They need only ppc_context.h (no generated game code, no registry).
 #include "ppc/boot_hle.hpp"
+#include "fs/guest_vfs.hpp"
+#include "kernel/guest_kernel_objects.hpp"
 #include <ppc_config.h>
 
 #include <atomic>
 #include <cassert>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <thread>
 #include <vector>
 
@@ -18,6 +22,9 @@ void poke(std::uint32_t at, const char* s) { std::memcpy(base() + at, s, std::st
 std::uint16_t be16(std::uint32_t a) { return static_cast<std::uint16_t>((g_mem[a] << 8) | g_mem[a + 1]); }
 std::uint32_t be32(std::uint32_t a) {
     return (std::uint32_t(g_mem[a]) << 24) | (std::uint32_t(g_mem[a + 1]) << 16) | (std::uint32_t(g_mem[a + 2]) << 8) | g_mem[a + 3];
+}
+std::uint64_t be64(std::uint32_t a) {
+    return (std::uint64_t(be32(a)) << 32) | be32(a + 4);
 }
 void put16(std::uint32_t a, std::uint16_t v) { g_mem[a] = v >> 8; g_mem[a + 1] = std::uint8_t(v); }
 
@@ -52,6 +59,254 @@ void test_executable_module_lookup() {
     boot_hle::XexGetModuleHandle(context, base());
     assert(context.r3.u32 == 0x00000490u);
     assert(be32(output) == 0);
+}
+
+void test_rtl_image_xex_header_field() {
+    constexpr std::uint32_t header = 0x7000u;
+    constexpr std::uint32_t header_size = 0x80u;
+    std::memset(base() + header, 0, header_size);
+    auto write_be32 = [](std::uint32_t address, std::uint32_t value) {
+        g_mem[address] = static_cast<std::uint8_t>(value >> 24);
+        g_mem[address + 1] = static_cast<std::uint8_t>(value >> 16);
+        g_mem[address + 2] = static_cast<std::uint8_t>(value >> 8);
+        g_mem[address + 3] = static_cast<std::uint8_t>(value);
+    };
+    write_be32(header + 8u, header_size);
+    write_be32(header + 0x14u, 3u);
+    // Inline-valued optional header (key type 0).
+    write_be32(header + 0x18u, 0x00010100u);
+    write_be32(header + 0x1Cu, 0x82A46B18u);
+    // Pointer-to-inline-value optional header (key type 1).
+    write_be32(header + 0x20u, 0x00010101u);
+    write_be32(header + 0x24u, 0x1234u);
+    // Offset-valued optional header (key type 2).
+    write_be32(header + 0x28u, 0x000002FFu);
+    write_be32(header + 0x2Cu, 0x50u);
+
+    PPCContext context{};
+    context.r3.u32 = header;
+    context.r4.u32 = 0x00010100u;
+    boot_hle::RtlImageXexHeaderField(context, base());
+    assert(context.r3.u32 == 0x82A46B18u);
+
+    context = {};
+    context.r3.u32 = header;
+    context.r4.u32 = 0x00010101u;
+    boot_hle::RtlImageXexHeaderField(context, base());
+    assert(context.r3.u32 == header + 0x24u);
+
+    context = {};
+    context.r3.u32 = header;
+    context.r4.u32 = 0x000002FFu;
+    boot_hle::RtlImageXexHeaderField(context, base());
+    assert(context.r3.u32 == header + 0x50u);
+
+    context = {};
+    context.r3.u32 = header;
+    context.r4.u32 = 0x00010200u;
+    boot_hle::RtlImageXexHeaderField(context, base());
+    assert(context.r3.u32 == 0u);
+
+    // Invalid guest pointers and malformed header sizes/counts fail closed.
+    context = {};
+    context.r3.u32 = 0xFFFFFFF0u;
+    context.r4.u32 = 0x00010100u;
+    boot_hle::RtlImageXexHeaderField(context, base());
+    assert(context.r3.u32 == 0u);
+
+    write_be32(header + 8u, 0x17u);
+    context = {};
+    context.r3.u32 = header;
+    context.r4.u32 = 0x00010100u;
+    boot_hle::RtlImageXexHeaderField(context, base());
+    assert(context.r3.u32 == 0u);
+
+    write_be32(header + 8u, header_size);
+    write_be32(header + 0x14u, 0xFFFFFFFFu);
+    context = {};
+    context.r3.u32 = header;
+    context.r4.u32 = 0x00010100u;
+    boot_hle::RtlImageXexHeaderField(context, base());
+    assert(context.r3.u32 == 0u);
+}
+
+void test_query_volume_information_file() {
+    namespace fs = std::filesystem;
+    const auto root = fs::temp_directory_path() / "toohuman_volume_information_tests";
+    fs::remove_all(root);
+    fs::create_directories(root);
+    const auto path = root / "fixture.bin";
+    { std::ofstream stream(path, std::ios::binary); stream << "Too Human"; }
+
+    auto file = std::make_shared<GuestFile>(path, false, true, false, false);
+    const auto handle = process_kernel_objects().insert(file);
+    assert(handle.has_value());
+
+    constexpr std::uint32_t iosb = 0x7800u;
+    constexpr std::uint32_t information = 0x7900u;
+    PPCContext context{};
+    context.r3.u32 = *handle;
+    context.r4.u32 = iosb;
+    context.r5.u32 = information;
+    context.r6.u32 = 24u;
+    context.r7.u32 = 1u; // FileFsVolumeInformation.
+    boot_hle::NtQueryVolumeInformationFile(context, base());
+    assert(context.r3.u32 == 0u);
+    assert(be32(iosb) == 0u);
+    assert(be32(iosb + 4u) == 17u);
+    assert(be64(information) == 0u);
+    assert(be32(information + 8u) == 0u);
+    assert(g_mem[information + 16u] == 0u);
+
+    context = {};
+    context.r3.u32 = *handle;
+    context.r4.u32 = iosb;
+    context.r5.u32 = information;
+    context.r6.u32 = 24u;
+    context.r7.u32 = 3u; // FileFsSizeInformation.
+    boot_hle::NtQueryVolumeInformationFile(context, base());
+    assert(context.r3.u32 == 0u);
+    assert(be32(iosb) == 0u);
+    assert(be32(iosb + 4u) == 24u);
+    const auto total_units = be64(information);
+    const auto available_units = be64(information + 8u);
+    assert(total_units > 0u);
+    assert(available_units <= total_units);
+    assert(be32(information + 16u) == 8u);
+    assert(be32(information + 20u) == 512u);
+
+    // FileBasicInformation (class 4) returns big-endian times and attributes.
+    constexpr std::uint32_t basic_information = 0x7A00u;
+    context = {};
+    context.r3.u32 = *handle;
+    context.r4.u32 = iosb;
+    context.r5.u32 = basic_information;
+    context.r6.u32 = 40u;
+    context.r7.u32 = 4u;
+    boot_hle::NtQueryInformationFile(context, base());
+    assert(context.r3.u32 == 0u);
+    assert(be32(iosb) == 0u);
+    assert(be32(iosb + 4u) == 40u);
+    assert(be64(basic_information + 0x00u) > 0u);
+    assert(be64(basic_information + 0x00u) == be64(basic_information + 0x10u));
+    assert(be32(basic_information + 0x20u) == 0x80u); // FILE_ATTRIBUTE_NORMAL.
+
+    constexpr std::uint32_t network_information = 0x7B00u;
+    context = {};
+    context.r3.u32 = *handle;
+    context.r4.u32 = iosb;
+    context.r5.u32 = network_information;
+    context.r6.u32 = 56u;
+    context.r7.u32 = 34u; // FileNetworkOpenInformation.
+    boot_hle::NtQueryInformationFile(context, base());
+    assert(context.r3.u32 == 0u);
+    assert(be32(iosb) == 0u);
+    assert(be32(iosb + 4u) == 56u);
+    const auto basic_write_time = be64(basic_information + 0x10u);
+    const auto network_write_time = be64(network_information + 0x10u);
+    const auto timestamp_delta = basic_write_time > network_write_time
+        ? basic_write_time - network_write_time
+        : network_write_time - basic_write_time;
+    assert(basic_write_time > 0u && network_write_time > 0u);
+    assert(timestamp_delta < 10000000ull); // Less than one second in FILETIME units.
+    assert(be32(network_information + 0x30u) == 0x80u);
+
+    context = {};
+    context.r3.u32 = *handle;
+    context.r4.u32 = iosb;
+    context.r5.u32 = information;
+    context.r6.u32 = 23u;
+    context.r7.u32 = 3u;
+    boot_hle::NtQueryVolumeInformationFile(context, base());
+    assert(context.r3.u32 == 0xC0000004u); // STATUS_INFO_LENGTH_MISMATCH.
+    assert(be32(iosb) == 0xC0000004u);
+    assert(be32(iosb + 4u) == 0u);
+
+    context = {};
+    context.r3.u32 = *handle;
+    context.r4.u32 = iosb;
+    context.r5.u32 = information;
+    context.r6.u32 = 24u;
+    context.r7.u32 = 4u; // DeviceInformation is not modelled by this VFS.
+    boot_hle::NtQueryVolumeInformationFile(context, base());
+    assert(context.r3.u32 == 0xC0000003u); // STATUS_INVALID_INFO_CLASS.
+    assert(be32(iosb) == 0xC0000003u);
+
+    assert(process_kernel_objects().close(*handle));
+    file.reset(); // Close the host stream before removing the fixture on Windows.
+    fs::remove_all(root);
+}
+
+void test_video_display_queries() {
+    constexpr std::uint32_t mode = 0x7000u;
+    constexpr std::uint32_t display = 0x7100u;
+    constexpr std::uint32_t gamma_type = 0x7200u;
+    constexpr std::uint32_t gamma_power = 0x7204u;
+
+    PPCContext context{};
+    context.r3.u32 = mode;
+    boot_hle::VdQueryVideoMode(context, base());
+    assert(context.r3.u32 == mode);
+    assert(be32(mode + 0x00u) == 1280u);
+    assert(be32(mode + 0x04u) == 720u);
+    assert(be32(mode + 0x08u) == 0u);
+    assert(be32(mode + 0x0Cu) == 1u);
+    assert(be32(mode + 0x10u) == 1u);
+    assert(be32(mode + 0x14u) == 0x42700000u); // 60.0f, big-endian.
+    assert(be32(mode + 0x18u) == 1u);          // NTSC.
+    assert(be32(mode + 0x1Cu) == 0x4Au);
+    assert(be32(mode + 0x20u) == 1u);
+    assert(be32(mode + 0x24u) == 0u);
+    assert(be32(mode + 0x28u) == 0u);
+    assert(be32(mode + 0x2Cu) == 0u);
+
+    context = {};
+    boot_hle::VdQueryVideoFlags(context, base());
+    assert(context.r3.u32 == 3u);
+
+    context = {};
+    context.r3.u32 = mode;
+    boot_hle::XGetVideoMode(context, base());
+    assert(context.r3.u32 == 0u); // XAM API returns ERROR_SUCCESS.
+    assert(be32(mode) == 1280u && be32(mode + 4u) == 720u);
+
+    context = {};
+    context.r3.u32 = display;
+    boot_hle::VdGetCurrentDisplayInformation(context, base());
+    assert(context.r3.u32 == display);
+    assert(be16(display + 0x00u) == 1280u);
+    assert(be16(display + 0x02u) == 720u);
+    assert(be32(display + 0x10u) == 1280u);
+    assert(be32(display + 0x14u) == 720u);
+    assert(be32(display + 0x18u) == 1280u);
+    assert(be32(display + 0x1Cu) == 720u);
+    assert(be32(display + 0x20u) == 1u);
+    assert(be32(display + 0x30u) == 1u);
+    assert(be16(display + 0x40u) == 320u);
+    assert(be16(display + 0x42u) == 180u);
+    assert(be16(display + 0x44u) == 320u);
+    assert(be16(display + 0x46u) == 180u);
+    assert(be16(display + 0x48u) == 1280u);
+    assert(be16(display + 0x4Au) == 720u);
+    assert(be32(display + 0x4Cu) == 0x42700000u);
+    assert(be32(display + 0x50u) == 0u);
+    assert(be16(display + 0x56u) == 1280u);
+
+    context = {};
+    context.r3.u32 = gamma_type;
+    context.r4.u32 = gamma_power;
+    boot_hle::VdGetCurrentDisplayGamma(context, base());
+    assert(context.r3.u32 == gamma_type);
+    assert(be32(gamma_type) == 2u); // BT.709.
+    float expected_power = 2.22222233f;
+    std::uint32_t expected_power_bits = 0;
+    std::memcpy(&expected_power_bits, &expected_power, sizeof(expected_power_bits));
+    assert(be32(gamma_power) == expected_power_bits);
+
+    context = {};
+    context.r3.u32 = 0xFFFFFFF0u; // The 48-byte record would cross the 4 GiB limit.
+    boot_hle::VdQueryVideoMode(context, base());
+    assert(context.r3.u32 == 0xC0000005u); // Invalid guest range.
 }
 
 void test_critical_sections() {
@@ -435,6 +690,9 @@ int main() {
     assert(be32(0x6F04) == 1);
 
     test_executable_module_lookup();
+    test_rtl_image_xex_header_field();
+    test_query_volume_information_file();
+    test_video_display_queries();
     test_critical_sections();
     test_tls();
     test_events();

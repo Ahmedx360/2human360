@@ -19,6 +19,7 @@ enum class GuestVfsStatus : std::uint32_t {
     NoSuchFile = 0xC000000Fu,
     EndOfFile = 0xC0000011u,
     NoMoreFiles = 0x80000006u,
+    BufferOverflow = 0x80000005u,
     ObjectNameNotFound = 0xC0000034u,
     ObjectNameCollision = 0xC0000035u,
     AccessDenied = 0xC0000022u,
@@ -72,7 +73,8 @@ public:
     [[nodiscard]] bool flush();
 
     [[nodiscard]] std::optional<GuestDirectoryEntry> next_directory_entry(
-        const std::string& pattern, bool restart, GuestVfsStatus& status);
+        const std::string& pattern, bool restart, GuestVfsStatus& status,
+        std::size_t max_name_bytes = static_cast<std::size_t>(-1));
 
 private:
     std::filesystem::path path_;

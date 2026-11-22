@@ -1,4 +1,5 @@
 #include "memory/guest_address_space.hpp"
+#include "memory/guest_mmio.hpp"
 #include "ppc/import_registry.hpp"
 #include "ppc/boot_hle.hpp"
 #include "fs/guest_vfs.hpp"
@@ -26,6 +27,14 @@ PPC_FUNC_IMPL(test_default_handler) {
     (void)ctx;
     (void)base;
 }
+
+std::uint32_t ppc_test_load_u32(std::uint8_t* base, std::uint32_t address) {
+    return PPC_LOAD_U32(address);
+}
+void ppc_test_store_u32(std::uint8_t* base, std::uint32_t address,
+                        std::uint32_t value) {
+    PPC_STORE_U32(address, value);
+}
 }
 
 int main() {
@@ -47,12 +56,31 @@ int main() {
     // The 4 GiB reservation is PROT_NONE until an explicit commit.
     assert(memory.commit_region(0x82012000u, 0x6000u, &error));
 
+    // Scalar generated PPC memory accessors must bypass the PROT_NONE guest
+    // aperture and use the runtime bus for Xenos/XMA, while preserving direct
+    // big-endian RAM behavior for ordinary guest addresses.
+    using toohuman::runtime::GuestMmioBus;
+    using toohuman::runtime::kXenosMmioBase;
+    GuestMmioBus::global().reset();
+    const auto xenos_register = kXenosMmioBase + 0x40u;
+    ppc_test_store_u32(memory.base(), xenos_register, 0x12345678u);
+    assert(ppc_test_load_u32(memory.base(), xenos_register) == 0x12345678u);
+    const auto mmio_trace = GuestMmioBus::global().trace();
+    assert(mmio_trace.size() == 2u);
+    assert(mmio_trace[0].write && mmio_trace[0].value == 0x12345678u);
+    assert(!mmio_trace[1].write && mmio_trace[1].value == 0x12345678u);
+
+    ppc_test_store_u32(memory.base(), 0x82012080u, 0x89ABCDEFu);
+    assert(ppc_test_load_u32(memory.base(), 0x82012080u) == 0x89ABCDEFu);
+    assert(memory.base()[0x82012080u] == 0x89u);
+    assert(memory.base()[0x82012083u] == 0xEFu);
+
     toohuman::runtime::PpcImportRegistry imports;
     assert(imports.register_handler("xboxkrnl.exe", 0x74u,
                                     &test_import_handler, &error));
     std::size_t startup_hle_count = 0;
     assert(toohuman::runtime::register_boot_imports(imports, &error, &startup_hle_count));
-    assert(startup_hle_count == 64u);
+    assert(startup_hle_count == 70u);
     const std::vector<toohuman::runtime::XexImport> metadata{
         {"xboxkrnl.exe", 0x74u, 0, 1, 0x82001100u},
         {"xboxkrnl.exe", 0x011Bu, 0, 1, 0x82001104u},
@@ -94,11 +122,17 @@ int main() {
         {"xboxkrnl.exe", 0x00F5u, 0, 1, 0x82001194u},
         {"xboxkrnl.exe", 0x0196u, 0, 1, 0x82001198u},
         {"xboxkrnl.exe", 0x00DAu, 0, 1, 0x8200119Cu},
-        {"xboxkrnl.exe", 0x00E4u, 0, 1, 0x820011A0u}
+        {"xboxkrnl.exe", 0x00E4u, 0, 1, 0x820011A0u},
+        {"xboxkrnl.exe", 0x00EFu, 0, 1, 0x820011A4u},
+        {"xboxkrnl.exe", 0x01B9u, 0, 1, 0x820011A8u},
+        {"xboxkrnl.exe", 0x01BAu, 0, 1, 0x820011ACu},
+        {"xboxkrnl.exe", 0x01C9u, 0, 1, 0x820011B0u},
+        {"xboxkrnl.exe", 0x01CAu, 0, 1, 0x820011B4u},
+        {"xam.xex",      0x03D1u, 0, 1, 0x820011B8u}
     };
     std::size_t registered = 0;
     assert(imports.install(memory, metadata, &registered, &error));
-    assert(registered == 41u);
+    assert(registered == 47u);
     assert(memory.get_function<PPCFunc*>(0x82001100u) != &test_default_handler);
 
     PPCContext context{};
@@ -114,6 +148,30 @@ int main() {
         assert(function != nullptr);
         function(ctx, memory.base());
     };
+    // The volume-information export uses the Xbox ABI:
+    // (handle, iosb, information, length, information_class).
+    // Supply valid non-handle arguments so the test reaches handle dispatch.
+    PPCContext volume_dispatch_context{};
+    volume_dispatch_context.r3.u32 = 0xDEADBEEFu;
+    volume_dispatch_context.r4.u32 = 0x82012000u; // Writable scratch IO_STATUS_BLOCK.
+    volume_dispatch_context.r6.u32 = 24u;          // FILE_FS_VOLUME_INFORMATION size.
+    volume_dispatch_context.r7.u32 = 1u;           // FileFsVolumeInformation.
+    call_test_import(0x820011A4u, volume_dispatch_context);
+    assert(volume_dispatch_context.r3.u32 == 0xC0000008u); // Invalid handle.
+
+    PPCContext video_flags_dispatch{};
+    call_test_import(0x820011B0u, video_flags_dispatch);
+    assert(video_flags_dispatch.r3.u32 == 3u);
+    PPCContext xget_video_dispatch{};
+    xget_video_dispatch.r3.u32 = 0x82012040u;
+    call_test_import(0x820011B8u, xget_video_dispatch);
+    assert(xget_video_dispatch.r3.u32 == 0u);
+    const auto* mode_bytes = memory.base() + 0x82012040u;
+    const auto mode_width = (std::uint32_t(mode_bytes[0]) << 24) |
+        (std::uint32_t(mode_bytes[1]) << 16) |
+        (std::uint32_t(mode_bytes[2]) << 8) | mode_bytes[3];
+    assert(mode_width == 1280u);
+
     PPCContext boot_context{};
     call_test_import(0x8200110Cu, boot_context); // KeGetCurrentProcessType
     assert(boot_context.r3.u32 == 1u);
@@ -144,6 +202,12 @@ int main() {
         const auto* p = memory.base() + address;
         return (std::uint32_t(p[0]) << 24) | (std::uint32_t(p[1]) << 16) |
                (std::uint32_t(p[2]) << 8) | std::uint32_t(p[3]);
+    };
+    auto guest_be64 = [&](std::uint32_t address) {
+        const auto* p = memory.base() + address;
+        std::uint64_t value = 0;
+        for (unsigned i = 0; i < 8; ++i) value = (value << 8) | p[i];
+        return value;
     };
     assert(guest_be32(critical_section + 0x10) == 0xFFFFFFFFu);
     constexpr std::uint32_t critical_section_pcr = 0x82015200u;
@@ -471,6 +535,21 @@ int main() {
                 directory_pattern.data(), directory_pattern.size());
     write_guest_be32(directory_restart, 1u);
 
+    // An undersized result buffer must not consume the current directory entry.
+    boot_context = {};
+    boot_context.r1.u32 = directory_restart - 0x54u;
+    boot_context.r3.u32 = *directory_handle;
+    boot_context.r7.u32 = directory_iosb;
+    boot_context.r8.u32 = directory_info;
+    boot_context.r9.u32 = 0x48u; // Header fits; "alpha.txt" does not.
+    boot_context.r10.u32 = directory_name_descriptor;
+    call_test_import(0x820011A0u, boot_context);
+    assert(boot_context.r3.u32 == 0x80000005u); // STATUS_BUFFER_OVERFLOW.
+    assert(guest_be32(directory_iosb) == 0x80000005u);
+    assert(guest_be32(directory_iosb + 4u) == 0u);
+
+    // Retry without restarting. The unreturned entry must still be first.
+    write_guest_be32(directory_restart, 0u);
     boot_context = {};
     boot_context.r1.u32 = directory_restart - 0x54u;
     boot_context.r3.u32 = *directory_handle;
@@ -482,8 +561,11 @@ int main() {
     assert(boot_context.r3.u32 == 0u);
     assert(guest_be32(directory_iosb) == 0u);
     assert(guest_be32(directory_info + 4u) == 0u);
-    assert(guest_be32(directory_info + 0x28u) == 3u);
+    // EndOfFile and AllocationSize are 64-bit big-endian LARGE_INTEGERs.
+    assert(guest_be64(directory_info + 0x28u) == 3u);
+    assert(guest_be64(directory_info + 0x30u) == 0x1000u);
     assert(guest_be32(directory_info + 0x3Cu) == 9u);
+    assert(guest_be32(directory_iosb + 4u) == 0x80u);
     assert(std::memcmp(memory.base() + directory_info + 0x40u, "alpha.txt", 9u) == 0);
 
     write_guest_be32(directory_restart, 0u);
@@ -1036,7 +1118,7 @@ int main() {
 
     // NtProtectVirtualMemory: r3/r4 point to in/out base/size, r5 is PAGE_*,
     // r6 points to OldProtect, and r7 is DebugMemory.
-    write_be(*stack_io + 8, virtual_address + 0x100u);
+    write_be(*stack_io + 8, virtual_address); // Page-aligned: protect exactly the first page.
     write_be(*stack_io + 12, vm_page_size);
     write_be(*stack_io + 16, 0xDEADBEEFu);
     PPCContext protect_context{};

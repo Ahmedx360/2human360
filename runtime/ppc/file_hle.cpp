@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -142,6 +143,23 @@ std::shared_ptr<GuestFile> file_from_handle(std::uint32_t handle) {
     return std::dynamic_pointer_cast<GuestFile>(
         process_kernel_objects().lookup(handle));
 }
+
+std::uint64_t host_filetime(const std::filesystem::path& path) {
+    std::error_code error;
+    const auto last_write = std::filesystem::last_write_time(path, error);
+    if (error) return 0;
+    const auto system_time =
+        std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+            last_write - std::filesystem::file_time_type::clock::now() +
+            std::chrono::system_clock::now());
+    const auto unix_100ns =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            system_time.time_since_epoch()).count() / 100;
+    constexpr std::int64_t kWindowsEpochOffset100ns = 116444736000000000ll;
+    const auto guest_time = unix_100ns + kWindowsEpochOffset100ns;
+    return guest_time > 0 ? static_cast<std::uint64_t>(guest_time) : 0u;
+}
+
 
 std::uint32_t open_common(std::uint8_t* base, std::uint32_t out_handle,
                           std::uint32_t access, std::uint32_t attrs,
@@ -346,6 +364,7 @@ PPC_FUNC(NtQueryInformationFile) {
 
     std::uint32_t required = 0;
     switch (cls) {
+    case 4: required = 40u; break;  // FileBasicInformation
     case 5: required = 24u; break;  // FileStandardInformation
     case 14: required = 8u; break;  // FilePositionInformation
     case 34: required = 56u; break; // FileNetworkOpenInformation
@@ -362,6 +381,23 @@ PPC_FUNC(NtQueryInformationFile) {
     const auto size = file->size();
     const auto allocation = (size + 0xFFFu) & ~0xFFFull;
     switch (cls) {
+    case 4: {
+        // The portable VFS exposes host write time only. Use it for all four
+        // FILE_BASIC_INFORMATION timestamps until the other times are tracked.
+        const auto filetime = host_filetime(file->path());
+        std::memset(at(base, info), 0, 40u);
+        wr64(base, info + 0x00u, filetime);
+        wr64(base, info + 0x08u, filetime);
+        wr64(base, info + 0x10u, filetime);
+        wr64(base, info + 0x18u, filetime);
+
+        const auto filename = file->path().filename().string();
+        std::uint32_t attributes = file->is_directory() ? 0x10u : 0u;
+        if (!filename.empty() && filename.front() == '.') attributes |= 0x02u;
+        if (attributes == 0) attributes = 0x80u; // FILE_ATTRIBUTE_NORMAL.
+        wr32(base, info + 0x20u, attributes);
+        break;
+    }
     case 5:
         std::memset(at(base, info), 0, 24u);
         wr64(base, info, allocation);
@@ -373,12 +409,18 @@ PPC_FUNC(NtQueryInformationFile) {
     case 14:
         wr64(base, info, file->position());
         break;
-    case 34:
+    case 34: {
+        const auto filetime = host_filetime(file->path());
         std::memset(at(base, info), 0, 56u);
+        wr64(base, info + 0x00u, filetime);
+        wr64(base, info + 0x08u, filetime);
+        wr64(base, info + 0x10u, filetime);
+        wr64(base, info + 0x18u, filetime);
         wr64(base, info + 32u, allocation);
         wr64(base, info + 40u, size);
         wr32(base, info + 48u, file->is_directory() ? 0x10u : 0x80u);
         break;
+    }
     }
     set_iosb(base, iosb, kSuccess, required);
     ctx.r3.u32 = kSuccess;
@@ -464,10 +506,88 @@ PPC_FUNC(NtQueryFullAttributesFile) {
     ctx.r3.u32 = kSuccess;
 }
 
+// xboxkrnl #0xEF. NtQueryVolumeInformationFile(handle, iosb, info, length, class).
+// Implement the stable volume and size records used by the Xbox 360 kernel ABI.
+// Allocation units are represented as 4 KiB clusters over the host-backed VFS volume.
+PPC_FUNC(NtQueryVolumeInformationFile) {
+    constexpr std::uint32_t kInvalidInfoClass = 0xC0000003u;
+    constexpr std::uint32_t kInfoLengthMismatch = 0xC0000004u;
+    constexpr std::uint32_t kRequiredLength = 24u;
+    constexpr std::uint32_t kVolumeInformationClass = 1u;
+    constexpr std::uint32_t kSizeInformationClass = 3u;
+    constexpr std::uint64_t kAllocationUnitBytes = 0x1000u;
+
+    if (!valid_iosb(base, ctx.r4.u32)) {
+        ctx.r3.u32 = kAccessViolation;
+        return;
+    }
+
+    const auto info_class = ctx.r7.u32;
+    if (info_class != kVolumeInformationClass &&
+        info_class != kSizeInformationClass) {
+        set_iosb(base, ctx.r4.u32, kInvalidInfoClass, 0);
+        ctx.r3.u32 = kInvalidInfoClass;
+        return;
+    }
+    if (ctx.r6.u32 < kRequiredLength) {
+        set_iosb(base, ctx.r4.u32, kInfoLengthMismatch, 0);
+        ctx.r3.u32 = kInfoLengthMismatch;
+        return;
+    }
+
+    const auto file = file_from_handle(ctx.r3.u32);
+    if (!file) {
+        set_iosb(base, ctx.r4.u32, kInvalidHandle, 0);
+        ctx.r3.u32 = kInvalidHandle;
+        return;
+    }
+
+    const auto iosb = ctx.r4.u32;
+    const auto information = ctx.r5.u32;
+    if (!valid_iosb(base, iosb) ||
+        !guest_range(base, information, kRequiredLength, GuestMemoryAccess::Write)) {
+        ctx.r3.u32 = kAccessViolation;
+        return;
+    }
+
+    std::memset(at(base, information), 0, kRequiredLength);
+    if (info_class == kVolumeInformationClass) {
+        // The Xbox kernel returns an empty volume label and zero serial/time
+        // for this generic VFS-backed mount.
+        // FILE_FS_VOLUME_INFORMATION: label begins at byte 17.
+        set_iosb(base, iosb, kSuccess, 17u);
+        ctx.r3.u32 = kSuccess;
+        return;
+    }
+
+    std::error_code space_error;
+    const auto volume_path = file->is_directory()
+        ? file->path() : file->path().parent_path();
+    const auto space = std::filesystem::space(volume_path, space_error);
+    if (space_error ||
+        space.capacity == static_cast<std::uintmax_t>(-1) ||
+        space.available == static_cast<std::uintmax_t>(-1)) {
+        set_iosb(base, iosb, kAccessDenied, 0);
+        ctx.r3.u32 = kAccessDenied;
+        return;
+    }
+
+    // FILE_FS_SIZE_INFORMATION uses 64-bit allocation-unit counts followed
+    // by sectors-per-unit and bytes-per-sector. Use 512-byte sectors and
+    // 4 KiB allocation units for the host-directory compatibility volume.
+    const auto total_units = space.capacity / kAllocationUnitBytes;
+    const auto available_units = space.available / kAllocationUnitBytes;
+    wr64(base, information + 0x00u, total_units);
+    wr64(base, information + 0x08u, available_units);
+    wr32(base, information + 0x10u, 8u);
+    wr32(base, information + 0x14u, 512u);
+    set_iosb(base, iosb, kSuccess, kRequiredLength);
+    ctx.r3.u32 = kSuccess;
+}
+
 // xboxkrnl #0xE4. Synchronous FILE_DIRECTORY_INFORMATION query.
 PPC_FUNC(NtQueryDirectoryFile) {
     constexpr std::uint32_t kInfoLengthMismatch = 0xC0000004u;
-    constexpr std::uint32_t kBufferOverflow = 0x80000005u;
     constexpr std::uint32_t kNoSuchFile = 0xC000000Fu;
     constexpr std::uint32_t kNoMoreFiles = 0x80000006u;
 
@@ -531,20 +651,16 @@ PPC_FUNC(NtQueryDirectoryFile) {
     }
 
     GuestVfsStatus vfs_status = GuestVfsStatus::Unsuccessful;
-    const auto entry = file->next_directory_entry(pattern, restart, vfs_status);
+    constexpr std::uint32_t kFileDirectoryInformationHeaderSize = 0x40u;
+    const auto entry = file->next_directory_entry(
+        pattern, restart, vfs_status,
+        length - kFileDirectoryInformationHeaderSize);
     if (!entry) {
         const auto status = static_cast<std::uint32_t>(vfs_status);
         set_iosb(base, iosb, status, 0);
         ctx.r3.u32 = status == static_cast<std::uint32_t>(GuestVfsStatus::NoMoreFiles)
             ? kNoMoreFiles : (status == static_cast<std::uint32_t>(GuestVfsStatus::NoSuchFile)
                 ? kNoSuchFile : status);
-        return;
-    }
-
-    constexpr std::uint32_t kFileDirectoryInformationHeaderSize = 0x40u;
-    if (entry->name.size() > length - kFileDirectoryInformationHeaderSize) {
-        set_iosb(base, iosb, kBufferOverflow, 0);
-        ctx.r3.u32 = kBufferOverflow;
         return;
     }
 
@@ -561,6 +677,8 @@ PPC_FUNC(NtQueryDirectoryFile) {
     std::memcpy(at(base, output + kFileDirectoryInformationHeaderSize),
                 entry->name.data(), entry->name.size());
 
+    // The Xbox 360 NtQueryDirectoryFile wrapper reports the supplied
+    // Length in IO_STATUS_BLOCK.Information when the query succeeds.
     set_iosb(base, iosb, kSuccess, length);
     ctx.r3.u32 = kSuccess;
     if (event) (void)event->set();

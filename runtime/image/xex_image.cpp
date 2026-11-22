@@ -121,6 +121,10 @@ XexImageResult load_xex2_image(std::span<const std::uint8_t> xex_file) {
                 if (!fits(source, data_size, xex_file.size())) {
                     return fail("XEX2 basic-compression block data is truncated");
                 }
+                // The supplied Too Human XEX reconstructs to 0x01458000 bytes,
+                // while its security header declares 0x01460000. Do not require
+                // the block output to equal that header value: the PE-sized image
+                // below is zero-initialized and safely pads the remaining tail.
                 output_size += static_cast<std::uint64_t>(data_size) + zero_size;
                 if (output_size > kMaxImageSize || output_size > security_image_size) {
                     return fail("XEX2 basic-compression output exceeds the declared image size");

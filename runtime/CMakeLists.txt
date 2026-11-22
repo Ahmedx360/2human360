@@ -4,6 +4,7 @@ add_library(TooHumanRuntimeCore STATIC
     kernel/guest_kernel_objects.cpp
     fs/guest_vfs.cpp
     memory/guest_memory.cpp
+    memory/guest_mmio.cpp
     memory/guest_heap.cpp
     memory/guest_address_space.cpp
     image/xbox360_pe.cpp
@@ -57,6 +58,18 @@ else()
 endif()
 
 if(BUILD_TESTING)
+    add_executable(TooHumanGuestMmioTests tests/guest_mmio_tests.cpp)
+    target_link_libraries(TooHumanGuestMmioTests PRIVATE TooHumanRuntimeCore)
+    target_compile_features(TooHumanGuestMmioTests PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(TooHumanGuestMmioTests PRIVATE /UNDEBUG)
+    else()
+        target_compile_options(TooHumanGuestMmioTests PRIVATE -UNDEBUG)
+    endif()
+    add_test(NAME TooHumanGuestMmioTests COMMAND TooHumanGuestMmioTests)
+endif()
+
+if(BUILD_TESTING)
     add_executable(TooHumanGuestKernelObjectTests tests/guest_kernel_objects_tests.cpp)
     target_link_libraries(TooHumanGuestKernelObjectTests PRIVATE TooHumanRuntimeCore)
     target_compile_features(TooHumanGuestKernelObjectTests PRIVATE cxx_std_20)
@@ -85,8 +98,10 @@ if(TH_BUILD_RECOMP_LIB)
         ppc/boot_hle_register.cpp
         ppc/title_runtime.cpp
     )
+    # Generated PPC accessors call the runtime MMIO bus, so the game-code
+    # archive must precede RuntimeCore when a final executable resolves symbols.
     target_link_libraries(TooHumanPpcRuntime
-        PUBLIC TooHumanRuntimeCore TooHumanRecompLib
+        PUBLIC TooHumanRecompLib TooHumanRuntimeCore
     )
     if(TARGET TooHumanBootHle)
         target_link_libraries(TooHumanPpcRuntime PUBLIC TooHumanBootHle)
