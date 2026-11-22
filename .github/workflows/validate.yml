@@ -61,7 +61,28 @@ jobs:
           -DBUILD_TESTING=ON
 
       - name: Compile the recompiled game-code library
-        run: cmake --build build/clang --target TooHumanRuntimeProbe TooHumanPpcImportRegistryTests TooHumanBootHleTests TooHumanGuestThreadStartupTests TooHumanGuestThreadManagerTests TooHumanGuestThreadRuntimeTests TooHumanGuestVfsTests TooHumanGuestKernelObjectTests TooHumanGuestMemoryTests TooHumanGuestHeapTests TooHumanXbox360PeTests TooHumanXexImageTests --parallel 2
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p build/diagnostics
+          cmake --build build/clang --target TooHumanRuntimeProbe TooHumanPpcImportRegistryTests TooHumanBootHleTests TooHumanGuestThreadStartupTests TooHumanGuestThreadManagerTests TooHumanGuestThreadRuntimeTests TooHumanGuestVfsTests TooHumanGuestKernelObjectTests TooHumanGuestMemoryTests TooHumanGuestHeapTests TooHumanXbox360PeTests TooHumanXexImageTests --parallel 1 2>&1 | tee build/diagnostics/clang-build.log
+
+      - name: Preserve compiler failure diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          if [[ -f build/diagnostics/clang-build.log ]]; then
+            tail -n 250 build/diagnostics/clang-build.log | tee build/diagnostics/clang-build-failure-tail.log >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload compiler failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: too-human-clang-build-failure
+          path: build/diagnostics/clang-build-failure-tail.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Test XEX import dispatch
         run: ctest --test-dir build/clang -R "TooHuman(BootHle|PpcImportRegistry|GuestThreadStartup|GuestThreadManager|GuestThreadRuntime|GuestVfs|GuestKernelObject|GuestMemory|GuestHeap|Xbox360Pe|XexImage)Tests" --output-on-failure
