@@ -161,6 +161,22 @@ Optional event handles are
 signaled on completion. APC callbacks, asynchronous I/O completion, other
 directory-information classes, and multi-record batching are not implemented.
 
+## Implemented: volume-information HLE
+
+The Xbox kernel `NtQueryVolumeInformationFile` import (ordinal `0xEF`) now
+supports `FileFsVolumeInformation` (class 1) and `FileFsSizeInformation`
+(class 3). It validates the handle, I/O status block, output range, class and
+minimum buffer size; writes all multibyte fields in guest big-endian order;
+and reports the returned record size through `IO_STATUS_BLOCK.Information`.
+The volume record currently uses the generic VFS mount defaults (zero serial,
+creation time and label, no object support). The size record derives capacity
+and available space from the host filesystem containing the opened file and
+models 4 KiB allocation units (8 sectors of 512 bytes). This is a compatibility
+baseline, not an emulation of FATX volume identity, device characteristics,
+or exact Xbox media geometry. Device-information (class 4) and
+attribute-information (class 5) queries remain unsupported and return
+`STATUS_INVALID_INFO_CLASS`.
+
 ## Next implementation sequence
 
 1. Add explicit MMIO ranges and aliases without exposing them as ordinary RAM.

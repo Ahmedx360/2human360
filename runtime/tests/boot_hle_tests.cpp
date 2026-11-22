@@ -1,11 +1,15 @@
 // Unit tests for the stateless startup HLE. They need only ppc_context.h (no generated game code, no registry).
 #include "ppc/boot_hle.hpp"
+#include "fs/guest_vfs.hpp"
+#include "kernel/guest_kernel_objects.hpp"
 #include <ppc_config.h>
 
 #include <atomic>
 #include <cassert>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <thread>
 #include <vector>
 
@@ -18,6 +22,9 @@ void poke(std::uint32_t at, const char* s) { std::memcpy(base() + at, s, std::st
 std::uint16_t be16(std::uint32_t a) { return static_cast<std::uint16_t>((g_mem[a] << 8) | g_mem[a + 1]); }
 std::uint32_t be32(std::uint32_t a) {
     return (std::uint32_t(g_mem[a]) << 24) | (std::uint32_t(g_mem[a + 1]) << 16) | (std::uint32_t(g_mem[a + 2]) << 8) | g_mem[a + 3];
+}
+std::uint64_t be64(std::uint32_t a) {
+    return (std::uint64_t(be32(a)) << 32) | be32(a + 4);
 }
 void put16(std::uint32_t a, std::uint16_t v) { g_mem[a] = v >> 8; g_mem[a + 1] = std::uint8_t(v); }
 
@@ -121,6 +128,76 @@ void test_rtl_image_xex_header_field() {
     context.r4.u32 = 0x00010100u;
     boot_hle::RtlImageXexHeaderField(context, base());
     assert(context.r3.u32 == 0u);
+}
+
+void test_query_volume_information_file() {
+    namespace fs = std::filesystem;
+    const auto root = fs::temp_directory_path() / "toohuman_volume_information_tests";
+    fs::remove_all(root);
+    fs::create_directories(root);
+    const auto path = root / "fixture.bin";
+    { std::ofstream stream(path, std::ios::binary); stream << "Too Human"; }
+
+    auto file = std::make_shared<GuestFile>(path, false, true, false, false);
+    const auto handle = process_kernel_objects().insert(file);
+    assert(handle.has_value());
+
+    constexpr std::uint32_t iosb = 0x7800u;
+    constexpr std::uint32_t information = 0x7900u;
+    PPCContext context{};
+    context.r3.u32 = *handle;
+    context.r4.u32 = iosb;
+    context.r5.u32 = information;
+    context.r6.u32 = 24u;
+    context.r7.u32 = 1u; // FileFsVolumeInformation.
+    boot_hle::NtQueryVolumeInformationFile(context, base());
+    assert(context.r3.u32 == 0u);
+    assert(be32(iosb) == 0u);
+    assert(be32(iosb + 4u) == 17u);
+    assert(be64(information) == 0u);
+    assert(be32(information + 8u) == 0u);
+    assert(g_mem[information + 16u] == 0u);
+
+    context = {};
+    context.r3.u32 = *handle;
+    context.r4.u32 = iosb;
+    context.r5.u32 = information;
+    context.r6.u32 = 24u;
+    context.r7.u32 = 3u; // FileFsSizeInformation.
+    boot_hle::NtQueryVolumeInformationFile(context, base());
+    assert(context.r3.u32 == 0u);
+    assert(be32(iosb) == 0u);
+    assert(be32(iosb + 4u) == 24u);
+    const auto total_units = be64(information);
+    const auto available_units = be64(information + 8u);
+    assert(total_units > 0u);
+    assert(available_units <= total_units);
+    assert(be32(information + 16u) == 8u);
+    assert(be32(information + 20u) == 512u);
+
+    context = {};
+    context.r3.u32 = *handle;
+    context.r4.u32 = iosb;
+    context.r5.u32 = information;
+    context.r6.u32 = 23u;
+    context.r7.u32 = 3u;
+    boot_hle::NtQueryVolumeInformationFile(context, base());
+    assert(context.r3.u32 == 0xC0000004u); // STATUS_INFO_LENGTH_MISMATCH.
+    assert(be32(iosb) == 0xC0000004u);
+    assert(be32(iosb + 4u) == 0u);
+
+    context = {};
+    context.r3.u32 = *handle;
+    context.r4.u32 = iosb;
+    context.r5.u32 = information;
+    context.r6.u32 = 24u;
+    context.r7.u32 = 4u; // DeviceInformation is not modelled by this VFS.
+    boot_hle::NtQueryVolumeInformationFile(context, base());
+    assert(context.r3.u32 == 0xC0000003u); // STATUS_INVALID_INFO_CLASS.
+    assert(be32(iosb) == 0xC0000003u);
+
+    assert(process_kernel_objects().close(*handle));
+    fs::remove_all(root);
 }
 
 void test_critical_sections() {
@@ -505,6 +582,7 @@ int main() {
 
     test_executable_module_lookup();
     test_rtl_image_xex_header_field();
+    test_query_volume_information_file();
     test_critical_sections();
     test_tls();
     test_events();

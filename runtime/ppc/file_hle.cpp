@@ -464,6 +464,78 @@ PPC_FUNC(NtQueryFullAttributesFile) {
     ctx.r3.u32 = kSuccess;
 }
 
+// xboxkrnl #0xEF. NtQueryVolumeInformationFile(handle, iosb, info, length, class).
+// Implement the stable volume and size records used by the Xbox 360 kernel ABI.
+// Allocation units are represented as 4 KiB clusters over the host-backed VFS volume.
+PPC_FUNC(NtQueryVolumeInformationFile) {
+    constexpr std::uint32_t kInvalidInfoClass = 0xC0000003u;
+    constexpr std::uint32_t kInfoLengthMismatch = 0xC0000004u;
+    constexpr std::uint32_t kRequiredLength = 24u;
+    constexpr std::uint32_t kVolumeInformationClass = 1u;
+    constexpr std::uint32_t kSizeInformationClass = 3u;
+    constexpr std::uint64_t kAllocationUnitBytes = 0x1000u;
+
+    const auto info_class = ctx.r7.u32;
+    if (info_class != kVolumeInformationClass &&
+        info_class != kSizeInformationClass) {
+        set_iosb(base, ctx.r4.u32, kInvalidInfoClass, 0);
+        ctx.r3.u32 = kInvalidInfoClass;
+        return;
+    }
+    if (ctx.r6.u32 < kRequiredLength) {
+        set_iosb(base, ctx.r4.u32, kInfoLengthMismatch, 0);
+        ctx.r3.u32 = kInfoLengthMismatch;
+        return;
+    }
+
+    const auto file = file_from_handle(ctx.r3.u32);
+    if (!file) {
+        set_iosb(base, ctx.r4.u32, kInvalidHandle, 0);
+        ctx.r3.u32 = kInvalidHandle;
+        return;
+    }
+
+    const auto iosb = ctx.r4.u32;
+    const auto information = ctx.r5.u32;
+    if (!valid_iosb(base, iosb) ||
+        !guest_range(base, information, kRequiredLength, GuestMemoryAccess::Write)) {
+        ctx.r3.u32 = kAccessViolation;
+        return;
+    }
+
+    std::memset(at(base, information), 0, kRequiredLength);
+    if (info_class == kVolumeInformationClass) {
+        // The Xbox kernel returns an empty volume label and zero serial/time
+        // for this generic VFS-backed mount.
+        // FILE_FS_VOLUME_INFORMATION: label begins at byte 17.
+        set_iosb(base, iosb, kSuccess, 17u);
+        ctx.r3.u32 = kSuccess;
+        return;
+    }
+
+    std::error_code space_error;
+    const auto space = std::filesystem::space(file->path(), space_error);
+    if (space_error ||
+        space.capacity == static_cast<std::uintmax_t>(-1) ||
+        space.available == static_cast<std::uintmax_t>(-1)) {
+        set_iosb(base, iosb, kAccessDenied, 0);
+        ctx.r3.u32 = kAccessDenied;
+        return;
+    }
+
+    // FILE_FS_SIZE_INFORMATION uses 64-bit allocation-unit counts followed
+    // by sectors-per-unit and bytes-per-sector. Use 512-byte sectors and
+    // 4 KiB allocation units for the host-directory compatibility volume.
+    const auto total_units = space.capacity / kAllocationUnitBytes;
+    const auto available_units = space.available / kAllocationUnitBytes;
+    wr64(base, information + 0x00u, total_units);
+    wr64(base, information + 0x08u, available_units);
+    wr32(base, information + 0x10u, 8u);
+    wr32(base, information + 0x14u, 512u);
+    set_iosb(base, iosb, kSuccess, kRequiredLength);
+    ctx.r3.u32 = kSuccess;
+}
+
 // xboxkrnl #0xE4. Synchronous FILE_DIRECTORY_INFORMATION query.
 PPC_FUNC(NtQueryDirectoryFile) {
     constexpr std::uint32_t kInfoLengthMismatch = 0xC0000004u;

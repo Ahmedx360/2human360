@@ -21,6 +21,7 @@ PPCFunc NtOpenFile;
 PPCFunc NtReadFile;
 PPCFunc NtWriteFile;
 PPCFunc NtQueryInformationFile;
+PPCFunc NtQueryVolumeInformationFile;
 PPCFunc NtSetInformationFile;
 PPCFunc NtQueryFullAttributesFile;
 PPCFunc NtQueryDirectoryFile;

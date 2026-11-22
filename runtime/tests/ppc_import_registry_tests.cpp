@@ -52,7 +52,7 @@ int main() {
                                     &test_import_handler, &error));
     std::size_t startup_hle_count = 0;
     assert(toohuman::runtime::register_boot_imports(imports, &error, &startup_hle_count));
-    assert(startup_hle_count == 64u);
+    assert(startup_hle_count == 65u);
     const std::vector<toohuman::runtime::XexImport> metadata{
         {"xboxkrnl.exe", 0x74u, 0, 1, 0x82001100u},
         {"xboxkrnl.exe", 0x011Bu, 0, 1, 0x82001104u},
@@ -94,12 +94,19 @@ int main() {
         {"xboxkrnl.exe", 0x00F5u, 0, 1, 0x82001194u},
         {"xboxkrnl.exe", 0x0196u, 0, 1, 0x82001198u},
         {"xboxkrnl.exe", 0x00DAu, 0, 1, 0x8200119Cu},
-        {"xboxkrnl.exe", 0x00E4u, 0, 1, 0x820011A0u}
+        {"xboxkrnl.exe", 0x00E4u, 0, 1, 0x820011A0u},
+        {"xboxkrnl.exe", 0x00EFu, 0, 1, 0x820011A4u}
     };
     std::size_t registered = 0;
     assert(imports.install(memory, metadata, &registered, &error));
-    assert(registered == 41u);
+    assert(registered == 42u);
     assert(memory.get_function<PPCFunc*>(0x82001100u) != &test_default_handler);
+    // The new volume-information export is registered under the Xbox ordinal 0xEF.
+    PPCContext volume_dispatch_context{};
+    volume_dispatch_context.r3.u32 = 0xDEADBEEFu;
+    call_test_import(0x820011A4u, volume_dispatch_context);
+    assert(volume_dispatch_context.r3.u32 == 0xC0000008u); // Invalid handle.
+
 
     PPCContext context{};
     context.ctr.u32 = 0x82001100u;
