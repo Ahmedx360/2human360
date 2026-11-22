@@ -519,7 +519,9 @@ PPC_FUNC(NtQueryVolumeInformationFile) {
     }
 
     std::error_code space_error;
-    const auto space = std::filesystem::space(file->path(), space_error);
+    const auto volume_path = file->is_directory()
+        ? file->path() : file->path().parent_path();
+    const auto space = std::filesystem::space(volume_path, space_error);
     if (space_error ||
         space.capacity == static_cast<std::uintmax_t>(-1) ||
         space.available == static_cast<std::uintmax_t>(-1)) {
