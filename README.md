@@ -13,12 +13,12 @@ You must provide your own legally obtained game files. No game executable, asset
 | Jump-table recovery | 396 initial tables, plus manually recovered NOP-padded tables |
 | Recompiler fixes | Title-specific PE loader, switch-boundary and VMX/codegen fixes |
 | Generated-code library | CMake static-library target added; requires Clang and SIMDe |
-| Kernel/XAM HLE | Actual XEX import inventory/name map, function-IAT patching and backing storage for 11 kernel data exports implemented; only basic pool/XAM allocation handlers are implemented; most kernel/XAM services remain missing |
-| Guest memory / image loader | Bounded big-endian memory view, PE/XEX loaders, section protections, 4 GiB guest address space, guest heaps and virtual-memory allocation/query/protection implemented; independent per-thread KTHREAD/PCR/TLS/stack contexts, context cleanup/reuse, a host thread lifecycle primitive, and a typed shared event/thread-completion handle table are implemented; NtWaitForSingleObjectEx/NtClose can operate on shared thread objects, but ExCreateThread/NtResumeThread integration, PPC worker execution, full scheduling and MMIO remain future work |
+| Kernel/XAM HLE | Exact XEX import inventory, 242 function thunks and 11 variable exports; 70 registered boot HLE handlers plus virtual-memory, file-system and video-query services. Most of the 242 imports still need title-verified implementations; existing handlers remain compatibility subsets, not a complete Xbox kernel/XAM |
+| Guest memory / image loader | Bounded big-endian memory, PE/XEX loading, 4 GiB guest address space, section protections, heaps and virtual-memory allocation/query/protection; KTHREAD/PCR/TLS/stack contexts; typed event/thread handles; ExCreateThread/NtResumeThread worker execution; VFS and scalar Xenos/XMA MMIO interception. Full scheduler semantics, APCs, sparse mappings and device behavior remain incomplete |
 | PPC indirect calls | Generated function map, diagnostic unresolved-target trap, caller-context invocation, function IAT patching and exact library/ordinal trampoline dispatch implemented |
-| Xenos graphics / EDRAM | Runtime implementation still required |
-| XMA audio | Runtime implementation still required |
-| Controller/input | Runtime implementation still required |
+| Xenos graphics / EDRAM | Scalar MMIO register interception and bounded access tracing exist; command processor, EDRAM, GPU side effects, shader translation and host renderer are not implemented |
+| XMA audio | XMA MMIO aperture is intercepted; XMA decoding, stream scheduling and host audio output are not implemented |
+| Controller/input | Runtime implementation still required; XAM input imports are not yet backed by a host controller layer |
 | Playability | **Not playable yet** |
 
 The generated translation directory contains 376 numbered C++ files (about 255 MiB of source), plus the function map and PPC context headers. Translation coverage is not the same as a complete or playable PC port.
@@ -50,7 +50,7 @@ These are image-specific observations, not generic Xbox 360 addresses.
 
 ## Build the generated game-code library
 
-The CMake targets build the generated PPC translation units as **TooHumanRecompLib** and, when runtime support is enabled, **TooHumanPpcRuntime**, which installs the generated function map, parses XEX imports and wires the title memory/dispatch setup through `initialize_title_runtime`. They are libraries, not a game executable. The runtime can invoke caller-selected translated functions and route XEX imports, but the title's real startup state, most kernel/XAM handlers, graphics, audio and input are still missing.
+The CMake targets build the generated PPC translation units as **TooHumanRecompLib** and, when runtime support is enabled, **TooHumanPpcRuntime**, which installs the generated function map, parses XEX imports and wires title memory, boot HLE and guest-thread setup through `initialize_title_runtime`. They are libraries, not a finished game executable. The runtime now has a substantial startup compatibility layer, guest worker execution, a virtual filesystem and scalar Xenos/XMA MMIO interception, but the full kernel/XAM surface, GPU command processor/renderer, XMA audio, controller input and host application shell are still missing.
 
 ### Requirements
 
