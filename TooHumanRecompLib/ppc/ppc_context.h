@@ -34,20 +34,113 @@
 
 #define PPC_FUNC_PROLOGUE() __builtin_assume(((size_t)base & 0x1F) == 0)
 
+#if defined(TOOHUMAN_ENABLE_PPC_MMIO)
+// Scalar guest memory accessors route the Xenos/XMA register apertures through
+// the runtime bus. Ordinary guest RAM retains the original direct volatile
+// access path; only effective addresses inside a device window call out.
+namespace toohuman::runtime {
+inline constexpr uint32_t kPpcXenosMmioBase = 0x7FC80000u;
+inline constexpr uint32_t kPpcXmaMmioBase = 0x7FEA0000u;
+inline constexpr uint64_t kPpcMmioWindowSize = 0x10000u;
+
+inline bool is_guest_mmio_address(uint32_t address, uint8_t width) noexcept {
+    if (width == 0) return false;
+    const auto end = static_cast<uint64_t>(address) + width;
+    const auto xenos_end = static_cast<uint64_t>(kPpcXenosMmioBase) +
+                           kPpcMmioWindowSize;
+    const auto xma_end = static_cast<uint64_t>(kPpcXmaMmioBase) +
+                         kPpcMmioWindowSize;
+    return (address >= kPpcXenosMmioBase && end <= xenos_end) ||
+           (address >= kPpcXmaMmioBase && end <= xma_end);
+}
+uint64_t guest_mmio_read(uint32_t address, uint8_t width) noexcept;
+void guest_mmio_write(uint32_t address, uint8_t width, uint64_t value) noexcept;
+} // namespace toohuman::runtime
+
+static inline uint8_t ppc_guest_load_u8(uint8_t* base, uint32_t address) noexcept {
+    if (toohuman::runtime::is_guest_mmio_address(address, 1))
+        return static_cast<uint8_t>(toohuman::runtime::guest_mmio_read(address, 1));
+    return *(volatile uint8_t*)(base + address);
+}
+static inline uint16_t ppc_guest_load_u16(uint8_t* base, uint32_t address) noexcept {
+    if (toohuman::runtime::is_guest_mmio_address(address, 2))
+        return static_cast<uint16_t>(toohuman::runtime::guest_mmio_read(address, 2));
+    return __builtin_bswap16(*(volatile uint16_t*)(base + address));
+}
+static inline uint32_t ppc_guest_load_u32(uint8_t* base, uint32_t address) noexcept {
+    if (toohuman::runtime::is_guest_mmio_address(address, 4))
+        return static_cast<uint32_t>(toohuman::runtime::guest_mmio_read(address, 4));
+    return __builtin_bswap32(*(volatile uint32_t*)(base + address));
+}
+static inline uint64_t ppc_guest_load_u64(uint8_t* base, uint32_t address) noexcept {
+    if (toohuman::runtime::is_guest_mmio_address(address, 8))
+        return toohuman::runtime::guest_mmio_read(address, 8);
+    return __builtin_bswap64(*(volatile uint64_t*)(base + address));
+}
+static inline void ppc_guest_store_u8(uint8_t* base, uint32_t address,
+                                      uint8_t value) noexcept {
+    if (toohuman::runtime::is_guest_mmio_address(address, 1)) {
+        toohuman::runtime::guest_mmio_write(address, 1, value);
+        return;
+    }
+    *(volatile uint8_t*)(base + address) = value;
+}
+static inline void ppc_guest_store_u16(uint8_t* base, uint32_t address,
+                                       uint16_t value) noexcept {
+    if (toohuman::runtime::is_guest_mmio_address(address, 2)) {
+        toohuman::runtime::guest_mmio_write(address, 2, value);
+        return;
+    }
+    *(volatile uint16_t*)(base + address) = __builtin_bswap16(value);
+}
+static inline void ppc_guest_store_u32(uint8_t* base, uint32_t address,
+                                       uint32_t value) noexcept {
+    if (toohuman::runtime::is_guest_mmio_address(address, 4)) {
+        toohuman::runtime::guest_mmio_write(address, 4, value);
+        return;
+    }
+    *(volatile uint32_t*)(base + address) = __builtin_bswap32(value);
+}
+static inline void ppc_guest_store_u64(uint8_t* base, uint32_t address,
+                                       uint64_t value) noexcept {
+    if (toohuman::runtime::is_guest_mmio_address(address, 8)) {
+        toohuman::runtime::guest_mmio_write(address, 8, value);
+        return;
+    }
+    *(volatile uint64_t*)(base + address) = __builtin_bswap64(value);
+}
+#endif
+
 #ifndef PPC_LOAD_U8
+#if defined(TOOHUMAN_ENABLE_PPC_MMIO)
+#define PPC_LOAD_U8(x) ppc_guest_load_u8(base, static_cast<uint32_t>(x))
+#else
 #define PPC_LOAD_U8(x) *(volatile uint8_t*)(base + (x))
+#endif
 #endif
 
 #ifndef PPC_LOAD_U16
+#if defined(TOOHUMAN_ENABLE_PPC_MMIO)
+#define PPC_LOAD_U16(x) ppc_guest_load_u16(base, static_cast<uint32_t>(x))
+#else
 #define PPC_LOAD_U16(x) __builtin_bswap16(*(volatile uint16_t*)(base + (x)))
+#endif
 #endif
 
 #ifndef PPC_LOAD_U32
+#if defined(TOOHUMAN_ENABLE_PPC_MMIO)
+#define PPC_LOAD_U32(x) ppc_guest_load_u32(base, static_cast<uint32_t>(x))
+#else
 #define PPC_LOAD_U32(x) __builtin_bswap32(*(volatile uint32_t*)(base + (x)))
+#endif
 #endif
 
 #ifndef PPC_LOAD_U64
+#if defined(TOOHUMAN_ENABLE_PPC_MMIO)
+#define PPC_LOAD_U64(x) ppc_guest_load_u64(base, static_cast<uint32_t>(x))
+#else
 #define PPC_LOAD_U64(x) __builtin_bswap64(*(volatile uint64_t*)(base + (x)))
+#endif
 #endif
 
 // TODO: Implement.
@@ -71,19 +164,35 @@
 #endif
 
 #ifndef PPC_STORE_U8
+#if defined(TOOHUMAN_ENABLE_PPC_MMIO)
+#define PPC_STORE_U8(x, y) ppc_guest_store_u8(base, static_cast<uint32_t>(x), static_cast<uint8_t>(y))
+#else
 #define PPC_STORE_U8(x, y) *(volatile uint8_t*)(base + (x)) = (y)
+#endif
 #endif
 
 #ifndef PPC_STORE_U16
+#if defined(TOOHUMAN_ENABLE_PPC_MMIO)
+#define PPC_STORE_U16(x, y) ppc_guest_store_u16(base, static_cast<uint32_t>(x), static_cast<uint16_t>(y))
+#else
 #define PPC_STORE_U16(x, y) *(volatile uint16_t*)(base + (x)) = __builtin_bswap16(y)
+#endif
 #endif
 
 #ifndef PPC_STORE_U32
+#if defined(TOOHUMAN_ENABLE_PPC_MMIO)
+#define PPC_STORE_U32(x, y) ppc_guest_store_u32(base, static_cast<uint32_t>(x), static_cast<uint32_t>(y))
+#else
 #define PPC_STORE_U32(x, y) *(volatile uint32_t*)(base + (x)) = __builtin_bswap32(y)
+#endif
 #endif
 
 #ifndef PPC_STORE_U64
+#if defined(TOOHUMAN_ENABLE_PPC_MMIO)
+#define PPC_STORE_U64(x, y) ppc_guest_store_u64(base, static_cast<uint32_t>(x), static_cast<uint64_t>(y))
+#else
 #define PPC_STORE_U64(x, y) *(volatile uint64_t*)(base + (x)) = __builtin_bswap64(y)
+#endif
 #endif
 
 // MMIO Store handling is completely reliant on being preeceded by eieio.
