@@ -151,9 +151,9 @@ int main(int argc, char** argv) {
         // thread. Match the execution scope used by worker threads so
         // ExTerminateThread unwinds this thread rather than returning an
         // ordinary STATUS_UNSUCCESSFUL result.
-        GuestThreadExecutionScope main_thread_scope(std::stop_token{});
+        toohuman::runtime::GuestThreadExecutionScope main_thread_scope(std::stop_token{});
         entry(report.main_thread.context, memory.base());
-    } catch (const GuestThreadExitSignal& exit) {
+    } catch (const toohuman::runtime::GuestThreadExitSignal& exit) {
         std::cout << "Guest main thread terminated with exit code 0x"
                   << std::hex << exit.exit_code() << std::dec << ".\n";
         return 0;
