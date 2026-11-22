@@ -144,6 +144,23 @@ std::shared_ptr<GuestFile> file_from_handle(std::uint32_t handle) {
         process_kernel_objects().lookup(handle));
 }
 
+std::uint64_t host_filetime(const std::filesystem::path& path) {
+    std::error_code error;
+    const auto last_write = std::filesystem::last_write_time(path, error);
+    if (error) return 0;
+    const auto system_time =
+        std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+            last_write - std::filesystem::file_time_type::clock::now() +
+            std::chrono::system_clock::now());
+    const auto unix_100ns =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            system_time.time_since_epoch()).count() / 100;
+    constexpr std::int64_t kWindowsEpochOffset100ns = 116444736000000000ll;
+    const auto guest_time = unix_100ns + kWindowsEpochOffset100ns;
+    return guest_time > 0 ? static_cast<std::uint64_t>(guest_time) : 0u;
+}
+
+
 std::uint32_t open_common(std::uint8_t* base, std::uint32_t out_handle,
                           std::uint32_t access, std::uint32_t attrs,
                           std::uint32_t iosb, std::uint32_t disposition,
@@ -365,25 +382,9 @@ PPC_FUNC(NtQueryInformationFile) {
     const auto allocation = (size + 0xFFFu) & ~0xFFFull;
     switch (cls) {
     case 4: {
-        // The portable VFS exposes host write time only. Use it for the four
-        // FILE_BASIC_INFORMATION timestamps until creation/access/change
-        // timestamps are tracked independently by GuestFile.
-        std::uint64_t filetime = 0;
-        std::error_code time_error;
-        const auto last_write = std::filesystem::last_write_time(file->path(), time_error);
-        if (!time_error) {
-            const auto system_time =
-                std::chrono::time_point_cast<std::chrono::system_clock::duration>(
-                    last_write - std::filesystem::file_time_type::clock::now() +
-                    std::chrono::system_clock::now());
-            const auto unix_100ns =
-                std::chrono::duration_cast<std::chrono::nanoseconds>(
-                    system_time.time_since_epoch()).count() / 100;
-            constexpr std::int64_t kWindowsEpochOffset100ns = 116444736000000000ll;
-            const auto guest_time = unix_100ns + kWindowsEpochOffset100ns;
-            if (guest_time > 0) filetime = static_cast<std::uint64_t>(guest_time);
-        }
-
+        // The portable VFS exposes host write time only. Use it for all four
+        // FILE_BASIC_INFORMATION timestamps until the other times are tracked.
+        const auto filetime = host_filetime(file->path());
         std::memset(at(base, info), 0, 40u);
         wr64(base, info + 0x00u, filetime);
         wr64(base, info + 0x08u, filetime);
@@ -408,12 +409,18 @@ PPC_FUNC(NtQueryInformationFile) {
     case 14:
         wr64(base, info, file->position());
         break;
-    case 34:
+    case 34: {
+        const auto filetime = host_filetime(file->path());
         std::memset(at(base, info), 0, 56u);
+        wr64(base, info + 0x00u, filetime);
+        wr64(base, info + 0x08u, filetime);
+        wr64(base, info + 0x10u, filetime);
+        wr64(base, info + 0x18u, filetime);
         wr64(base, info + 32u, allocation);
         wr64(base, info + 40u, size);
         wr32(base, info + 48u, file->is_directory() ? 0x10u : 0x80u);
         break;
+    }
     }
     set_iosb(base, iosb, kSuccess, required);
     ctx.r3.u32 = kSuccess;
