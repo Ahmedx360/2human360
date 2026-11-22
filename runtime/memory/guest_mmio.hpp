@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
@@ -31,6 +32,8 @@ struct GuestMmioAccess {
 // accesses, but does not claim to emulate Xenos or XMA device side effects.
 class GuestMmioBus final {
 public:
+    using XenosWriteObserver = void (*)(void* context, std::uint32_t address,
+                                        std::uint8_t width, std::uint64_t value) noexcept;
     static constexpr std::size_t kTraceCapacity = 4096;
 
     GuestMmioBus() = default;
@@ -52,6 +55,17 @@ public:
                                      std::uint8_t width) noexcept;
     [[nodiscard]] bool write(std::uint32_t address, std::uint8_t width,
                              std::uint64_t value) noexcept;
+    // PM4 register writes update the same register file but must not recurse
+    // into the primary-ring write-pointer observer.
+    [[nodiscard]] bool write_unobserved(std::uint32_t address,
+                                        std::uint8_t width,
+                                        std::uint64_t value) noexcept;
+
+    // One active title may observe Xenos MMIO writes. Clearing an observer
+    // waits for any callback already in flight to return.
+    [[nodiscard]] bool set_xenos_write_observer(
+        void* context, XenosWriteObserver observer) noexcept;
+    void clear_xenos_write_observer(void* context) noexcept;
 
     [[nodiscard]] std::vector<GuestMmioAccess> trace() const;
     [[nodiscard]] std::uint64_t dropped_trace_entries() const noexcept;
@@ -62,8 +76,14 @@ private:
                                GuestMmioDevice& device,
                                std::uint32_t& offset) const noexcept;
     void record_locked(const GuestMmioAccess& access) noexcept;
+    [[nodiscard]] bool write_impl(std::uint32_t address, std::uint8_t width,
+                                  std::uint64_t value, bool notify) noexcept;
 
     mutable std::mutex mutex_;
+    std::condition_variable observer_idle_;
+    void* observer_context_{};
+    XenosWriteObserver xenos_write_observer_{};
+    std::size_t observer_callbacks_in_flight_{};
     std::array<std::uint8_t, kGuestMmioWindowSize> xenos_{};
     std::array<std::uint8_t, kGuestMmioWindowSize> xma_{};
     std::array<GuestMmioAccess, kTraceCapacity> trace_{};
