@@ -76,7 +76,7 @@ int main() {
     Capture capture;
     const Pm4DispatchCallbacks callbacks{&capture, write_register, type3};
     const auto result = dispatch_pm4_guest_ring(
-        memory, kRingPhysical, 0u, 6u, 2u, callbacks, 4u);
+        memory, kRingPhysical, 2u, 6u, 2u, callbacks, 4u);
     assert(result);
     assert(result.dispatch.packets == 1u);
     assert(result.dispatch.dwords_consumed == 4u);
@@ -91,7 +91,7 @@ int main() {
     store_be32(ring + 7u * 4u, 0xABu);
     store_be32(ring + 0u * 4u, 0xCDu);
     const auto type3_result = dispatch_pm4_guest_ring(
-        memory, kRingPhysical, 0u, 6u, 1u, callbacks, 4u);
+        memory, kRingPhysical, 2u, 6u, 1u, callbacks, 4u);
     assert(type3_result);
     assert(type3_result.dispatch.packets == 1u);
     assert(type3_result.dispatch.read_index == 1u);
@@ -103,27 +103,27 @@ int main() {
     assert(load_be32(memory.base() + kWritebackGuest) == 0x12345678u);
 
     const auto empty = dispatch_pm4_guest_ring(
-        memory, kRingPhysical, 0u, 3u, 3u, callbacks, 1u);
+        memory, kRingPhysical, 2u, 3u, 3u, callbacks, 1u);
     assert(empty);
     assert(empty.dispatch.packets == 0u);
     assert(empty.dispatch.read_index == 3u);
 
     const auto bad_read = dispatch_pm4_guest_ring(
-        memory, kRingPhysical, 0u, 8u, 0u, callbacks, 1u);
+        memory, kRingPhysical, 2u, 8u, 0u, callbacks, 1u);
     assert(bad_read.error == Pm4GuestRingError::InvalidReadPointer);
     const auto bad_write = dispatch_pm4_guest_ring(
-        memory, kRingPhysical, 0u, 0u, 8u, callbacks, 1u);
+        memory, kRingPhysical, 2u, 0u, 8u, callbacks, 1u);
     assert(bad_write.error == Pm4GuestRingError::InvalidWritePointer);
     const auto bad_size = dispatch_pm4_guest_ring(
         memory, kRingPhysical, 27u, 0u, 0u, callbacks, 1u);
     assert(bad_size.error == Pm4GuestRingError::InvalidRingSize);
     const auto bad_base = dispatch_pm4_guest_ring(
-        memory, 0x1FFFFFF8u, 0u, 0u, 1u, callbacks, 1u);
+        memory, 0x1FFFFFF8u, 2u, 0u, 1u, callbacks, 1u);
     assert(bad_base.error == Pm4GuestRingError::InvalidPhysicalRange);
 
     // A valid physical range that has not been committed must fail safely.
     const auto not_mapped = dispatch_pm4_guest_ring(
-        memory, 0x00030000u, 0u, 0u, 1u, callbacks, 1u);
+        memory, 0x00030000u, 2u, 0u, 1u, callbacks, 1u);
     assert(not_mapped.error == Pm4GuestRingError::RingNotReadable);
 
     // The writeback target must be committed and writable.
