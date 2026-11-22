@@ -237,6 +237,77 @@ void test_query_volume_information_file() {
     fs::remove_all(root);
 }
 
+void test_video_display_queries() {
+    constexpr std::uint32_t mode = 0x7000u;
+    constexpr std::uint32_t display = 0x7100u;
+    constexpr std::uint32_t gamma_type = 0x7200u;
+    constexpr std::uint32_t gamma_power = 0x7204u;
+
+    PPCContext context{};
+    context.r3.u32 = mode;
+    boot_hle::VdQueryVideoMode(context, base());
+    assert(context.r3.u32 == mode);
+    assert(be32(mode + 0x00u) == 1280u);
+    assert(be32(mode + 0x04u) == 720u);
+    assert(be32(mode + 0x08u) == 0u);
+    assert(be32(mode + 0x0Cu) == 1u);
+    assert(be32(mode + 0x10u) == 1u);
+    assert(be32(mode + 0x14u) == 0x42700000u); // 60.0f, big-endian.
+    assert(be32(mode + 0x18u) == 1u);          // NTSC.
+    assert(be32(mode + 0x1Cu) == 0x4Au);
+    assert(be32(mode + 0x20u) == 1u);
+    assert(be32(mode + 0x24u) == 0u);
+    assert(be32(mode + 0x28u) == 0u);
+    assert(be32(mode + 0x2Cu) == 0u);
+
+    context = {};
+    boot_hle::VdQueryVideoFlags(context, base());
+    assert(context.r3.u32 == 3u);
+
+    context = {};
+    context.r3.u32 = mode;
+    boot_hle::XGetVideoMode(context, base());
+    assert(context.r3.u32 == 0u); // XAM API returns ERROR_SUCCESS.
+    assert(be32(mode) == 1280u && be32(mode + 4u) == 720u);
+
+    context = {};
+    context.r3.u32 = display;
+    boot_hle::VdGetCurrentDisplayInformation(context, base());
+    assert(context.r3.u32 == display);
+    assert(be16(display + 0x00u) == 1280u);
+    assert(be16(display + 0x02u) == 720u);
+    assert(be32(display + 0x10u) == 1280u);
+    assert(be32(display + 0x14u) == 720u);
+    assert(be32(display + 0x18u) == 1280u);
+    assert(be32(display + 0x1Cu) == 720u);
+    assert(be32(display + 0x20u) == 1u);
+    assert(be32(display + 0x30u) == 1u);
+    assert(be16(display + 0x40u) == 320u);
+    assert(be16(display + 0x42u) == 180u);
+    assert(be16(display + 0x44u) == 320u);
+    assert(be16(display + 0x46u) == 180u);
+    assert(be16(display + 0x48u) == 1280u);
+    assert(be16(display + 0x4Au) == 720u);
+    assert(be32(display + 0x4Cu) == 0x42700000u);
+    assert(be32(display + 0x50u) == 0u);
+    assert(be16(display + 0x56u) == 1280u);
+
+    context = {};
+    context.r3.u32 = gamma_type;
+    context.r4.u32 = gamma_power;
+    boot_hle::VdGetCurrentDisplayGamma(context, base());
+    assert(context.r3.u32 == gamma_type);
+    assert(be32(gamma_type) == 2u); // BT.709.
+    float expected_power = 2.22222233f;
+    std::uint32_t expected_power_bits = 0;
+    std::memcpy(&expected_power_bits, &expected_power, sizeof(expected_power_bits));
+    assert(be32(gamma_power) == expected_power_bits);
+
+    context = {};
+    boot_hle::VdQueryVideoMode(context, base());
+    assert(context.r3.u32 == 0xC0000005u); // Null output pointer.
+}
+
 void test_critical_sections() {
     constexpr std::uint32_t address = 0x8000u;
     PPCContext context{};
@@ -620,6 +691,7 @@ int main() {
     test_executable_module_lookup();
     test_rtl_image_xex_header_field();
     test_query_volume_information_file();
+    test_video_display_queries();
     test_critical_sections();
     test_tls();
     test_events();
