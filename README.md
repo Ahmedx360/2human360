@@ -122,7 +122,7 @@ Build the patched XenonRecomp tools:
 python tools/recompile.py build-tools --generator Ninja
 ~~~
 
-This applies `tools/patches/xenonrecomp-pe-loader.patch` to the pinned submodule only when the patch applies cleanly. Re-running the command is safe. If the submodule contains partial or conflicting edits, the helper stops without resetting or overwriting them.
+The helper uses `clang++` by default (or `clang-cl` on Windows); pass `--compiler` to override it. This applies `tools/patches/xenonrecomp-pe-loader.patch` to the pinned submodule only when the patch applies cleanly. Re-running the command is safe. If the submodule contains partial or conflicting edits, the helper stops without resetting or overwriting them.
 
 Generate jump-table analysis into a separate review file:
 
