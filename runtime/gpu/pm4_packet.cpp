@@ -62,4 +62,87 @@ Pm4DecodeResult decode_pm4_packet(
     return result;
 }
 
+
+Pm4DispatchResult dispatch_pm4_stream(
+    std::span<const std::uint32_t> dwords,
+    const Pm4DispatchCallbacks& callbacks,
+    std::size_t max_packets) noexcept {
+    Pm4DispatchResult result{};
+    std::size_t offset = 0;
+
+    while (offset < dwords.size()) {
+        if (result.packets >= max_packets) {
+            result.error = Pm4DispatchError::PacketLimitReached;
+            break;
+        }
+
+        const auto decoded = decode_pm4_packet(dwords, offset);
+        if (!decoded) {
+            result.error = Pm4DispatchError::PacketDecodeFailed;
+            break;
+        }
+
+        const auto& packet = decoded.packet;
+        const auto payload = dwords.subspan(
+            packet.payload_offset, packet.payload_count);
+        bool accepted = true;
+
+        switch (packet.type) {
+        case Pm4PacketType::Nop:
+        case Pm4PacketType::Type2:
+            break;
+
+        case Pm4PacketType::Type0:
+            if (!callbacks.write_register) {
+                result.error = Pm4DispatchError::MissingRegisterHandler;
+                return result;
+            }
+            for (std::size_t i = 0; i < payload.size(); ++i) {
+                const auto index = packet.write_one_register
+                    ? packet.register_index
+                    : packet.register_index + static_cast<std::uint32_t>(i);
+                if (!callbacks.write_register(callbacks.context, index,
+                                              payload[i])) {
+                    accepted = false;
+                    break;
+                }
+            }
+            break;
+
+        case Pm4PacketType::Type1:
+            if (!callbacks.write_register) {
+                result.error = Pm4DispatchError::MissingRegisterHandler;
+                return result;
+            }
+            accepted = callbacks.write_register(
+                callbacks.context, packet.register_index, payload[0]);
+            if (accepted) {
+                accepted = callbacks.write_register(
+                    callbacks.context, packet.second_register_index, payload[1]);
+            }
+            break;
+
+        case Pm4PacketType::Type3:
+            if (!callbacks.type3) {
+                result.error = Pm4DispatchError::MissingType3Handler;
+                return result;
+            }
+            accepted = callbacks.type3(callbacks.context, packet.opcode,
+                                       packet.predicate, payload);
+            break;
+        }
+
+        if (!accepted) {
+            result.error = Pm4DispatchError::CallbackRejected;
+            break;
+        }
+
+        offset += packet.dword_count;
+        result.dwords_consumed = offset;
+        ++result.packets;
+    }
+
+    return result;
+}
+
 } // namespace toohuman::runtime
