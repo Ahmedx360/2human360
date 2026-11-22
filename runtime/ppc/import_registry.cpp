@@ -520,6 +520,14 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
 
     const auto& binding = import_it->second;
     const auto& import = binding.import;
+    static const bool trace_imports = std::getenv("TH_TRACE_IMPORTS") != nullptr;
+    if (trace_imports) {
+        std::fprintf(stderr, "[import] %s#%u r3=%08X r4=%08X r5=%08X r6=%08X lr=%08X\n",
+                     import.library.c_str(), static_cast<unsigned>(import.ordinal),
+                     static_cast<unsigned>(context.r3.u32), static_cast<unsigned>(context.r4.u32),
+                     static_cast<unsigned>(context.r5.u32), static_cast<unsigned>(context.r6.u32),
+                     static_cast<unsigned>(context.lr));
+    }
     if (binding.handler == nullptr && guest_heap_) {
         if (import.library == "xboxkrnl.exe" && import.ordinal == 0x000B) {
             const auto allocation = guest_heap_->allocate(context.r4.u32, 16);

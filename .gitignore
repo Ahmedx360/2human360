@@ -17,3 +17,4 @@ __pycache__/
 build/
 private/
 build_full.log
+build2.log

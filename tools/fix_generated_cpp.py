@@ -86,6 +86,30 @@ def normalize_cpp_source(source: str) -> str:
             raise ValueError("Cannot locate insertion point for legacy PPC label loc_82814C64")
         source = source.replace(anchor, replacement, 1)
 
+    # Import thunk records were emitted as data-only functions
+    # (`.long 0x010100DC`), so direct `bl` calls to them did nothing. Route
+    # them through the runtime function table, where the import registry
+    # installs its trampoline at the thunk address.
+    def route_thunk(match: re.Match[str]) -> str:
+        word = int(match.group("word"), 16)
+        if (word >> 24) != 0x01 or ((word >> 16) & 0xFF) > 1:
+            return match.group(0)
+        return (
+            f"PPC_FUNC_IMPL(__imp__sub_{match.group('addr')}) {{\n"
+            "\tPPC_FUNC_PROLOGUE();\n"
+            f"\tctx.ctr.u32 = 0x{match.group('addr')};\n"
+            f"\tPPC_CALL_INDIRECT_FUNC(0x{match.group('addr')});\n"
+            "}"
+        )
+
+    source = re.sub(
+        r"PPC_FUNC_IMPL\(__imp__sub_(?P<addr>[0-9A-Fa-f]{8})\) \{\n"
+        r"\tPPC_FUNC_PROLOGUE\(\);\n"
+        r"\t// \.long (?P<word>0x[0-9A-Fa-f]+)\n\}",
+        route_thunk,
+        source,
+    )
+
     return source
 
 
