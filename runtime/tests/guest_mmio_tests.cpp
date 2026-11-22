@@ -76,7 +76,7 @@ int main() {
     assert(bounded.size() == GuestMmioBus::kTraceCapacity);
     assert(bus.dropped_trace_entries() == 8u);
     assert(bounded.front().sequence == 9u);
-    assert(bounded.back().sequence == GuestMmioBus::kTraceCapacity + 7u);
+    assert(bounded.back().sequence == GuestMmioBus::kTraceCapacity + 8u);
     assert(bus.read(reg, 4) == GuestMmioBus::kTraceCapacity + 6u);
 
     return 0;
