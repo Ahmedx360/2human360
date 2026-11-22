@@ -191,10 +191,12 @@ std::optional<GuestDirectoryEntry> GuestFile::next_directory_entry(
         return std::nullopt;
     }
 
-    if (restart || directory_pattern_ != pattern) {
-        directory_pattern_ = pattern;
+    const bool pattern_changed = !pattern.empty() && directory_pattern_ != pattern;
+    if (restart || pattern_changed || !directory_scanned_) {
+        if (!pattern.empty() || restart) directory_pattern_ = pattern;
         directory_cursor_ = 0;
         directory_entries_.clear();
+        directory_scanned_ = true;
 
         std::error_code ec;
         std::filesystem::directory_iterator it(path_, ec);

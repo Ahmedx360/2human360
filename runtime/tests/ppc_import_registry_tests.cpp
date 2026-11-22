@@ -493,7 +493,7 @@ int main() {
     boot_context.r7.u32 = directory_iosb;
     boot_context.r8.u32 = directory_info;
     boot_context.r9.u32 = 0x80u;
-    boot_context.r10.u32 = 0u;
+    boot_context.r10.u32 = directory_name_descriptor;
     call_test_import(0x820011A0u, boot_context);
     assert(boot_context.r3.u32 == 0x80000006u); // STATUS_NO_MORE_FILES.
     assert(guest_be32(directory_iosb) == 0x80000006u);
