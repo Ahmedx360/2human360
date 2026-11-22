@@ -91,10 +91,25 @@ The circular-ring consumer accepts a caller-provided span of guest-logical
 dwords and read/write indices. It handles packets that cross the physical end
 of the ring, validates pointers and incomplete payloads, enforces a per-call
 packet budget, and returns the read index only after complete packet dispatch.
-The ring consumer does not map guest physical addresses, configure the Xenos
-CP ring registers, write the guest read pointer back, execute indirect buffers,
-or provide GPU command semantics. Those responsibilities remain in the future
-device layer; no guest GPU operation is claimed to work yet.
+
+`dispatch_pm4_guest_ring` bridges that decoder to the reserved guest
+address space. It translates an Xbox physical address through the
+`0xA0000000 + (physical & 0x1FFFFFFF)` alias used by the reference runtime,
+checks that the complete ring is committed and readable, converts guest
+big-endian words, and copies only one bounded PM4 packet at a time. Packet
+wraparound is handled without allocating a full-ring snapshot. The companion
+`write_pm4_guest_read_pointer` validates a committed writable physical
+target and stores the progress dword in guest big-endian order. Ring sizing
+uses `1 << (size_log2 + 3)` bytes, matching the reference command processor's
+8-byte sizing unit.
+
+This is a memory/packet bridge, not the Xenos command processor itself. The
+caller must still supply the ring base, size and write pointer; CP register
+programming, asynchronous worker scheduling, MMIO write-pointer notification,
+indirect-buffer execution, interrupts, fences, DMA, and GPU opcode semantics
+are not implemented. Callbacks should avoid partial side effects when they
+reject a packet, because packet-level pointer progress is transactional but
+host callback state is not automatically rolled back.
 
 The PM4 stream dispatcher builds on the packet decoder and routes type-0
 sequential/single-register writes and type-1 two-register writes to an explicit
