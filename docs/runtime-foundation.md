@@ -86,6 +86,17 @@ not execute opcodes, follow indirect buffers, consume a GPU ring buffer, or
 translate shaders. The helper is kept independent of a graphics backend so
 packet framing can be regression-tested before command execution is added.
 
+The PM4 stream dispatcher builds on the packet decoder and routes type-0
+sequential/single-register writes and type-1 two-register writes to an explicit
+register callback. Type-3 packets are forwarded with opcode, predicate and a
+bounded payload span to an explicit opcode callback; type-2 and zero-word NOP
+packets are consumed without side effects. Dispatch has a caller-supplied
+packet budget and stops on malformed/truncated input, missing handlers, or a
+callback rejection. It reports only fully consumed packets. This is still not
+a ring-buffer worker: guest physical-address translation, wraparound, CP
+read/write pointers, interrupts, memory writes/fences and GPU state semantics
+must be implemented before it can process the title's real command stream.
+
 ## Startup import priorities and boot HLE
 
 `tools/startup_import_trace.py` walks the recompiled call graph from `_xstart` in source order and reports where each
