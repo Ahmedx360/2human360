@@ -52,7 +52,7 @@ int main() {
                                     &test_import_handler, &error));
     std::size_t startup_hle_count = 0;
     assert(toohuman::runtime::register_boot_imports(imports, &error, &startup_hle_count));
-    assert(startup_hle_count == 65u);
+    assert(startup_hle_count == 70u);
     const std::vector<toohuman::runtime::XexImport> metadata{
         {"xboxkrnl.exe", 0x74u, 0, 1, 0x82001100u},
         {"xboxkrnl.exe", 0x011Bu, 0, 1, 0x82001104u},
@@ -95,11 +95,16 @@ int main() {
         {"xboxkrnl.exe", 0x0196u, 0, 1, 0x82001198u},
         {"xboxkrnl.exe", 0x00DAu, 0, 1, 0x8200119Cu},
         {"xboxkrnl.exe", 0x00E4u, 0, 1, 0x820011A0u},
-        {"xboxkrnl.exe", 0x00EFu, 0, 1, 0x820011A4u}
+        {"xboxkrnl.exe", 0x00EFu, 0, 1, 0x820011A4u},
+        {"xboxkrnl.exe", 0x01B9u, 0, 1, 0x820011A8u},
+        {"xboxkrnl.exe", 0x01BAu, 0, 1, 0x820011ACu},
+        {"xboxkrnl.exe", 0x01C9u, 0, 1, 0x820011B0u},
+        {"xboxkrnl.exe", 0x01CAu, 0, 1, 0x820011B4u},
+        {"xam.xex",      0x03D1u, 0, 1, 0x820011B8u}
     };
     std::size_t registered = 0;
     assert(imports.install(memory, metadata, &registered, &error));
-    assert(registered == 42u);
+    assert(registered == 47u);
     assert(memory.get_function<PPCFunc*>(0x82001100u) != &test_default_handler);
 
     PPCContext context{};
@@ -125,6 +130,19 @@ int main() {
     volume_dispatch_context.r7.u32 = 1u;           // FileFsVolumeInformation.
     call_test_import(0x820011A4u, volume_dispatch_context);
     assert(volume_dispatch_context.r3.u32 == 0xC0000008u); // Invalid handle.
+
+    PPCContext video_flags_dispatch{};
+    call_test_import(0x820011B0u, video_flags_dispatch);
+    assert(video_flags_dispatch.r3.u32 == 3u);
+    PPCContext xget_video_dispatch{};
+    xget_video_dispatch.r3.u32 = 0x82012040u;
+    call_test_import(0x820011B8u, xget_video_dispatch);
+    assert(xget_video_dispatch.r3.u32 == 0u);
+    const auto* mode_bytes = memory.base() + 0x82012040u;
+    const auto mode_width = (std::uint32_t(mode_bytes[0]) << 24) |
+        (std::uint32_t(mode_bytes[1]) << 16) |
+        (std::uint32_t(mode_bytes[2]) << 8) | mode_bytes[3];
+    assert(mode_width == 1280u);
 
     PPCContext boot_context{};
     call_test_import(0x8200110Cu, boot_context); // KeGetCurrentProcessType
