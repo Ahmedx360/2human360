@@ -111,14 +111,24 @@ pumping, and records the optional read-pointer writeback target.
 fully dispatched packets, and publishes partial progress if a later packet
 fails. A failed writeback is reported separately from a packet-dispatch failure.
 
-This is still not an asynchronous Xenos command processor. The class is not
-yet wired to `VdInitializeRingBuffer`, `VdEnableRingBufferRPtrWriteBack`, or
-the `CP_RB_WPTR` MMIO write path. It does not implement the hardware's
-read-pointer writeback block cadence, indirect-buffer execution, interrupts,
-fences, DMA, or GPU opcode semantics. The writeback block-size value is
-retained for diagnostics; the current synchronous pump writes the read pointer
-after each call that consumes dwords. Callbacks should avoid partial side
-effects when they reject a packet, because packet-level pointer progress is
+The pump is wired to Too Human's `VdInitializeRingBuffer` (kernel ordinal
+`0x01C3`) and `VdEnableRingBufferRPtrWriteBack` (`0x01B6`) imports through
+the per-title `PpcImportRegistry`. A 32-bit scalar Xenos write to
+`CP_RB_WPTR` (register index `0x01C5`, MMIO address `0x7FC80714`) updates
+the command processor's dword write pointer and invokes one bounded pump.
+The MMIO bus calls observers outside its register-file lock; PM4 type-0/type-1
+writes use an unobserved register-file path to avoid recursively triggering
+the command processor. Observer teardown waits for in-flight callbacks.
+
+This is not an asynchronous GPU worker or complete Xenos device. Type-0 and
+type-1 packets currently update the Xenos register-file mirror only. All
+Type-3 opcodes are logged and rejected, so packet progress stops at the first
+unsupported command rather than being reported as successful. The hardware's
+read-pointer writeback block cadence is not modeled; the current synchronous
+pump writes the read pointer after each call that consumes dwords. Indirect
+buffers, interrupts, fences, DMA, register side effects and GPU opcode
+semantics remain unimplemented. Callbacks should avoid partial side effects
+when they reject a packet, because packet-level pointer progress is
 transactional but host callback state is not automatically rolled back.
 
 The PM4 stream dispatcher builds on the packet decoder and routes type-0
@@ -128,10 +138,9 @@ bounded payload span to an explicit opcode callback; type-2 and zero-word NOP
 packets are consumed without side effects. Dispatch has a caller-supplied
 packet budget and stops on malformed/truncated input, missing handlers, or
 a callback rejection. It reports only fully consumed packets. The Xenos
-command-processor pump now owns primary-ring configuration and pointer
-progress, but the guest-memory adapter and pump are not yet connected to
-Too Human's kernel imports or MMIO write-pointer path. It cannot yet process
-the title's real command stream end to end.
+command-processor pump is connected to the title's ring setup imports and
+scalar `CP_RB_WPTR` MMIO write path, but it rejects unsupported Type-3
+operations and cannot process the title's real command stream end to end.
 
 ## Implemented: bounded Xenos primary-ring pump
 
