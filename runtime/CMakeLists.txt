@@ -7,6 +7,7 @@ add_library(TooHumanRuntimeCore STATIC
     memory/guest_mmio.cpp
     gpu/pm4_packet.cpp
     gpu/pm4_guest_ring.cpp
+    gpu/xenos_command_processor.cpp
     memory/guest_heap.cpp
     memory/guest_address_space.cpp
     image/xbox360_pe.cpp
@@ -90,6 +91,16 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME TooHumanPm4GuestRingTests COMMAND TooHumanPm4GuestRingTests)
 
+    add_executable(TooHumanXenosCommandProcessorTests tests/xenos_command_processor_tests.cpp)
+    target_link_libraries(TooHumanXenosCommandProcessorTests PRIVATE TooHumanRuntimeCore)
+    target_compile_features(TooHumanXenosCommandProcessorTests PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(TooHumanXenosCommandProcessorTests PRIVATE /UNDEBUG)
+    else()
+        target_compile_options(TooHumanXenosCommandProcessorTests PRIVATE -UNDEBUG)
+    endif()
+    add_test(NAME TooHumanXenosCommandProcessorTests COMMAND TooHumanXenosCommandProcessorTests)
+
     add_executable(TooHumanPm4RingTests tests/pm4_ring_tests.cpp)
     target_link_libraries(TooHumanPm4RingTests PRIVATE TooHumanRuntimeCore)
     target_compile_features(TooHumanPm4RingTests PRIVATE cxx_std_20)
@@ -130,11 +141,18 @@ if(TH_BUILD_RECOMP_LIB)
         ppc/boot_hle_register.cpp
         ppc/title_runtime.cpp
     )
-    # Generated PPC accessors call the runtime MMIO bus, so the game-code
-    # archive must precede RuntimeCore when a final executable resolves symbols.
-    target_link_libraries(TooHumanPpcRuntime
-        PUBLIC TooHumanRecompLib TooHumanRuntimeCore
-    )
+    # Generated PPC accessors call into RuntimeCore. On ELF linkers, rescan
+    # the two static archives as a group so references emitted by any generated
+    # translation unit cannot be stranded by archive ordering.
+    if(UNIX AND NOT APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+        target_link_libraries(TooHumanPpcRuntime PUBLIC
+            "$<LINK_GROUP:RESCAN,TooHumanRecompLib,TooHumanRuntimeCore>"
+        )
+    else()
+        target_link_libraries(TooHumanPpcRuntime PUBLIC
+            TooHumanRecompLib TooHumanRuntimeCore
+        )
+    endif()
     if(TARGET TooHumanBootHle)
         target_link_libraries(TooHumanPpcRuntime PUBLIC TooHumanBootHle)
     endif()
