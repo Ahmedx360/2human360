@@ -5,6 +5,7 @@ add_library(TooHumanRuntimeCore STATIC
     fs/guest_vfs.cpp
     memory/guest_memory.cpp
     memory/guest_mmio.cpp
+    gpu/pm4_packet.cpp
     memory/guest_heap.cpp
     memory/guest_address_space.cpp
     image/xbox360_pe.cpp
@@ -57,6 +58,16 @@ if(BUILD_TESTING)
         target_compile_options(TooHumanGuestMmioTests PRIVATE -UNDEBUG)
     endif()
     add_test(NAME TooHumanGuestMmioTests COMMAND TooHumanGuestMmioTests)
+
+    add_executable(TooHumanPm4PacketTests tests/pm4_packet_tests.cpp)
+    target_link_libraries(TooHumanPm4PacketTests PRIVATE TooHumanRuntimeCore)
+    target_compile_features(TooHumanPm4PacketTests PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(TooHumanPm4PacketTests PRIVATE /UNDEBUG)
+    else()
+        target_compile_options(TooHumanPm4PacketTests PRIVATE -UNDEBUG)
+    endif()
+    add_test(NAME TooHumanPm4PacketTests COMMAND TooHumanPm4PacketTests)
 endif()
 
 if(BUILD_TESTING)
