@@ -90,6 +90,6 @@ struct Pm4DispatchResult {
 [[nodiscard]] Pm4DispatchResult dispatch_pm4_stream(
     std::span<const std::uint32_t> dwords,
     const Pm4DispatchCallbacks& callbacks,
-    std::size_t max_packets) noexcept;
+    std::size_t max_packets);
 
 } // namespace toohuman::runtime
