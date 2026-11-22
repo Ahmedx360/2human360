@@ -234,7 +234,8 @@ struct PPCFPSCRRegister
 
     inline void setcsr(uint32_t csr) noexcept
     {
-        simde_mm_setcsr(csr);
+        // Keep every SSE exception masked: PowerPC FPSCR writes carry no host mask bits.
+        simde_mm_setcsr(csr | 0x1F80u);
     }
 #elif defined(__aarch64__) || defined(_M_ARM64)
     // RMode
