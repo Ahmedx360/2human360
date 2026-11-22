@@ -74,7 +74,7 @@ int main() {
         assert(!stopped);
         assert(stopped.error == Pm4DispatchError::PacketLimitReached);
         assert(stopped.packets == 1u);
-        assert(stopped.dwords_consumed == 3u);
+        assert(stopped.dwords_consumed == 4u);
     }
 
     {
