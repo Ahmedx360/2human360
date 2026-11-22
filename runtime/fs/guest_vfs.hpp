@@ -10,6 +10,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace toohuman::runtime {
 
@@ -17,6 +18,7 @@ enum class GuestVfsStatus : std::uint32_t {
     Success = 0,
     NoSuchFile = 0xC000000Fu,
     EndOfFile = 0xC0000011u,
+    NoMoreFiles = 0x80000006u,
     ObjectNameNotFound = 0xC0000034u,
     ObjectNameCollision = 0xC0000035u,
     AccessDenied = 0xC0000022u,
@@ -24,6 +26,18 @@ enum class GuestVfsStatus : std::uint32_t {
     NotADirectory = 0xC0000103u,
     FileIsADirectory = 0xC00000BAu,
     InvalidParameter = 0xC000000Du,
+};
+
+struct GuestDirectoryEntry {
+    std::string name;
+    std::uint32_t file_index{};
+    std::uint64_t creation_time{};
+    std::uint64_t last_access_time{};
+    std::uint64_t last_write_time{};
+    std::uint64_t change_time{};
+    std::uint64_t end_of_file{};
+    std::uint64_t allocation_size{};
+    std::uint32_t attributes{};
 };
 
 // A host file or directory opened through the guest VFS. Volume permissions
@@ -57,8 +71,8 @@ public:
     [[nodiscard]] bool resize(std::uint64_t new_size);
     [[nodiscard]] bool flush();
 
-    // Directory enumeration cursor (index into sorted entry names).
-    std::size_t dir_cursor{};
+    [[nodiscard]] std::optional<GuestDirectoryEntry> next_directory_entry(
+        const std::string& pattern, bool restart, GuestVfsStatus& status);
 
 private:
     std::filesystem::path path_;
@@ -69,6 +83,9 @@ private:
     mutable std::mutex mutex_;
     mutable std::fstream stream_;
     std::uint64_t position_{};
+    std::string directory_pattern_;
+    std::vector<GuestDirectoryEntry> directory_entries_;
+    std::size_t directory_cursor_{};
 };
 
 struct GuestVfsOpenResult {
@@ -85,14 +102,10 @@ public:
     GuestVfs(std::filesystem::path game_root, std::filesystem::path save_root);
     [[nodiscard]] static GuestVfs from_environment();
 
-    // root_dir is an already-open directory handle's host path. root_writable
-    // carries the volume's write policy into relative opens.
     [[nodiscard]] std::optional<std::filesystem::path> resolve(
         const std::string& guest_name, const std::filesystem::path* root_dir,
         bool* writable, bool root_writable = true) const;
 
-    // disposition: 0 supersede, 1 open, 2 create, 3 open_if,
-    // 4 overwrite, 5 overwrite_if.
     [[nodiscard]] GuestVfsOpenResult open(
         const std::string& guest_name, const std::filesystem::path* root_dir,
         std::uint32_t disposition, bool want_write, bool directory_only,

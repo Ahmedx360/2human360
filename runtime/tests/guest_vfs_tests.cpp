@@ -121,6 +121,33 @@ int main() {
     assert(vfs.open("game:\\Data\\File.TXT", nullptr, 6, false, false).status ==
            GuestVfsStatus::InvalidParameter);
 
+    // Directory enumeration supports wildcard matching, cursor continuation,
+    // restart, and explicit end-of-directory status.
+    fs::create_directories(tmp / "game" / "Enumerate");
+    { std::ofstream(tmp / "game" / "Enumerate" / "alpha.txt") << "a"; }
+    { std::ofstream(tmp / "game" / "Enumerate" / "beta.bin") << "bb"; }
+    auto enumerate = vfs.open("game:\\Enumerate", nullptr, 1, false, true);
+    assert(enumerate.status == GuestVfsStatus::Success);
+    GuestVfsStatus enum_status = GuestVfsStatus::Unsuccessful;
+    auto first_entry = enumerate.file->next_directory_entry("a*.txt", true, enum_status);
+    assert(first_entry && enum_status == GuestVfsStatus::Success);
+    assert(first_entry->name == "alpha.txt");
+    assert(first_entry->end_of_file == 1u);
+    assert((first_entry->attributes & 0x80u) != 0u);
+    auto no_more = enumerate.file->next_directory_entry("a*.txt", false, enum_status);
+    assert(!no_more && enum_status == GuestVfsStatus::NoSuchFile);
+    auto beta = enumerate.file->next_directory_entry("*", true, enum_status);
+    assert(beta && beta->name == "alpha.txt");
+    beta = enumerate.file->next_directory_entry("", false, enum_status);
+    assert(beta && beta->name == "beta.bin");
+    beta = enumerate.file->next_directory_entry("", false, enum_status);
+    assert(!beta && enum_status == GuestVfsStatus::NoMoreFiles);
+    auto denied_enum = vfs.open("game:\\Enumerate", nullptr, 1, false, true,
+                                true, false);
+    assert(denied_enum.status == GuestVfsStatus::Success);
+    assert(!denied_enum.file->next_directory_entry("*", true, enum_status));
+    assert(enum_status == GuestVfsStatus::AccessDenied);
+
     // Directory open.
     assert(vfs.open("game:\\", nullptr, 1, false, true).file->is_directory());
     fs::remove_all(tmp);

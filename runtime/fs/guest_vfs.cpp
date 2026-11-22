@@ -1,6 +1,8 @@
 #include "fs/guest_vfs.hpp"
 
 #include <algorithm>
+#include <chrono>
+#include <cstdint>
 #include <cctype>
 #include <cstdlib>
 #include <limits>
@@ -59,6 +61,43 @@ std::optional<std::string> find_case_insensitive(
         if (lower(name) == wanted) return name;
     }
     return std::nullopt;
+}
+
+bool wildcard_match_ci(std::string_view pattern, std::string_view name) {
+    std::size_t p = 0, n = 0;
+    std::size_t star = std::string_view::npos;
+    std::size_t retry = 0;
+    const auto equal_ci = [](char a, char b) {
+        return std::tolower(static_cast<unsigned char>(a)) ==
+               std::tolower(static_cast<unsigned char>(b));
+    };
+    while (n < name.size()) {
+        if (p < pattern.size() &&
+            (pattern[p] == '?' || equal_ci(pattern[p], name[n]))) {
+            ++p;
+            ++n;
+        } else if (p < pattern.size() && pattern[p] == '*') {
+            star = p++;
+            retry = n;
+        } else if (star != std::string_view::npos) {
+            p = star + 1;
+            n = ++retry;
+        } else {
+            return false;
+        }
+    }
+    while (p < pattern.size() && pattern[p] == '*') ++p;
+    return p == pattern.size();
+}
+
+std::uint64_t to_filetime(fs::file_time_type value) {
+    const auto system_time = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+        value - fs::file_time_type::clock::now() + std::chrono::system_clock::now());
+    const auto ticks = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        system_time.time_since_epoch()).count() / 100;
+    constexpr std::int64_t kWindowsEpochOffset = 116444736000000000ll;
+    const auto filetime = ticks + kWindowsEpochOffset;
+    return filetime < 0 ? 0u : static_cast<std::uint64_t>(filetime);
 }
 
 } // namespace
@@ -134,6 +173,93 @@ std::size_t GuestFile::write(const void* data, std::size_t length,
     if (!stream_) { stream_.clear(); return 0; }
     position_ = at + length;
     return length;
+}
+
+std::optional<GuestDirectoryEntry> GuestFile::next_directory_entry(
+    const std::string& pattern, bool restart, GuestVfsStatus& status) {
+    std::lock_guard lock(mutex_);
+    if (!directory_) {
+        status = GuestVfsStatus::NotADirectory;
+        return std::nullopt;
+    }
+    if (!readable_) {
+        status = GuestVfsStatus::AccessDenied;
+        return std::nullopt;
+    }
+    if (pattern.find_first_of("/\\:") != std::string::npos) {
+        status = GuestVfsStatus::InvalidParameter;
+        return std::nullopt;
+    }
+
+    if (restart || directory_pattern_ != pattern) {
+        directory_pattern_ = pattern;
+        directory_cursor_ = 0;
+        directory_entries_.clear();
+
+        std::error_code ec;
+        std::filesystem::directory_iterator it(path_, ec);
+        if (ec) {
+            status = GuestVfsStatus::AccessDenied;
+            return std::nullopt;
+        }
+        const std::filesystem::directory_iterator end;
+        for (; it != end; it.increment(ec)) {
+            if (ec) {
+                status = GuestVfsStatus::Unsuccessful;
+                directory_entries_.clear();
+                return std::nullopt;
+            }
+            const auto name = it->path().filename().string();
+            if (!pattern.empty() && !wildcard_match_ci(pattern, name)) continue;
+
+            const auto canonical = canonical_path(it->path());
+            const auto canonical_root = canonical_path(path_);
+            if (!canonical || !canonical_root || !is_within(*canonical_root, *canonical))
+                continue; // Never enumerate a link outside the mounted directory.
+
+            GuestDirectoryEntry entry{};
+            entry.name = name;
+            std::error_code type_error;
+            const bool is_dir = std::filesystem::is_directory(*canonical, type_error);
+            if (type_error) continue;
+            entry.attributes = is_dir ? 0x10u : 0x80u;
+            if (!name.empty() && name.front() == '.') entry.attributes |= 0x02u;
+            if (!is_dir) {
+                std::error_code size_error;
+                const auto bytes = std::filesystem::file_size(*canonical, size_error);
+                if (size_error) continue;
+                entry.end_of_file = static_cast<std::uint64_t>(bytes);
+                entry.allocation_size = entry.end_of_file == 0 ? 0u :
+                    (entry.end_of_file > std::numeric_limits<std::uint64_t>::max() - 0xFFFu
+                        ? entry.end_of_file
+                        : (entry.end_of_file + 0xFFFu) & ~0xFFFull);
+            }
+            std::error_code time_error;
+            const auto write_time = std::filesystem::last_write_time(*canonical, time_error);
+            if (!time_error) {
+                entry.creation_time = to_filetime(write_time);
+                entry.last_access_time = entry.creation_time;
+                entry.last_write_time = entry.creation_time;
+                entry.change_time = entry.creation_time;
+            }
+            directory_entries_.push_back(std::move(entry));
+        }
+
+        std::sort(directory_entries_.begin(), directory_entries_.end(),
+                  [](const GuestDirectoryEntry& a, const GuestDirectoryEntry& b) {
+                      return lower(a.name) < lower(b.name);
+                  });
+        for (std::size_t i = 0; i < directory_entries_.size(); ++i)
+            directory_entries_[i].file_index = static_cast<std::uint32_t>(i);
+    }
+
+    if (directory_cursor_ >= directory_entries_.size()) {
+        status = pattern.empty() ? GuestVfsStatus::NoMoreFiles
+                                 : GuestVfsStatus::NoSuchFile;
+        return std::nullopt;
+    }
+    status = GuestVfsStatus::Success;
+    return directory_entries_[directory_cursor_++];
 }
 
 std::uint64_t GuestFile::position() const {
