@@ -117,7 +117,6 @@ Pm4GuestRingResult dispatch_pm4_guest_ring(
     // touching the occupied portion of the ring and only buffering one packet.
     std::array<std::uint32_t, kMaxPacketDwords> packet_words{};
     const auto ring_dwords = static_cast<std::size_t>(ring_dwords_64);
-    const auto ring_bytes = static_cast<std::size_t>(ring_bytes_64);
 
     while (result.dispatch.read_index != write_index) {
         if (result.dispatch.packets >= max_packets) {
@@ -158,8 +157,6 @@ Pm4GuestRingResult dispatch_pm4_guest_ring(
         result.dispatch.dwords_consumed += packet_dwords;
         ++result.dispatch.packets;
     }
-
-    (void)ring_bytes;
     return result;
 }
 
