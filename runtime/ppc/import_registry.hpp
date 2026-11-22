@@ -72,6 +72,12 @@ public:
     [[nodiscard]] XenosCommandProcessor& xenos_command_processor() noexcept {
         return xenos_command_processor_;
     }
+    [[nodiscard]] bool initialize_xenos_ring(
+        std::uint32_t physical_base, std::uint32_t size_log2,
+        std::string* error = nullptr) noexcept;
+    [[nodiscard]] bool enable_xenos_read_pointer_writeback(
+        std::uint32_t physical_address, std::uint32_t block_size_log2,
+        std::string* error = nullptr) noexcept;
 
     // Guest LDR_DATA_TABLE_ENTRY address backing XexExecutableModuleHandle.
     [[nodiscard]] std::uint32_t executable_module_handle() const noexcept {
@@ -116,6 +122,7 @@ private:
     std::unique_ptr<GuestHeap> virtual_heap_;
     std::unique_ptr<GuestHeap> stack_heap_;
     XenosCommandProcessor xenos_command_processor_;
+    mutable std::mutex xenos_command_processor_mutex_;
     GuestAddressSpace* memory_{};
     std::unordered_map<std::uint32_t, VirtualMemoryRegion> virtual_memory_regions_;
     mutable std::mutex virtual_memory_regions_mutex_;
