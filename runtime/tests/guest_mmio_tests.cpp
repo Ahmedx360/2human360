@@ -57,10 +57,12 @@ int main() {
     assert(trace.front().address == reg);
     assert(trace.front().value == 0u);
     assert(!trace.front().write);
-    assert(trace.back().address == xma_reg);
-    assert(trace.back().value == 0xCAFEBABEu);
-    assert(trace.back().write);
-    assert(trace.back().device == GuestMmioDevice::Xma);
+    assert(trace[12].address == xma_reg);
+    assert(trace[12].value == 0xCAFEBABEu);
+    assert(trace[12].write);
+    assert(trace[12].device == GuestMmioDevice::Xma);
+    assert(trace[13].address == xma_reg);
+    assert(!trace[13].write);
 
     bus.reset();
     assert(bus.trace().empty());
