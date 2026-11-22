@@ -505,7 +505,11 @@ PPC_FUNC(XexGetModuleHandle) {
 PPC_FUNC(RtlImageXexHeaderField) {
     const auto header = ctx.r3.u32;
     const auto requested_key = ctx.r4.u32;
-    if (header == 0) {
+    // The XEX header is guest-provided data. Validate the fixed header before
+    // reading SizeOfHeaders/Count, then validate the complete optional-header
+    // table before walking its entries.
+    if (header == 0 ||
+        !guest_range_valid(base, header, 0x18u, GuestMemoryAccess::Read)) {
         ctx.r3.u32 = 0;
         return;
     }
@@ -513,7 +517,8 @@ PPC_FUNC(RtlImageXexHeaderField) {
     const auto header_size = get_be32(at(base, header + 8));
     const auto optional_count = get_be32(at(base, header + 0x14));
     if (header_size < 0x18u || header_size > 0x100000u ||
-        optional_count > (header_size - 0x18u) / 8u) {
+        optional_count > (header_size - 0x18u) / 8u ||
+        !guest_range_valid(base, header, header_size, GuestMemoryAccess::Read)) {
         ctx.r3.u32 = 0;
         return;
     }
