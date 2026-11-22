@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -346,6 +347,7 @@ PPC_FUNC(NtQueryInformationFile) {
 
     std::uint32_t required = 0;
     switch (cls) {
+    case 4: required = 40u; break;  // FileBasicInformation
     case 5: required = 24u; break;  // FileStandardInformation
     case 14: required = 8u; break;  // FilePositionInformation
     case 34: required = 56u; break; // FileNetworkOpenInformation
@@ -362,6 +364,39 @@ PPC_FUNC(NtQueryInformationFile) {
     const auto size = file->size();
     const auto allocation = (size + 0xFFFu) & ~0xFFFull;
     switch (cls) {
+    case 4: {
+        // The portable VFS exposes host write time only. Use it for the four
+        // FILE_BASIC_INFORMATION timestamps until creation/access/change
+        // timestamps are tracked independently by GuestFile.
+        std::uint64_t filetime = 0;
+        std::error_code time_error;
+        const auto last_write = std::filesystem::last_write_time(file->path(), time_error);
+        if (!time_error) {
+            const auto system_time =
+                std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+                    last_write - std::filesystem::file_time_type::clock::now() +
+                    std::chrono::system_clock::now());
+            const auto unix_100ns =
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    system_time.time_since_epoch()).count() / 100;
+            constexpr std::int64_t kWindowsEpochOffset100ns = 116444736000000000ll;
+            const auto guest_time = unix_100ns + kWindowsEpochOffset100ns;
+            if (guest_time > 0) filetime = static_cast<std::uint64_t>(guest_time);
+        }
+
+        std::memset(at(base, info), 0, 40u);
+        wr64(base, info + 0x00u, filetime);
+        wr64(base, info + 0x08u, filetime);
+        wr64(base, info + 0x10u, filetime);
+        wr64(base, info + 0x18u, filetime);
+
+        const auto filename = file->path().filename().string();
+        std::uint32_t attributes = file->is_directory() ? 0x10u : 0u;
+        if (!filename.empty() && filename.front() == '.') attributes |= 0x02u;
+        if (attributes == 0) attributes = 0x80u; // FILE_ATTRIBUTE_NORMAL.
+        wr32(base, info + 0x20u, attributes);
+        break;
+    }
     case 5:
         std::memset(at(base, info), 0, 24u);
         wr64(base, info, allocation);

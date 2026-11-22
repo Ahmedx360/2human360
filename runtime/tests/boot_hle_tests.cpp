@@ -175,6 +175,20 @@ void test_query_volume_information_file() {
     assert(be32(information + 16u) == 8u);
     assert(be32(information + 20u) == 512u);
 
+    // FileBasicInformation (class 4) returns big-endian times and attributes.
+    constexpr std::uint32_t basic_information = 0x7A00u;
+    context = {};
+    context.r3.u32 = *handle;
+    context.r4.u32 = iosb;
+    context.r5.u32 = basic_information;
+    context.r6.u32 = 40u;
+    context.r7.u32 = 4u;
+    boot_hle::NtQueryInformationFile(context, base());
+    assert(context.r3.u32 == 0u);
+    assert(be32(iosb) == 0u);
+    assert(be32(iosb + 4u) == 40u);
+    assert(be32(basic_information + 0x20u) == 0x80u); // FILE_ATTRIBUTE_NORMAL.
+
     context = {};
     context.r3.u32 = *handle;
     context.r4.u32 = iosb;
