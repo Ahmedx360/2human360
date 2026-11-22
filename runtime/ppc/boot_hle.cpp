@@ -457,6 +457,36 @@ PPC_FUNC(VdGetCurrentDisplayGamma) {
     if (power_output != 0) put_be_float(at(base, power_output), 2.22222233f);
 }
 
+// xboxkrnl #0x1C3. Configure the primary Xenos PM4 ring buffer.
+PPC_FUNC(VdInitializeRingBuffer) {
+    auto* registry = PpcImportRegistry::active();
+    if (!registry) {
+        std::fprintf(stderr, "[TooHuman][Xenos] VdInitializeRingBuffer before import registry activation\\n");
+        return;
+    }
+    std::string error;
+    if (!registry->xenos_command_processor().initialize_ring(
+            ctx.r3.u32, ctx.r4.u32, &error)) {
+        std::fprintf(stderr, "[TooHuman][Xenos] VdInitializeRingBuffer failed: %s\\n",
+                     error.c_str());
+    }
+}
+
+// xboxkrnl #0x1B6. Configure primary-ring read-pointer writeback.
+PPC_FUNC(VdEnableRingBufferRPtrWriteBack) {
+    auto* registry = PpcImportRegistry::active();
+    if (!registry) {
+        std::fprintf(stderr, "[TooHuman][Xenos] VdEnableRingBufferRPtrWriteBack before import registry activation\\n");
+        return;
+    }
+    std::string error;
+    if (!registry->xenos_command_processor().enable_read_pointer_writeback(
+            ctx.r3.u32, ctx.r4.u32, &error)) {
+        std::fprintf(stderr, "[TooHuman][Xenos] VdEnableRingBufferRPtrWriteBack failed: %s\\n",
+                     error.c_str());
+    }
+}
+
 // xboxkrnl #0x12C. RtlInitAnsiString(ANSI_STRING* dest /*r3*/, const char* src /*r4*/).
 // ANSI_STRING (big-endian): u16 Length, u16 MaximumLength, u32 Buffer. The source is NOT copied.
 // xboxkrnl #0x10. Covers the common stable XConfig settings reached during
