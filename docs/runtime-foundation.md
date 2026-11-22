@@ -134,6 +134,29 @@ cooperate with its stop token. It does not initialize guest context, execute PPC
 KTHREAD state on transitions, implement suspend beyond the initial gate, or register any kernel import.
 TooHumanGuestThreadManagerTests exercises suspend/resume, timeout/completion, exit codes, invalid handles, deferred cleanup and closing a live handle without cancelling it.
 
+## Implemented: guest virtual filesystem and directory enumeration
+
+The host-backed `GuestVfs` maps the title's game volume read-only and save/cache
+volumes beneath a configurable save root. It normalizes Xbox device paths,
+performs case-insensitive component lookup, rejects traversal and symlink
+escapes, and enforces read/write permissions inherited from directory handles.
+`GuestFile` supports synchronous reads, writes, seeks, resize, flush, file
+metadata queries, and stateful directory enumeration. Directory enumeration
+sorts entries deterministically, supports case-insensitive `*`/`?` matching,
+retains its search expression and cursor across calls, and reports
+`STATUS_NO_SUCH_FILE` separately from `STATUS_NO_MORE_FILES`.
+
+The Xbox 360 `NtQueryDirectoryFile` export uses this title's compact ABI:
+`r3` is the directory handle, `r7` the I/O status block, `r8` the output
+buffer, `r9` its byte length, `r10` the optional 8-byte `ANSI_STRING`
+search descriptor, and the ninth `RestartScan` argument is at `r1 + 0x54`.
+It emits a single `FILE_DIRECTORY_INFORMATION` record per synchronous call.
+The record's `EndOfFile` and `AllocationSize` fields are 64-bit big-endian
+values; `IO_STATUS_BLOCK.Information` reports the number of bytes actually
+written (the 0x40-byte header plus the filename). Optional event handles are
+signaled on completion. APC callbacks, asynchronous I/O completion, other
+directory-information classes, and multi-record batching are not implemented.
+
 ## Next implementation sequence
 
 1. Add explicit MMIO ranges and aliases without exposing them as ordinary RAM.

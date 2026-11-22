@@ -86,6 +86,7 @@ private:
     std::string directory_pattern_;
     std::vector<GuestDirectoryEntry> directory_entries_;
     std::size_t directory_cursor_{};
+    bool directory_scanned_{};
 };
 
 struct GuestVfsOpenResult {

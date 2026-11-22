@@ -1,6 +1,7 @@
 #include "memory/guest_address_space.hpp"
 #include "ppc/import_registry.hpp"
 #include "ppc/boot_hle.hpp"
+#include "fs/guest_vfs.hpp"
 #include "ppc/guest_thread_manager.hpp"
 #include <ppc_config.h>
 
@@ -9,6 +10,8 @@
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -49,7 +52,7 @@ int main() {
                                     &test_import_handler, &error));
     std::size_t startup_hle_count = 0;
     assert(toohuman::runtime::register_boot_imports(imports, &error, &startup_hle_count));
-    assert(startup_hle_count == 63u);
+    assert(startup_hle_count == 64u);
     const std::vector<toohuman::runtime::XexImport> metadata{
         {"xboxkrnl.exe", 0x74u, 0, 1, 0x82001100u},
         {"xboxkrnl.exe", 0x011Bu, 0, 1, 0x82001104u},
@@ -90,11 +93,12 @@ int main() {
         {"xboxkrnl.exe", 0x0092u, 0, 1, 0x82001190u},
         {"xboxkrnl.exe", 0x00F5u, 0, 1, 0x82001194u},
         {"xboxkrnl.exe", 0x0196u, 0, 1, 0x82001198u},
-        {"xboxkrnl.exe", 0x00DAu, 0, 1, 0x8200119Cu}
+        {"xboxkrnl.exe", 0x00DAu, 0, 1, 0x8200119Cu},
+        {"xboxkrnl.exe", 0x00E4u, 0, 1, 0x820011A0u}
     };
     std::size_t registered = 0;
     assert(imports.install(memory, metadata, &registered, &error));
-    assert(registered == 40u);
+    assert(registered == 41u);
     assert(memory.get_function<PPCFunc*>(0x82001100u) != &test_default_handler);
 
     PPCContext context{};
@@ -140,6 +144,12 @@ int main() {
         const auto* p = memory.base() + address;
         return (std::uint32_t(p[0]) << 24) | (std::uint32_t(p[1]) << 16) |
                (std::uint32_t(p[2]) << 8) | std::uint32_t(p[3]);
+    };
+    auto guest_be64 = [&](std::uint32_t address) {
+        const auto* p = memory.base() + address;
+        std::uint64_t value = 0;
+        for (unsigned i = 0; i < 8; ++i) value = (value << 8) | p[i];
+        return value;
     };
     assert(guest_be32(critical_section + 0x10) == 0xFFFFFFFFu);
     constexpr std::uint32_t critical_section_pcr = 0x82015200u;
@@ -438,6 +448,79 @@ int main() {
     toohuman::runtime::set_executable_module_handle(0);
 
     toohuman::runtime::set_executable_module_handle(0);
+
+    // NtQueryDirectoryFile emits the 0x40-byte FILE_DIRECTORY_INFORMATION
+    // header and keeps a cursor on the directory object between calls.
+    const auto directory_test_root =
+        std::filesystem::temp_directory_path() / "toohuman_nt_query_directory_test";
+    std::filesystem::remove_all(directory_test_root);
+    std::filesystem::create_directories(directory_test_root);
+    { std::ofstream(directory_test_root / "alpha.txt", std::ios::binary) << "abc"; }
+    { std::ofstream(directory_test_root / "beta.bin", std::ios::binary) << "xy"; }
+    auto directory_object = std::make_shared<toohuman::runtime::GuestFile>(
+        directory_test_root, true, true, false, true);
+    const auto directory_handle =
+        toohuman::runtime::process_kernel_objects().insert(directory_object);
+    assert(directory_handle);
+
+    constexpr std::uint32_t directory_name_descriptor = 0x82016200u;
+    constexpr std::uint32_t directory_pattern_buffer = 0x82016220u;
+    constexpr std::uint32_t directory_iosb = 0x82016240u;
+    constexpr std::uint32_t directory_info = 0x82016260u;
+    constexpr std::uint32_t directory_restart = 0x82016300u;
+    const std::string directory_pattern = "a*.txt";
+    write_guest_be32(directory_name_descriptor,
+        (static_cast<std::uint32_t>(directory_pattern.size()) << 16) |
+         static_cast<std::uint32_t>(directory_pattern.size()));
+    write_guest_be32(directory_name_descriptor + 4u, directory_pattern_buffer);
+    std::memcpy(memory.base() + directory_pattern_buffer,
+                directory_pattern.data(), directory_pattern.size());
+    write_guest_be32(directory_restart, 1u);
+
+    boot_context = {};
+    boot_context.r1.u32 = directory_restart - 0x54u;
+    boot_context.r3.u32 = *directory_handle;
+    boot_context.r7.u32 = directory_iosb;
+    boot_context.r8.u32 = directory_info;
+    boot_context.r9.u32 = 0x80u;
+    boot_context.r10.u32 = directory_name_descriptor;
+    call_test_import(0x820011A0u, boot_context); // NtQueryDirectoryFile.
+    assert(boot_context.r3.u32 == 0u);
+    assert(guest_be32(directory_iosb) == 0u);
+    assert(guest_be32(directory_info + 4u) == 0u);
+    // EndOfFile and AllocationSize are 64-bit big-endian LARGE_INTEGERs.
+    assert(guest_be64(directory_info + 0x28u) == 3u);
+    assert(guest_be64(directory_info + 0x30u) == 0x1000u);
+    assert(guest_be32(directory_info + 0x3Cu) == 9u);
+    assert(guest_be32(directory_iosb + 4u) == 0x40u + 9u);
+    assert(std::memcmp(memory.base() + directory_info + 0x40u, "alpha.txt", 9u) == 0);
+
+    write_guest_be32(directory_restart, 0u);
+    boot_context = {};
+    boot_context.r1.u32 = directory_restart - 0x54u;
+    boot_context.r3.u32 = *directory_handle;
+    boot_context.r7.u32 = directory_iosb;
+    boot_context.r8.u32 = directory_info;
+    boot_context.r9.u32 = 0x80u;
+    boot_context.r10.u32 = directory_name_descriptor;
+    call_test_import(0x820011A0u, boot_context);
+    assert(boot_context.r3.u32 == 0x80000006u); // STATUS_NO_MORE_FILES.
+    assert(guest_be32(directory_iosb) == 0x80000006u);
+
+    // Invalid output memory is rejected before advancing the directory cursor.
+    write_guest_be32(directory_restart, 1u);
+    boot_context = {};
+    boot_context.r1.u32 = directory_restart - 0x54u;
+    boot_context.r3.u32 = *directory_handle;
+    boot_context.r7.u32 = directory_iosb;
+    boot_context.r8.u32 = 0x60000000u;
+    boot_context.r9.u32 = 0x80u;
+    call_test_import(0x820011A0u, boot_context);
+    assert(boot_context.r3.u32 == 0xC0000005u);
+
+    assert(toohuman::runtime::process_kernel_objects().close(*directory_handle));
+    std::filesystem::remove_all(directory_test_root);
+
 
     // Event create/set/clear/wait/close lifecycle, including manual vs auto reset.
     constexpr std::uint32_t handle_out = 0x82013000u;
