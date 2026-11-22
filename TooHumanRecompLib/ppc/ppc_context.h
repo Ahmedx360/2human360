@@ -143,10 +143,9 @@ static inline void ppc_guest_store_u64(uint8_t* base, uint32_t address,
 #endif
 #endif
 
-// TODO: Implement.
-// These are currently unused. However, MMIO loads could possibly be handled statically with some profiling and a fallback.
-// The fallback would be a runtime exception handler which will intercept reads from MMIO regions 
-// and log the PC for compiling to static code later.
+// MMIO loads use the same address-range interception as ordinary scalar loads.
+// The current bus covers scalar register accesses; vector/atomic operations still
+// need separate decoding/interception before they can safely target device windows.
 #ifndef PPC_MM_LOAD_U8
 #define PPC_MM_LOAD_U8(x)  PPC_LOAD_U8 (x)
 #endif
@@ -195,8 +194,9 @@ static inline void ppc_guest_store_u64(uint8_t* base, uint32_t address,
 #endif
 #endif
 
-// MMIO Store handling is completely reliant on being preeceded by eieio.
-// TODO: Verify if that's always the case.
+// XenonRecomp marks stores following eieio with PPC_MM_STORE, but address
+// interception is also applied to ordinary scalar stores so correctness does not
+// depend on that heuristic.
 #ifndef PPC_MM_STORE_U8
 #define PPC_MM_STORE_U8(x, y)   PPC_STORE_U8 (x, y)
 #endif
