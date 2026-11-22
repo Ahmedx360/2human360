@@ -61,6 +61,18 @@ int main() {
     assert(child && !child_volume_writable);
     assert(vfs.open("new.bin", &game_dir.file->path(), 2, true, false,
                     game_dir.file->volume_writable()).status == GuestVfsStatus::AccessDenied);
+    // A read-only directory handle cannot grant create rights on a writable mount.
+    auto save_dir_read = vfs.open("cache:\\save", nullptr, 1, false, true);
+    assert(save_dir_read.status == GuestVfsStatus::Success);
+    assert(!save_dir_read.file->can_write());
+    assert(vfs.open("relative.bin", &save_dir_read.file->path(), 2, true, false,
+                    save_dir_read.file->can_write()).status == GuestVfsStatus::AccessDenied);
+    auto save_dir_write = vfs.open("cache:\\save", nullptr, 1, true, true);
+    assert(save_dir_write.status == GuestVfsStatus::Success);
+    assert(save_dir_write.file->can_write());
+    auto relative_created = vfs.open("relative.bin", &save_dir_write.file->path(),
+                                     2, true, false, save_dir_write.file->can_write());
+    assert(relative_created.status == GuestVfsStatus::Success);
 
     // Existing symlinks must not escape the configured root.
     fs::create_directories(tmp / "outside");

@@ -148,7 +148,7 @@ std::uint32_t open_common(std::uint8_t* base, std::uint32_t out_handle,
         }
         root = directory->path();
         root_ptr = &root;
-        root_writable = directory->volume_writable();
+        root_writable = directory->can_write();
     }
 
     constexpr std::uint32_t kGenericRead = 0x80000000u;
@@ -238,7 +238,11 @@ PPC_FUNC(NtReadFile) {
     const auto buffer = ctx.r8.u32;
     const auto length = ctx.r9.u32;
     const auto offset_ptr = ctx.r10.u32;
-    if (!valid_iosb(base, iosb) ||
+    const auto event = ctx.r4.u32 == 0 ? std::shared_ptr<GuestEventObject>{}
+        : std::dynamic_pointer_cast<GuestEventObject>(
+              process_kernel_objects().lookup(ctx.r4.u32));
+    if ((ctx.r4.u32 != 0 && !event) ||
+        !valid_iosb(base, iosb) ||
         (length != 0 && !guest_range(base, buffer, length, GuestMemoryAccess::Write)) ||
         (offset_ptr != 0 && !guest_range(base, offset_ptr, 8u, GuestMemoryAccess::Read))) {
         ctx.r3.u32 = kAccessViolation;
@@ -258,15 +262,7 @@ PPC_FUNC(NtReadFile) {
         set_iosb(base, iosb, kSuccess, static_cast<std::uint32_t>(got));
         ctx.r3.u32 = kSuccess;
     }
-    if (ctx.r4.u32 != 0) {
-        const auto event = std::dynamic_pointer_cast<GuestEventObject>(
-            process_kernel_objects().lookup(ctx.r4.u32));
-        if (!event) {
-            ctx.r3.u32 = kInvalidHandle;
-            return;
-        }
-        (void)event->set();
-    }
+    if (event) (void)event->set();
 }
 
 // xboxkrnl #0xFF. NtWriteFile(h, event, apc, apcctx, iosb, buf, len, offset).
@@ -280,7 +276,11 @@ PPC_FUNC(NtWriteFile) {
     const auto buffer = ctx.r8.u32;
     const auto length = ctx.r9.u32;
     const auto offset_ptr = ctx.r10.u32;
-    if (!valid_iosb(base, iosb) ||
+    const auto event = ctx.r4.u32 == 0 ? std::shared_ptr<GuestEventObject>{}
+        : std::dynamic_pointer_cast<GuestEventObject>(
+              process_kernel_objects().lookup(ctx.r4.u32));
+    if ((ctx.r4.u32 != 0 && !event) ||
+        !valid_iosb(base, iosb) ||
         (length != 0 && !guest_range(base, buffer, length, GuestMemoryAccess::Read)) ||
         (offset_ptr != 0 && !guest_range(base, offset_ptr, 8u, GuestMemoryAccess::Read))) {
         ctx.r3.u32 = kAccessViolation;
@@ -300,7 +300,7 @@ PPC_FUNC(NtWriteFile) {
     }
     set_iosb(base, iosb, kSuccess, static_cast<std::uint32_t>(wrote));
     ctx.r3.u32 = kSuccess;
-    signal_optional_event(ctx.r4.u32);
+    if (event) (void)event->set();
 }
 
 // xboxkrnl #0xE8. NtQueryInformationFile(h, iosb, info, len, class).

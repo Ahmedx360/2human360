@@ -304,7 +304,7 @@ GuestVfsOpenResult GuestVfs::open(
             return result;
         }
         result.file = std::make_shared<GuestFile>(
-            *host, true, true, false, volume_writable);
+            *host, true, want_read, want_write, volume_writable);
         result.information = 1u;
         return result;
     }
@@ -320,7 +320,7 @@ GuestVfsOpenResult GuestVfs::open(
             return result;
         }
         result.file = std::make_shared<GuestFile>(
-            *host, true, true, false, volume_writable);
+            *host, true, want_read, want_write, volume_writable);
         result.information = 2u;
         return result;
     }
