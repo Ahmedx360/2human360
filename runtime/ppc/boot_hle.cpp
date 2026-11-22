@@ -935,6 +935,29 @@ PPC_FUNC(ObReferenceObjectByHandle) {
     ctx.r3.u32 = kStatusSuccess;
 }
 
+// xboxkrnl #0x97. KeSetAffinityThread(PKTHREAD, KAFFINITY, PKAFFINITY old /*r5, optional*/).
+// Host scheduling decides placement; report a six-core affinity as the previous value.
+PPC_FUNC(KeSetAffinityThread) {
+    constexpr std::uint32_t kAllCores = 0x3Fu;
+    if (ctx.r5.u32 != 0) put_be32(at(base, ctx.r5.u32), kAllCores);
+    ctx.r3.u32 = kAllCores;
+}
+
+// xboxkrnl #0x105. ObDereferenceObject(PVOID): kernel objects are owned by the handle table.
+PPC_FUNC(ObDereferenceObject) {
+    ctx.r3.u32 = kStatusSuccess; // reference counts are not tracked yet
+}
+
+// xboxkrnl #0x99. KeSetBasePriorityThread(PKTHREAD, LONG): priority is advisory under the host scheduler.
+PPC_FUNC(KeSetBasePriorityThread) {
+    ctx.r3.u32 = 0; // previous priority
+}
+
+// xboxkrnl #0xC7. MmSetAddressProtect(PVOID, SIZE_T, ULONG): no-op; host pages remain read/write.
+PPC_FUNC(MmSetAddressProtect) {
+    ctx.r3.u32 = 0; // physical-heap pages stay RW on the host
+}
+
 PPC_FUNC(NtClose) {
     ctx.r3.u32 = process_kernel_objects().close(ctx.r3.u32)
         ? kStatusSuccess : kStatusInvalidHandle;

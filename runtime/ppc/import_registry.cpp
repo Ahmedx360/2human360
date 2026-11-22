@@ -536,6 +536,15 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
             context.r3.u32 = allocation.value_or(0);
             return;
         }
+        if (import.library == "xboxkrnl.exe" && import.ordinal == 0x00BA) {
+            // MmAllocatePhysicalMemoryEx(flags, size, protect, min, max, alignment).
+            const auto alignment = std::max<std::uint32_t>(
+                context.r8.u32 != 0 ? context.r8.u32 : 0x1000u, 0x1000u);
+            const auto allocation = guest_heap_->allocate(context.r4.u32, alignment);
+            if (allocation) std::memset(base + *allocation, 0, context.r4.u32);
+            context.r3.u32 = allocation.value_or(0);
+            return;
+        }
         if (import.library == "xboxkrnl.exe" && import.ordinal == 0x000F) {
             (void)guest_heap_->deallocate(context.r3.u32);
             context.r3.u32 = 0;
