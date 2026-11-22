@@ -467,7 +467,6 @@ PPC_FUNC(NtQueryFullAttributesFile) {
 // xboxkrnl #0xE4. Synchronous FILE_DIRECTORY_INFORMATION query.
 PPC_FUNC(NtQueryDirectoryFile) {
     constexpr std::uint32_t kInfoLengthMismatch = 0xC0000004u;
-    constexpr std::uint32_t kBufferOverflow = 0x80000005u;
     constexpr std::uint32_t kNoSuchFile = 0xC000000Fu;
     constexpr std::uint32_t kNoMoreFiles = 0x80000006u;
 
@@ -531,20 +530,16 @@ PPC_FUNC(NtQueryDirectoryFile) {
     }
 
     GuestVfsStatus vfs_status = GuestVfsStatus::Unsuccessful;
-    const auto entry = file->next_directory_entry(pattern, restart, vfs_status);
+    constexpr std::uint32_t kFileDirectoryInformationHeaderSize = 0x40u;
+    const auto entry = file->next_directory_entry(
+        pattern, restart, vfs_status,
+        length - kFileDirectoryInformationHeaderSize);
     if (!entry) {
         const auto status = static_cast<std::uint32_t>(vfs_status);
         set_iosb(base, iosb, status, 0);
         ctx.r3.u32 = status == static_cast<std::uint32_t>(GuestVfsStatus::NoMoreFiles)
             ? kNoMoreFiles : (status == static_cast<std::uint32_t>(GuestVfsStatus::NoSuchFile)
                 ? kNoSuchFile : status);
-        return;
-    }
-
-    constexpr std::uint32_t kFileDirectoryInformationHeaderSize = 0x40u;
-    if (entry->name.size() > length - kFileDirectoryInformationHeaderSize) {
-        set_iosb(base, iosb, kBufferOverflow, 0);
-        ctx.r3.u32 = kBufferOverflow;
         return;
     }
 
