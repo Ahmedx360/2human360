@@ -556,9 +556,9 @@ PPC_FUNC(NtQueryDirectoryFile) {
     std::memcpy(at(base, output + kFileDirectoryInformationHeaderSize),
                 entry->name.data(), entry->name.size());
 
-    const auto bytes_written = static_cast<std::uint32_t>(
-        kFileDirectoryInformationHeaderSize + entry->name.size());
-    set_iosb(base, iosb, kSuccess, bytes_written);
+    // The Xbox 360 NtQueryDirectoryFile wrapper reports the supplied
+    // Length in IO_STATUS_BLOCK.Information when the query succeeds.
+    set_iosb(base, iosb, kSuccess, length);
     ctx.r3.u32 = kSuccess;
     if (event) (void)event->set();
 }
