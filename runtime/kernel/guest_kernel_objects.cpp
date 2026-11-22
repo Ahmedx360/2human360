@@ -1,19 +1,33 @@
 #include "kernel/guest_kernel_objects.hpp"
+
+#include <utility>
+#include <vector>
+
 namespace toohuman::runtime {
+
 GuestEventObject::GuestEventObject(bool manual_reset, bool initially_signaled)
     : manual_reset_(manual_reset), signaled_(initially_signaled) {}
-GuestKernelObjectType GuestEventObject::type() const noexcept { return GuestKernelObjectType::Event; }
-GuestKernelObjectWaitResult GuestEventObject::wait(std::optional<std::chrono::milliseconds> timeout) {
+
+GuestKernelObjectType GuestEventObject::type() const noexcept {
+    return GuestKernelObjectType::Event;
+}
+
+GuestKernelObjectWaitResult GuestEventObject::wait(
+    std::optional<std::chrono::milliseconds> timeout) {
     std::unique_lock lock(mutex_);
     const auto ready = [&] { return signaled_; };
     if (!signaled_) {
         if (timeout) {
-            if (!condition_.wait_for(lock, *timeout, ready)) return GuestKernelObjectWaitResult::Timeout;
-        } else condition_.wait(lock, ready);
+            if (!condition_.wait_for(lock, *timeout, ready))
+                return GuestKernelObjectWaitResult::Timeout;
+        } else {
+            condition_.wait(lock, ready);
+        }
     }
     if (!manual_reset_) signaled_ = false;
     return GuestKernelObjectWaitResult::Signaled;
 }
+
 bool GuestEventObject::set() {
     bool previous = false;
     {
@@ -25,70 +39,156 @@ bool GuestEventObject::set() {
     else condition_.notify_one();
     return previous;
 }
+
 void GuestEventObject::clear() {
     std::lock_guard lock(mutex_);
     signaled_ = false;
 }
-std::optional<GuestKernelHandle> GuestKernelObjectTable::insert(std::shared_ptr<GuestKernelObject> object) {
+
+GuestKernelObjectTable::~GuestKernelObjectTable() {
+    clear();
+}
+
+bool GuestKernelObjectTable::add_handle_reference_locked(
+    const std::shared_ptr<GuestKernelObject>& object) {
+    auto it = object_handle_states_.find(object.get());
+    if (it != object_handle_states_.end()) {
+        if (it->second.object.expired()) {
+            object_handle_states_.erase(it);
+        } else {
+            if (it->second.closed) return false;
+            ++it->second.open_handles;
+            return true;
+        }
+    }
+    object_handle_states_.emplace(
+        object.get(), ObjectHandleState{object, 1u, false});
+    return true;
+}
+
+std::optional<GuestKernelHandle> GuestKernelObjectTable::insert(
+    std::shared_ptr<GuestKernelObject> object) {
     if (!object) return std::nullopt;
     std::lock_guard lock(mutex_);
-    for (std::uint64_t n = 0; n < 0x3FFF0000ull; ++n) {
+
+    for (std::uint64_t attempts = 0; attempts < 0x3FFF0000ull; ++attempts) {
         const auto handle = next_handle_;
         next_handle_ += 4u;
         if (next_handle_ < 0x1000u) next_handle_ = 0x1000u;
-        if (handle && objects_.emplace(handle, object).second) return handle;
+        if (handle == 0 || objects_.contains(handle)) continue;
+        if (!add_handle_reference_locked(object)) return std::nullopt;
+        objects_.emplace(handle, object);
+        return handle;
     }
     return std::nullopt;
 }
+
 bool GuestKernelObjectTable::insert_at(
     GuestKernelHandle handle, std::shared_ptr<GuestKernelObject> object) {
     if (handle == 0 || !object) return false;
     std::lock_guard lock(mutex_);
-    return objects_.emplace(handle, std::move(object)).second;
+    if (objects_.contains(handle)) return false;
+    if (!add_handle_reference_locked(object)) return false;
+    objects_.emplace(handle, std::move(object));
+    return true;
 }
-std::shared_ptr<GuestKernelObject> GuestKernelObjectTable::lookup(GuestKernelHandle handle) const {
+
+std::shared_ptr<GuestKernelObject> GuestKernelObjectTable::lookup(
+    GuestKernelHandle handle) const {
     std::lock_guard lock(mutex_);
     const auto it = objects_.find(handle);
     return it == objects_.end() ? nullptr : it->second;
 }
+
 bool GuestKernelObjectTable::close(GuestKernelHandle handle) {
     std::shared_ptr<GuestKernelObject> object;
+    bool last_handle = false;
     {
         std::lock_guard lock(mutex_);
         const auto it = objects_.find(handle);
         if (it == objects_.end()) return false;
         object = std::move(it->second);
         objects_.erase(it);
+
+        const auto state = object_handle_states_.find(object.get());
+        if (state != object_handle_states_.end() && state->second.open_handles != 0) {
+            --state->second.open_handles;
+            if (state->second.open_handles == 0 && !state->second.closed) {
+                state->second.closed = true;
+                last_handle = true;
+            }
+        }
     }
-    // Callbacks may lock object state or free guest allocations. Never call
-    // them while holding the process handle-table mutex.
-    object->on_handle_closed();
+    // Notify only when the final table handle is gone. Do not call object
+    // callbacks under the table mutex: they may release guest heaps or re-enter.
+    if (last_handle) object->on_handle_closed();
     return true;
 }
 
-void GuestKernelObjectTable::clear() {
-    decltype(objects_) closing;
+bool GuestKernelObjectTable::close_object(
+    const std::shared_ptr<GuestKernelObject>& object) {
+    if (!object) return false;
+    bool removed = false;
+    bool notify = false;
     {
         std::lock_guard lock(mutex_);
-        closing.swap(objects_);
+        for (auto it = objects_.begin(); it != objects_.end();) {
+            if (it->second.get() == object.get()) {
+                it = objects_.erase(it);
+                removed = true;
+            } else {
+                ++it;
+            }
+        }
+        const auto state = object_handle_states_.find(object.get());
+        if (state != object_handle_states_.end() &&
+            state->second.open_handles != 0) {
+            state->second.open_handles = 0;
+            if (!state->second.closed) {
+                state->second.closed = true;
+                notify = true;
+            }
+        }
     }
-    // As with close(), object callbacks may re-enter the table.
-    for (auto& [handle, object] : closing) {
-        (void)handle;
-        if (object) object->on_handle_closed();
-    }
+    if (notify) object->on_handle_closed();
+    return removed;
 }
+
+void GuestKernelObjectTable::clear() {
+    std::vector<std::shared_ptr<GuestKernelObject>> notify;
+    {
+        std::lock_guard lock(mutex_);
+        notify.reserve(object_handle_states_.size());
+        for (auto& [raw, state] : object_handle_states_) {
+            (void)raw;
+            if (state.open_handles != 0 && !state.closed) {
+                state.open_handles = 0;
+                state.closed = true;
+                if (auto object = state.object.lock())
+                    notify.push_back(std::move(object));
+            }
+        }
+        objects_.clear();
+    }
+    for (const auto& object : notify) object->on_handle_closed();
+}
+
 GuestKernelObjectWaitResult GuestKernelObjectTable::wait(
-    GuestKernelHandle handle, std::optional<std::chrono::milliseconds> timeout) const {
+    GuestKernelHandle handle,
+    std::optional<std::chrono::milliseconds> timeout) const {
     auto object = lookup(handle);
-    return object ? object->wait(timeout) : GuestKernelObjectWaitResult::InvalidHandle;
+    return object ? object->wait(timeout)
+                  : GuestKernelObjectWaitResult::InvalidHandle;
 }
+
 std::size_t GuestKernelObjectTable::size() const {
     std::lock_guard lock(mutex_);
     return objects_.size();
 }
+
 GuestKernelObjectTable& process_kernel_objects() noexcept {
     static GuestKernelObjectTable table;
     return table;
 }
+
 } // namespace toohuman::runtime

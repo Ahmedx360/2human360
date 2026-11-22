@@ -166,6 +166,10 @@ GuestThreadManager::~GuestThreadManager() {
     // The close callback marks each thread handle as no longer externally
     // reachable. Running workers keep their guest context until complete().
     for (const auto handle : handles) object_table_->close(handle);
+    // Duplicated handles may still exist after the manager's original handle
+    // was closed. Runtime shutdown invalidates every alias before cleanup
+    // callbacks can outlive the runtime/heaps they capture.
+    for (const auto& record : workers) object_table_->close_object(record);
     for (const auto& record : workers) {
         record->worker.request_stop();
         record->condition.notify_all();

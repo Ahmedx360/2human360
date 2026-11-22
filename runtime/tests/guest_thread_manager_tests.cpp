@@ -175,6 +175,32 @@ int main() {
     assert(native_manager.close_handle(native_kthread));
     assert(!native_table.lookup(native_kthread));
 
+    // If an NT duplicate survives the manager's original handle, manager
+    // teardown must invalidate that alias before destroying the runtime.
+    GuestKernelObjectTable alias_table;
+    std::atomic<std::uint32_t> alias_cleanup_calls{0};
+    GuestKernelHandle alias_handle = 0;
+    {
+        GuestThreadManager alias_manager(alias_table);
+        const auto primary = alias_manager.create(
+            GuestThreadStartup{},
+            [](GuestThreadStartup&, std::stop_token) { return 17u; },
+            false, &error,
+            [&](GuestThreadStartup&) { ++alias_cleanup_calls; });
+        assert(primary);
+        assert(alias_manager.wait(*primary, 2s) == GuestThreadWaitResult::Signaled);
+        auto shared_object = alias_table.lookup(*primary);
+        assert(shared_object);
+        const auto duplicate = alias_table.insert(shared_object);
+        assert(duplicate);
+        alias_handle = *duplicate;
+        assert(alias_manager.close_handle(*primary));
+        assert(alias_cleanup_calls.load() == 0u);
+        assert(alias_table.lookup(alias_handle));
+    }
+    assert(alias_cleanup_calls.load() == 1u);
+    assert(!alias_table.lookup(alias_handle));
+
     assert(!manager.resume(0xFFFFFFFFu, nullptr, &error));
     assert(manager.wait(0xFFFFFFFFu, 0ms) == GuestThreadWaitResult::InvalidHandle);
     return 0;

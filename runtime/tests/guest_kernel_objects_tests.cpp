@@ -21,10 +21,12 @@ public:
     }
     void on_handle_closed() noexcept override {
         callback_called = true;
+        ++callback_count;
         remaining_handles = table_.size();
     }
     bool callback_called{};
     std::size_t remaining_handles{};
+    std::size_t callback_count{};
 private:
     toohuman::runtime::GuestKernelObjectTable& table_;
 };
@@ -87,6 +89,22 @@ int main() {
     assert(objects.close(*reentrant_handle));
     assert(reentrant->callback_called);
     assert(reentrant->remaining_handles == 0u);
+    assert(reentrant->callback_count == 1u);
+
+    // NtDuplicateObject shares an object body across multiple handles. Closing
+    // one alias must not run its final-close callback while another remains.
+    auto duplicated = std::make_shared<ReentrantCloseObject>(objects);
+    const auto original_handle = objects.insert(duplicated);
+    assert(original_handle);
+    const auto duplicate_handle = objects.insert(duplicated);
+    assert(duplicate_handle && *duplicate_handle != *original_handle);
+    assert(objects.close(*original_handle));
+    assert(!duplicated->callback_called);
+    assert(objects.lookup(*duplicate_handle) == duplicated);
+    assert(objects.close(*duplicate_handle));
+    assert(duplicated->callback_called);
+    assert(duplicated->callback_count == 1u);
+    assert(duplicated->remaining_handles == 0u);
 
     // ABI-specific handles may expose a native KTHREAD address, but must
     // reject the null value and collisions with existing objects.
