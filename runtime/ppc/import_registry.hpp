@@ -94,6 +94,16 @@ private:
 
     [[nodiscard]] static std::string make_key(const std::string& library,
                                               std::uint16_t ordinal);
+    static void xenos_mmio_write_observer(
+        void* context, std::uint32_t address, std::uint8_t width,
+        std::uint64_t value) noexcept;
+    void handle_xenos_mmio_write(std::uint32_t address, std::uint8_t width,
+                                 std::uint64_t value) noexcept;
+    static bool dispatch_xenos_register_write(
+        void* context, std::uint32_t index, std::uint32_t value);
+    static bool reject_xenos_type3(
+        void* context, std::uint32_t opcode, bool predicate,
+        std::span<const std::uint32_t> payload);
 
     struct ImportBinding {
         XexImport import;
