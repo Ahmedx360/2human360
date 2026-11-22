@@ -4,6 +4,24 @@
 #include <cstdint>
 #include <vector>
 
+namespace {
+struct ObserverCapture {
+    std::size_t calls{};
+    std::uint32_t address{};
+    std::uint8_t width{};
+    std::uint64_t value{};
+};
+
+void observe_xenos_write(void* opaque, std::uint32_t address,
+                         std::uint8_t width, std::uint64_t value) noexcept {
+    auto& capture = *static_cast<ObserverCapture*>(opaque);
+    ++capture.calls;
+    capture.address = address;
+    capture.width = width;
+    capture.value = value;
+}
+} // namespace
+
 int main() {
     using namespace toohuman::runtime;
     auto& bus = GuestMmioBus::global();
@@ -43,6 +61,23 @@ int main() {
     assert(bus.write(xma_reg, 4, 0xCAFEBABEu));
     assert(bus.read(xma_reg, 4) == 0xCAFEBABEu);
     assert(bus.read(reg, 4) == 0xFE22AABBu);
+
+    // Xenos writes can notify the command processor after the register
+    // mirror is updated. Its own PM4 register writes bypass notification.
+    ObserverCapture observer_capture{};
+    assert(bus.set_xenos_write_observer(&observer_capture, observe_xenos_write));
+    assert(bus.write(reg, 4, 0x55667788u));
+    assert(observer_capture.calls == 1u);
+    assert(observer_capture.address == reg);
+    assert(observer_capture.width == 4u);
+    assert(observer_capture.value == 0x55667788u);
+    assert(bus.write_unobserved(reg + 4u, 4, 0xAABBCCDDu));
+    assert(observer_capture.calls == 1u);
+    assert(bus.write(xma_reg, 4, 0x11223344u));
+    assert(observer_capture.calls == 1u);
+    bus.clear_xenos_write_observer(&observer_capture);
+    assert(bus.write(reg, 4, 0x01020304u));
+    assert(observer_capture.calls == 1u);
 
     const auto before_invalid = bus.trace().size();
     assert(!bus.write(kXenosMmioBase + kGuestMmioWindowSize - 1u, 2, 0xFFFFu));
