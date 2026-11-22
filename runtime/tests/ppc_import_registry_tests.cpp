@@ -1072,7 +1072,7 @@ int main() {
 
     // NtProtectVirtualMemory: r3/r4 point to in/out base/size, r5 is PAGE_*,
     // r6 points to OldProtect, and r7 is DebugMemory.
-    write_be(*stack_io + 8, virtual_address + 0x100u);
+    write_be(*stack_io + 8, virtual_address); // Page-aligned: protect exactly the first page.
     write_be(*stack_io + 12, vm_page_size);
     write_be(*stack_io + 16, 0xDEADBEEFu);
     PPCContext protect_context{};
