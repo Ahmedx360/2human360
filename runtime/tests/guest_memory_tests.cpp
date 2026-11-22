@@ -12,6 +12,8 @@ int main() {
     GuestMemory memory{0x82000000u, bytes};
 
     assert(memory.valid());
+    assert(!toohuman::runtime::GuestAddressSpace::is_accessible_range(
+        memory.base(), 0x1000u, 4u, toohuman::runtime::GuestMemoryAccess::Read));
     assert(memory.guest_base() == 0x82000000u);
     assert(memory.size() == bytes.size());
     assert(memory.contains(0x82000000u, 1));

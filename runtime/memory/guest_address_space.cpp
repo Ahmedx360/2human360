@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <cstring>
+#include <cstdio>
 #include <utility>
+#include <limits>
 #include <vector>
 
 #if defined(_WIN32)
@@ -56,6 +58,77 @@ bool protect_pages(void* address, std::size_t size, std::uint8_t flags) noexcept
 
 std::size_t GuestAddressSpace::page_size() noexcept {
     return host_page_size();
+}
+
+bool GuestAddressSpace::is_accessible_range(
+    const std::uint8_t* base, std::uint32_t guest_address,
+    std::size_t size, GuestMemoryAccess access) noexcept {
+    if (base == nullptr) return false;
+    if (size == 0) return true;
+    if (static_cast<std::uint64_t>(guest_address) + size > kSize) return false;
+
+    const auto base_address = reinterpret_cast<std::uintptr_t>(base);
+    if (guest_address > std::numeric_limits<std::uintptr_t>::max() - base_address)
+        return false;
+    const auto begin = base_address + static_cast<std::uintptr_t>(guest_address);
+    if (size > std::numeric_limits<std::uintptr_t>::max() - begin) return false;
+    const auto end = begin + size;
+    auto cursor = begin;
+
+#if defined(_WIN32)
+    while (cursor < end) {
+        MEMORY_BASIC_INFORMATION info{};
+        if (VirtualQuery(reinterpret_cast<const void*>(cursor), &info, sizeof(info)) == 0)
+            return false;
+        const auto region_begin = reinterpret_cast<std::uintptr_t>(info.BaseAddress);
+        if (region_begin > cursor || info.RegionSize == 0 ||
+            info.RegionSize > std::numeric_limits<std::uintptr_t>::max() - region_begin ||
+            info.State != MEM_COMMIT) return false;
+        const auto protection = info.Protect & 0xFFu;
+        if ((info.Protect & PAGE_GUARD) != 0 || protection == PAGE_NOACCESS)
+            return false;
+        const bool readable = protection == PAGE_READONLY ||
+            protection == PAGE_READWRITE || protection == PAGE_WRITECOPY ||
+            protection == PAGE_EXECUTE_READ || protection == PAGE_EXECUTE_READWRITE ||
+            protection == PAGE_EXECUTE_WRITECOPY;
+        const bool writable = protection == PAGE_READWRITE ||
+            protection == PAGE_WRITECOPY || protection == PAGE_EXECUTE_READWRITE ||
+            protection == PAGE_EXECUTE_WRITECOPY;
+        if (access == GuestMemoryAccess::Read ? !readable : !writable) return false;
+        cursor = std::min(end, region_begin + info.RegionSize);
+    }
+    return true;
+#elif defined(__linux__)
+    // The 4 GiB reservation is a single PROT_NONE mapping whose VMAs split as
+    // pages are committed/protected. /proc/self/maps exposes the effective
+    // permissions and lets this check reject both uncommitted and read-only pages.
+    std::FILE* maps = std::fopen("/proc/self/maps", "r");
+    if (!maps) return false;
+    char line[1024];
+    bool accessible = false;
+    while (cursor < end && std::fgets(line, sizeof(line), maps) != nullptr) {
+        unsigned long long region_begin_raw = 0;
+        unsigned long long region_end_raw = 0;
+        char permissions[5]{};
+        if (std::sscanf(line, "%llx-%llx %4s",
+                        &region_begin_raw, &region_end_raw, permissions) != 3)
+            continue;
+        const auto region_begin = static_cast<std::uintptr_t>(region_begin_raw);
+        const auto region_end = static_cast<std::uintptr_t>(region_end_raw);
+        if (region_end <= cursor) continue;
+        if (region_begin > cursor || region_end <= region_begin) break;
+        const bool readable = permissions[0] == 'r';
+        const bool writable = permissions[1] == 'w';
+        if (access == GuestMemoryAccess::Read ? !readable : !writable) break;
+        cursor = std::min(end, region_end);
+    }
+    accessible = cursor == end;
+    std::fclose(maps);
+    return accessible;
+#else
+    (void)access;
+    return false;
+#endif
 }
 
 GuestAddressSpace::GuestAddressSpace(void* reservation) noexcept

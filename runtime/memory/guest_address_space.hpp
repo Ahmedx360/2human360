@@ -12,6 +12,8 @@
 
 namespace toohuman::runtime {
 
+enum class GuestMemoryAccess : std::uint8_t { Read, Write };
+
 enum class GuestMemoryProtection : std::uint8_t {
     NoAccess = 0,
     ReadOnly = 1,
@@ -36,6 +38,11 @@ public:
     [[nodiscard]] static GuestAddressSpace reserve(std::string* error = nullptr);
     // Native page granularity used by commit_region/protect_region.
     [[nodiscard]] static std::size_t page_size() noexcept;
+    // Safely checks a guest VA range against the host mappings and permissions.
+    // This is used by HLE handlers before copying data to/from guest buffers.
+    [[nodiscard]] static bool is_accessible_range(
+        const std::uint8_t* base, std::uint32_t guest_address,
+        std::size_t size, GuestMemoryAccess access) noexcept;
 
     // Commits the image's guest virtual range as read/write and copies its
     // image-relative bytes to base() + image.image_base. Section-specific
