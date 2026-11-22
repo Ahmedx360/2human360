@@ -178,7 +178,7 @@ int main() {
                (std::uint32_t(bytes[2]) << 8) |
                std::uint32_t(bytes[3]);
     };
-    put_guest_be32(0xA0010000u, (1u << 16) | 0x20u); // One type-0 value to reg 0x20.
+    put_guest_be32(0xA0010000u, 0x20u); // One type-0 value to reg 0x20.
     put_guest_be32(0xA0010004u, 0xDEADBEEFu);
     ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 2u);
     assert(imports.xenos_command_processor().read_index() == 2u);
