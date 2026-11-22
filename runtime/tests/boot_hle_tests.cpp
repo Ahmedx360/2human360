@@ -197,6 +197,7 @@ void test_query_volume_information_file() {
     assert(be32(iosb) == 0xC0000003u);
 
     assert(process_kernel_objects().close(*handle));
+    file.reset(); // Close the host stream before removing the fixture on Windows.
     fs::remove_all(root);
 }
 
