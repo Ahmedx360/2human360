@@ -3,6 +3,7 @@
 #include "gpu/pm4_packet.hpp"
 #include "memory/guest_address_space.hpp"
 
+#include <cstddef>
 #include <cstdint>
 
 namespace toohuman::runtime {
@@ -15,7 +16,6 @@ enum class Pm4GuestRingError : std::uint8_t {
     InvalidReadPointer,
     InvalidWritePointer,
     RingNotReadable,
-    ReadPointerNotWritable,
     PacketDecodeFailed,
     MissingRegisterHandler,
     MissingType3Handler,
