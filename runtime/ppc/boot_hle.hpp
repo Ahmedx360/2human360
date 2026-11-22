@@ -23,6 +23,7 @@ PPCFunc NtWriteFile;
 PPCFunc NtQueryInformationFile;
 PPCFunc NtSetInformationFile;
 PPCFunc NtQueryFullAttributesFile;
+PPCFunc NtQueryDirectoryFile;
 PPCFunc NtFlushBuffersFile;
 } // namespace boot_hle
 

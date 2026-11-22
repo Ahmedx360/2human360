@@ -4,6 +4,7 @@
 #include "kernel/guest_kernel_objects.hpp"
 #include "memory/guest_address_space.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -77,6 +78,36 @@ void set_iosb(std::uint8_t* base, std::uint32_t iosb,
 // Xbox OBJECT_ATTRIBUTES starts with RootDirectory and ObjectName. The object
 // name is an 8-byte big-endian ANSI_STRING descriptor (Length, MaximumLength,
 // Buffer). Validate each guest range before dereferencing it.
+NameReadResult read_ansi_string(
+    std::uint8_t* base, std::uint32_t descriptor,
+    std::string& value, bool allow_empty) {
+    if (descriptor == 0)
+        return allow_empty ? NameReadResult::Success : NameReadResult::InvalidParameter;
+    if (!guest_range(base, descriptor, 8u, GuestMemoryAccess::Read))
+        return NameReadResult::AccessViolation;
+
+    const auto length = (std::uint32_t(*at(base, descriptor)) << 8) |
+                        std::uint32_t(*at(base, descriptor + 1u));
+    const auto maximum_length = (std::uint32_t(*at(base, descriptor + 2u)) << 8) |
+                                std::uint32_t(*at(base, descriptor + 3u));
+    const auto buffer = rd32(base, descriptor + 4u);
+    if (length == 0) {
+        value.clear();
+        return allow_empty ? NameReadResult::Success : NameReadResult::InvalidParameter;
+    }
+    if (length > maximum_length || length > 0x8000u || buffer == 0)
+        return NameReadResult::InvalidParameter;
+    if (!guest_range(base, buffer, length, GuestMemoryAccess::Read))
+        return NameReadResult::AccessViolation;
+
+    value.assign(reinterpret_cast<const char*>(at(base, buffer)), length);
+    for (const auto ch : value) {
+        if (ch == '\0' || static_cast<unsigned char>(ch) > 0x7Fu)
+            return NameReadResult::InvalidParameter;
+    }
+    return NameReadResult::Success;
+}
+
 NameReadResult read_object_name(std::uint8_t* base, std::uint32_t attrs,
                                 std::string& name, std::uint32_t& root_handle,
                                 bool& root_writable) {
@@ -431,6 +462,108 @@ PPC_FUNC(NtQueryFullAttributesFile) {
     wr64(base, out + 40u, size);
     wr32(base, out + 48u, is_directory ? 0x10u : 0x80u);
     ctx.r3.u32 = kSuccess;
+}
+
+// xboxkrnl #0xE4. Synchronous FILE_DIRECTORY_INFORMATION query.
+PPC_FUNC(NtQueryDirectoryFile) {
+    constexpr std::uint32_t kInfoLengthMismatch = 0xC0000004u;
+    constexpr std::uint32_t kBufferOverflow = 0x80000005u;
+    constexpr std::uint32_t kNoSuchFile = 0xC000000Fu;
+    constexpr std::uint32_t kNoMoreFiles = 0x80000006u;
+
+    const auto file = file_from_handle(ctx.r3.u32);
+    if (!file) { ctx.r3.u32 = kInvalidHandle; return; }
+    if (!file->is_directory()) { ctx.r3.u32 = 0xC0000103u; return; }
+    if (!file->can_read()) { ctx.r3.u32 = kAccessDenied; return; }
+
+    const auto iosb = ctx.r7.u32;
+    const auto output = ctx.r8.u32;
+    const auto length = ctx.r9.u32;
+    const auto name_descriptor = ctx.r10.u32;
+    if (!valid_iosb(base, iosb)) { ctx.r3.u32 = kAccessViolation; return; }
+    if (length < 72u) {
+        set_iosb(base, iosb, kInfoLengthMismatch, 0);
+        ctx.r3.u32 = kInfoLengthMismatch;
+        return;
+    }
+    if (length > 0x100000u ||
+        !guest_range(base, output, length, GuestMemoryAccess::Write)) {
+        set_iosb(base, iosb, kAccessViolation, 0);
+        ctx.r3.u32 = kAccessViolation;
+        return;
+    }
+
+    std::uint32_t restart_address = 0;
+    const auto restart_address64 = static_cast<std::uint64_t>(ctx.r1.u32) + 0x54u;
+    if (restart_address64 > 0xFFFFFFFFull ||
+        !guest_range(base, static_cast<std::uint32_t>(restart_address64),
+                     4u, GuestMemoryAccess::Read)) {
+        set_iosb(base, iosb, kAccessViolation, 0);
+        ctx.r3.u32 = kAccessViolation;
+        return;
+    }
+    restart_address = static_cast<std::uint32_t>(restart_address64);
+    const bool restart = rd32(base, restart_address) != 0;
+
+    auto event = ctx.r4.u32 == 0 ? std::shared_ptr<GuestEventObject>{}
+        : std::dynamic_pointer_cast<GuestEventObject>(
+              process_kernel_objects().lookup(ctx.r4.u32));
+    if (ctx.r4.u32 != 0 && !event) {
+        set_iosb(base, iosb, kInvalidHandle, 0);
+        ctx.r3.u32 = kInvalidHandle;
+        return;
+    }
+
+    std::string pattern;
+    const auto name_status = read_ansi_string(
+        base, name_descriptor, pattern, true);
+    if (name_status != NameReadResult::Success) {
+        const auto status = name_status == NameReadResult::AccessViolation
+            ? kAccessViolation : kInvalidParameter;
+        set_iosb(base, iosb, status, 0);
+        ctx.r3.u32 = status;
+        return;
+    }
+    if (pattern.find_first_of("/\\:") != std::string::npos) {
+        set_iosb(base, iosb, kInvalidParameter, 0);
+        ctx.r3.u32 = kInvalidParameter;
+        return;
+    }
+
+    GuestVfsStatus vfs_status = GuestVfsStatus::Unsuccessful;
+    const auto entry = file->next_directory_entry(pattern, restart, vfs_status);
+    if (!entry) {
+        const auto status = static_cast<std::uint32_t>(vfs_status);
+        set_iosb(base, iosb, status, 0);
+        ctx.r3.u32 = status == static_cast<std::uint32_t>(GuestVfsStatus::NoMoreFiles)
+            ? kNoMoreFiles : (status == static_cast<std::uint32_t>(GuestVfsStatus::NoSuchFile)
+                ? kNoSuchFile : status);
+        return;
+    }
+
+    constexpr std::uint32_t kFileDirectoryInformationHeaderSize = 0x40u;
+    if (entry->name.size() > length - kFileDirectoryInformationHeaderSize) {
+        set_iosb(base, iosb, kBufferOverflow, 0);
+        ctx.r3.u32 = kBufferOverflow;
+        return;
+    }
+
+    wr32(base, output + 0x00u, 0u); // NextEntryOffset: one entry per call.
+    wr32(base, output + 0x04u, entry->file_index);
+    wr64(base, output + 0x08u, entry->creation_time);
+    wr64(base, output + 0x10u, entry->last_access_time);
+    wr64(base, output + 0x18u, entry->last_write_time);
+    wr64(base, output + 0x20u, entry->change_time);
+    wr64(base, output + 0x28u, entry->end_of_file);
+    wr64(base, output + 0x30u, entry->allocation_size);
+    wr32(base, output + 0x38u, entry->attributes);
+    wr32(base, output + 0x3Cu, static_cast<std::uint32_t>(entry->name.size()));
+    std::memcpy(at(base, output + kFileDirectoryInformationHeaderSize),
+                entry->name.data(), entry->name.size());
+
+    set_iosb(base, iosb, kSuccess, length);
+    ctx.r3.u32 = kSuccess;
+    if (event) (void)event->set();
 }
 
 // xboxkrnl #0xDB. NtFlushBuffersFile(h, iosb).
