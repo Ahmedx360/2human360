@@ -304,8 +304,9 @@ void test_video_display_queries() {
     assert(be32(gamma_power) == expected_power_bits);
 
     context = {};
+    context.r3.u32 = 0xFFFFFFF0u; // The 48-byte record would cross the 4 GiB limit.
     boot_hle::VdQueryVideoMode(context, base());
-    assert(context.r3.u32 == 0xC0000005u); // Null output pointer.
+    assert(context.r3.u32 == 0xC0000005u); // Invalid guest range.
 }
 
 void test_critical_sections() {
