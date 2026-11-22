@@ -65,7 +65,7 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p build/diagnostics
-          cmake --build build/clang --target TooHumanRuntimeProbe TooHumanPpcImportRegistryTests TooHumanBootHleTests TooHumanGuestThreadStartupTests TooHumanGuestThreadManagerTests TooHumanGuestThreadRuntimeTests TooHumanGuestVfsTests TooHumanGuestKernelObjectTests TooHumanGuestMemoryTests TooHumanGuestHeapTests TooHumanXbox360PeTests TooHumanXexImageTests --parallel 1 2>&1 | tee build/diagnostics/clang-build.log
+          cmake --build build/clang --target TooHumanRuntimeProbe TooHumanPpcImportRegistryTests TooHumanBootHleTests TooHumanGuestThreadStartupTests TooHumanGuestThreadManagerTests TooHumanGuestThreadRuntimeTests TooHumanGuestVfsTests TooHumanGuestKernelObjectTests TooHumanGuestMemoryTests TooHumanGuestHeapTests TooHumanXbox360PeTests TooHumanXexImageTests TooHumanPm4GuestRingTests TooHumanXenosCommandProcessorTests --parallel 1 2>&1 | tee build/diagnostics/clang-build.log
 
       - name: Preserve compiler failure diagnostics
         if: failure()
@@ -85,4 +85,4 @@ jobs:
           retention-days: 7
 
       - name: Test XEX import dispatch
-        run: ctest --test-dir build/clang -R "TooHuman(BootHle|PpcImportRegistry|GuestThreadStartup|GuestThreadManager|GuestThreadRuntime|GuestVfs|GuestKernelObject|GuestMemory|GuestHeap|Xbox360Pe|XexImage)Tests" --output-on-failure
+        run: ctest --test-dir build/clang -R "TooHuman(BootHle|PpcImportRegistry|GuestThreadStartup|GuestThreadManager|GuestThreadRuntime|GuestVfs|GuestKernelObject|GuestMemory|GuestHeap|Xbox360Pe|XexImage|Pm4GuestRing|XenosCommandProcessor)Tests" --output-on-failure
