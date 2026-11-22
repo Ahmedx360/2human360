@@ -129,7 +129,10 @@ int main() {
     auto enumerate = vfs.open("game:\\Enumerate", nullptr, 1, false, true);
     assert(enumerate.status == GuestVfsStatus::Success);
     GuestVfsStatus enum_status = GuestVfsStatus::Unsuccessful;
-    auto first_entry = enumerate.file->next_directory_entry("a*.txt", true, enum_status);
+    auto too_small = enumerate.file->next_directory_entry("a*.txt", true, enum_status, 8u);
+    assert(!too_small && enum_status == GuestVfsStatus::BufferOverflow);
+    // A failed small-buffer query must not consume the matching entry.
+    auto first_entry = enumerate.file->next_directory_entry("", false, enum_status, 9u);
     assert(first_entry && enum_status == GuestVfsStatus::Success);
     assert(first_entry->name == "alpha.txt");
     assert(first_entry->end_of_file == 1u);
