@@ -115,9 +115,14 @@ int main() {
         assert(function != nullptr);
         function(ctx, memory.base());
     };
-    // The new volume-information export is registered under Xbox ordinal 0xEF.
+    // The volume-information export uses the Xbox ABI:
+    // (handle, iosb, information, length, information_class).
+    // Supply valid non-handle arguments so the test reaches handle dispatch.
     PPCContext volume_dispatch_context{};
     volume_dispatch_context.r3.u32 = 0xDEADBEEFu;
+    volume_dispatch_context.r4.u32 = 0x82012000u; // Writable scratch IO_STATUS_BLOCK.
+    volume_dispatch_context.r6.u32 = 24u;          // FILE_FS_VOLUME_INFORMATION size.
+    volume_dispatch_context.r7.u32 = 1u;           // FileFsVolumeInformation.
     call_test_import(0x820011A4u, volume_dispatch_context);
     assert(volume_dispatch_context.r3.u32 == 0xC0000008u); // Invalid handle.
 
