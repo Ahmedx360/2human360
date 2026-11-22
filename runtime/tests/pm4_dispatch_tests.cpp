@@ -3,6 +3,7 @@
 #include <array>
 #include <cassert>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -55,13 +56,13 @@ int main() {
     assert(result.packets == 6u);
     assert(result.dwords_consumed == stream.size());
     assert(capture.registers.size() == 7u);
-    assert(capture.registers[0] == std::pair<std::uint32_t, std::uint32_t>{0x10u, 0x11u});
-    assert(capture.registers[1] == std::pair<std::uint32_t, std::uint32_t>{0x11u, 0x22u});
-    assert(capture.registers[2] == std::pair<std::uint32_t, std::uint32_t>{0x12u, 0x33u});
-    assert(capture.registers[3] == std::pair<std::uint32_t, std::uint32_t>{0x20u, 0x44u});
-    assert(capture.registers[4] == std::pair<std::uint32_t, std::uint32_t>{0x20u, 0x55u});
-    assert(capture.registers[5] == std::pair<std::uint32_t, std::uint32_t>{0x30u, 0x66u});
-    assert(capture.registers[6] == std::pair<std::uint32_t, std::uint32_t>{0x31u, 0x77u});
+    assert((capture.registers[0] == std::pair<std::uint32_t, std::uint32_t>{0x10u, 0x11u}));
+    assert((capture.registers[1] == std::pair<std::uint32_t, std::uint32_t>{0x11u, 0x22u}));
+    assert((capture.registers[2] == std::pair<std::uint32_t, std::uint32_t>{0x12u, 0x33u}));
+    assert((capture.registers[3] == std::pair<std::uint32_t, std::uint32_t>{0x20u, 0x44u}));
+    assert((capture.registers[4] == std::pair<std::uint32_t, std::uint32_t>{0x20u, 0x55u}));
+    assert((capture.registers[5] == std::pair<std::uint32_t, std::uint32_t>{0x30u, 0x66u}));
+    assert((capture.registers[6] == std::pair<std::uint32_t, std::uint32_t>{0x31u, 0x77u}));
     assert(capture.opcode == 0x55u);
     assert(capture.predicate);
     assert((capture.type3_payload == std::vector<std::uint32_t>{0x88u, 0x99u}));
