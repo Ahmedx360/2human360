@@ -254,8 +254,8 @@ std::optional<GuestDirectoryEntry> GuestFile::next_directory_entry(
     }
 
     if (directory_cursor_ >= directory_entries_.size()) {
-        status = pattern.empty() ? GuestVfsStatus::NoMoreFiles
-                                 : GuestVfsStatus::NoSuchFile;
+        status = directory_entries_.empty() && !pattern.empty()
+            ? GuestVfsStatus::NoSuchFile : GuestVfsStatus::NoMoreFiles;
         return std::nullopt;
     }
     status = GuestVfsStatus::Success;

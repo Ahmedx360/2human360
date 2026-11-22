@@ -135,13 +135,15 @@ int main() {
     assert(first_entry->end_of_file == 1u);
     assert((first_entry->attributes & 0x80u) != 0u);
     auto no_more = enumerate.file->next_directory_entry("a*.txt", false, enum_status);
-    assert(!no_more && enum_status == GuestVfsStatus::NoSuchFile);
+    assert(!no_more && enum_status == GuestVfsStatus::NoMoreFiles);
     auto beta = enumerate.file->next_directory_entry("*", true, enum_status);
     assert(beta && beta->name == "alpha.txt");
     beta = enumerate.file->next_directory_entry("", false, enum_status);
     assert(beta && beta->name == "beta.bin");
     beta = enumerate.file->next_directory_entry("", false, enum_status);
     assert(!beta && enum_status == GuestVfsStatus::NoMoreFiles);
+    auto absent_pattern = enumerate.file->next_directory_entry("missing*", true, enum_status);
+    assert(!absent_pattern && enum_status == GuestVfsStatus::NoSuchFile);
     auto denied_enum = vfs.open("game:\\Enumerate", nullptr, 1, false, true,
                                 true, false);
     assert(denied_enum.status == GuestVfsStatus::Success);
