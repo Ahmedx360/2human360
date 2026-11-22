@@ -3,6 +3,7 @@
 #include "memory/guest_address_space.hpp"
 #include "ppc/title_runtime.hpp"
 #include "ppc/boot_hle.hpp"
+#include "ppc/guest_thread_execution.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -144,8 +145,19 @@ int main(int argc, char** argv) {
     }
     std::cout << "Invoking game entry point 0x" << std::hex
               << loaded_image->entry_point << std::dec
-              << " (this may terminate the process or hit an unimplemented HLE).\n";
-    entry(report.main_thread.context, memory.base());
+              << " (this may hit an unimplemented HLE).\n";
+    try {
+        // The process entry point runs on the already prepared guest main
+        // thread. Match the execution scope used by worker threads so
+        // ExTerminateThread unwinds this thread rather than returning an
+        // ordinary STATUS_UNSUCCESSFUL result.
+        GuestThreadExecutionScope main_thread_scope(std::stop_token{});
+        entry(report.main_thread.context, memory.base());
+    } catch (const GuestThreadExitSignal& exit) {
+        std::cout << "Guest main thread terminated with exit code 0x"
+                  << std::hex << exit.exit_code() << std::dec << ".\n";
+        return 0;
+    }
     std::cout << "Guest entry point returned to the host probe.\n";
     return 0;
 }
