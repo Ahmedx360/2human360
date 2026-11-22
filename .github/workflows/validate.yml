@@ -1,6 +1,8 @@
 name: Validate and build Too Human recompilation
 
 on:
+  push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
