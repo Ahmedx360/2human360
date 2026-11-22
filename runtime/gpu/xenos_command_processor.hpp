@@ -2,6 +2,7 @@
 
 #include "gpu/pm4_guest_ring.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
