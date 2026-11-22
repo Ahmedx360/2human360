@@ -1,0 +1,132 @@
+#include "gpu/pm4_guest_ring.hpp"
+
+#include <array>
+#include <cassert>
+#include <cstdint>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace {
+
+struct Capture {
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> registers;
+    std::uint32_t opcode{};
+    std::vector<std::uint32_t> payload;
+};
+
+bool write_register(void* opaque, std::uint32_t index, std::uint32_t value) {
+    static_cast<Capture*>(opaque)->registers.emplace_back(index, value);
+    return true;
+}
+
+bool type3(void* opaque, std::uint32_t opcode, bool,
+           std::span<const std::uint32_t> payload) {
+    auto& capture = *static_cast<Capture*>(opaque);
+    capture.opcode = opcode;
+    capture.payload.assign(payload.begin(), payload.end());
+    return true;
+}
+
+void store_be32(std::uint8_t* bytes, std::uint32_t value) {
+    bytes[0] = static_cast<std::uint8_t>(value >> 24);
+    bytes[1] = static_cast<std::uint8_t>(value >> 16);
+    bytes[2] = static_cast<std::uint8_t>(value >> 8);
+    bytes[3] = static_cast<std::uint8_t>(value);
+}
+
+std::uint32_t load_be32(const std::uint8_t* bytes) {
+    return (static_cast<std::uint32_t>(bytes[0]) << 24) |
+           (static_cast<std::uint32_t>(bytes[1]) << 16) |
+           (static_cast<std::uint32_t>(bytes[2]) << 8) |
+           static_cast<std::uint32_t>(bytes[3]);
+}
+
+} // namespace
+
+int main() {
+    using namespace toohuman::runtime;
+
+    std::uint32_t guest_address = 0;
+    assert(xenos_physical_to_guest_address(0x00010000u, 0x1000u, guest_address));
+    assert(guest_address == 0xA0010000u);
+    assert(xenos_physical_to_guest_address(0xA0010000u, 4u, guest_address));
+    assert(guest_address == 0xA0010000u);
+    assert(!xenos_physical_to_guest_address(0x1FFFFFF8u, 16u, guest_address));
+    assert(!xenos_physical_to_guest_address(0x00001000u, 0u, guest_address));
+
+    std::string error;
+    auto memory = GuestAddressSpace::reserve(&error);
+    assert(memory.valid());
+
+    constexpr std::uint32_t kRingPhysical = 0x00010000u;
+    constexpr std::uint32_t kRingGuest = 0xA0010000u;
+    constexpr std::uint32_t kWritebackPhysical = 0x00020000u;
+    constexpr std::uint32_t kWritebackGuest = 0xA0020000u;
+    assert(memory.commit_region(kRingGuest, 0x1000u, &error));
+    assert(memory.commit_region(kWritebackGuest, 0x1000u, &error));
+
+    // Eight-dword ring. The type-0 packet wraps after its first payload dword.
+    auto* const ring = memory.base() + kRingGuest;
+    store_be32(ring + 6u * 4u, (2u << 16) | 0x40u);
+    store_be32(ring + 7u * 4u, 0x11u);
+    store_be32(ring + 0u * 4u, 0x22u);
+    store_be32(ring + 1u * 4u, 0x33u);
+
+    Capture capture;
+    const Pm4DispatchCallbacks callbacks{&capture, write_register, type3};
+    const auto result = dispatch_pm4_guest_ring(
+        memory, kRingPhysical, 0u, 6u, 2u, callbacks, 4u);
+    assert(result);
+    assert(result.dispatch.packets == 1u);
+    assert(result.dispatch.dwords_consumed == 4u);
+    assert(result.dispatch.read_index == 2u);
+    assert(capture.registers.size() == 3u);
+    assert((capture.registers[0] == std::pair<std::uint32_t, std::uint32_t>{0x40u, 0x11u}));
+    assert((capture.registers[1] == std::pair<std::uint32_t, std::uint32_t>{0x41u, 0x22u}));
+    assert((capture.registers[2] == std::pair<std::uint32_t, std::uint32_t>{0x42u, 0x33u}));
+
+    // Type-3 packet at the end wraps into the beginning of the same ring.
+    store_be32(ring + 6u * 4u, 0xC0000000u | (1u << 16) | (0x37u << 8));
+    store_be32(ring + 7u * 4u, 0xABu);
+    store_be32(ring + 0u * 4u, 0xCDu);
+    const auto type3_result = dispatch_pm4_guest_ring(
+        memory, kRingPhysical, 0u, 6u, 1u, callbacks, 4u);
+    assert(type3_result);
+    assert(type3_result.dispatch.packets == 1u);
+    assert(type3_result.dispatch.read_index == 1u);
+    assert(capture.opcode == 0x37u);
+    assert((capture.payload == std::vector<std::uint32_t>{0xABu, 0xCDu}));
+
+    // Read-pointer writeback must use guest big-endian byte order.
+    assert(write_pm4_guest_read_pointer(memory, kWritebackPhysical, 0x12345678u));
+    assert(load_be32(memory.base() + kWritebackGuest) == 0x12345678u);
+
+    const auto empty = dispatch_pm4_guest_ring(
+        memory, kRingPhysical, 0u, 3u, 3u, callbacks, 1u);
+    assert(empty);
+    assert(empty.dispatch.packets == 0u);
+    assert(empty.dispatch.read_index == 3u);
+
+    const auto bad_read = dispatch_pm4_guest_ring(
+        memory, kRingPhysical, 0u, 8u, 0u, callbacks, 1u);
+    assert(bad_read.error == Pm4GuestRingError::InvalidReadPointer);
+    const auto bad_write = dispatch_pm4_guest_ring(
+        memory, kRingPhysical, 0u, 0u, 8u, callbacks, 1u);
+    assert(bad_write.error == Pm4GuestRingError::InvalidWritePointer);
+    const auto bad_size = dispatch_pm4_guest_ring(
+        memory, kRingPhysical, 27u, 0u, 0u, callbacks, 1u);
+    assert(bad_size.error == Pm4GuestRingError::InvalidRingSize);
+    const auto bad_base = dispatch_pm4_guest_ring(
+        memory, 0x1FFFFFF8u, 0u, 0u, 1u, callbacks, 1u);
+    assert(bad_base.error == Pm4GuestRingError::InvalidPhysicalRange);
+
+    // A valid physical range that has not been committed must fail safely.
+    const auto not_mapped = dispatch_pm4_guest_ring(
+        memory, 0x00030000u, 0u, 0u, 1u, callbacks, 1u);
+    assert(not_mapped.error == Pm4GuestRingError::RingNotReadable);
+
+    // The writeback target must be committed and writable.
+    assert(!write_pm4_guest_read_pointer(memory, 0x00030000u, 7u));
+    return 0;
+}
