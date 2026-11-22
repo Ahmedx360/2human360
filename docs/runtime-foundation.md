@@ -184,13 +184,40 @@ or exact Xbox media geometry. Device-information (class 4) and
 attribute-information (class 5) queries remain unsupported and return
 `STATUS_INVALID_INFO_CLASS`.
 
+## Implemented: initial Xenos/XMA MMIO register bus
+
+The runtime now recognizes the Xbox 360 Xenos register aperture at
+`0x7FC80000-0x7FC8FFFF` and the XMA aperture at
+`0x7FEA0000-0x7FEAFFFF`. The initial `GuestMmioBus` provides separate
+64 KiB, byte-addressable register files for those devices, preserving
+big-endian byte lanes for 8-, 16-, 32- and 64-bit scalar accesses. Unwritten
+register bytes read as zero; writes are retained for readback. A bounded
+4096-entry trace captures address, width, value, device and access direction.
+
+When both the generated PPC library and runtime core are enabled, scalar
+`PPC_LOAD_U*` and `PPC_STORE_U*` accessors check those apertures before
+dereferencing guest RAM. Thus scalar register accesses do not fault against
+the guest address space's default `PROT_NONE` reservation. Ordinary RAM
+retains the original direct big-endian access path. The `PPC_MM_*` aliases
+use the same checked accessors.
+
+This is an interception and diagnostics foundation, not GPU/XMA emulation.
+It does not implement register side effects, command processor state,
+interrupts, DMA, XMA decoding, vector/atomic MMIO operations, or a renderer.
+Returning zero for an untouched register is only the register-file default;
+the trace must be used to identify accesses that need real device semantics.
+`TooHumanGuestMmioTests` covers range boundaries, independent apertures,
+big-endian subword lanes, readback, invalid accesses and bounded tracing.
+`TooHumanPpcImportRegistryTests` also verifies that generated scalar loads
+and stores reach the bus without touching uncommitted guest pages.
+
 ## Next implementation sequence
 
-1. Add explicit MMIO ranges and aliases without exposing them as ordinary RAM.
-2. Extend the now-connected thread foundation with the next imports actually reached by Too Human startup. Keep unknown ordinals fail-fast and document each ABI.
-3. Establish Too Human's real startup stack, TLS, register state and guest-thread lifecycle from XEX metadata and observed call sites.
-4. Add virtual file access and save-data isolation.
-5. Add GPU command capture/decoding before attempting a renderer; then add XMA and controller services.
+1. Replace the scalar MMIO register-file stubs with device-specific Xenos/XMA side effects and add the register accesses actually observed in Too Human.
+2. Add GPU command capture/decoding and ring-buffer execution before attempting a renderer.
+3. Extend scalar interception to vector and atomic PPC memory operations used by the title.
+4. Add XMA decoding and controller services after the graphics/boot traces identify their required ABIs.
+5. Run the real XEX entry point, capture the first unsupported import/MMIO access, and implement only behavior supported by call-site evidence.
 
 Every step should have game-free tests and diagnostics before integration with the title.
 
