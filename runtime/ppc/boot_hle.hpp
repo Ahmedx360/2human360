@@ -50,6 +50,8 @@ PPCFunc VdQueryVideoMode;
 PPCFunc VdQueryVideoFlags;
 PPCFunc VdGetCurrentDisplayInformation;
 PPCFunc VdGetCurrentDisplayGamma;
+PPCFunc VdInitializeRingBuffer;
+PPCFunc VdEnableRingBufferRPtrWriteBack;
 PPCFunc ExGetXConfigSetting;
 PPCFunc XamGetSystemVersion;
 PPCFunc XamShowMessageBoxUIEx;
