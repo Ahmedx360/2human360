@@ -75,20 +75,67 @@ std::uint64_t GuestMmioBus::read(std::uint32_t address,
 
 bool GuestMmioBus::write(std::uint32_t address, std::uint8_t width,
                          std::uint64_t value) noexcept {
+    return write_impl(address, width, value, true);
+}
+
+bool GuestMmioBus::write_unobserved(std::uint32_t address,
+                                   std::uint8_t width,
+                                   std::uint64_t value) noexcept {
+    return write_impl(address, width, value, false);
+}
+
+bool GuestMmioBus::write_impl(std::uint32_t address, std::uint8_t width,
+                              std::uint64_t value, bool notify) noexcept {
     GuestMmioDevice device{};
     std::uint32_t offset = 0;
     if (!resolve(address, width, device, offset)) return false;
 
-    std::lock_guard lock(mutex_);
-    auto& bytes = device == GuestMmioDevice::Xenos ? xenos_ : xma_;
-    for (std::uint8_t i = 0; i < width; ++i) {
-        const auto shift = static_cast<unsigned>((width - 1u - i) * 8u);
-        bytes[offset + i] = static_cast<std::uint8_t>(value >> shift);
+    XenosWriteObserver observer = nullptr;
+    void* observer_context = nullptr;
+    {
+        std::lock_guard lock(mutex_);
+        auto& bytes = device == GuestMmioDevice::Xenos ? xenos_ : xma_;
+        for (std::uint8_t i = 0; i < width; ++i) {
+            const auto shift = static_cast<unsigned>((width - 1u - i) * 8u);
+            bytes[offset + i] = static_cast<std::uint8_t>(value >> shift);
+        }
+        const auto mask = width == 8 ? ~std::uint64_t{0}
+            : ((std::uint64_t{1} << (width * 8u)) - 1u);
+        record_locked({next_sequence_++, address, value & mask, device, width, true});
+
+        if (notify && device == GuestMmioDevice::Xenos && xenos_write_observer_) {
+            observer = xenos_write_observer_;
+            observer_context = observer_context_;
+            ++observer_callbacks_in_flight_;
+        }
     }
-    const auto mask = width == 8 ? ~std::uint64_t{0}
-        : ((std::uint64_t{1} << (width * 8u)) - 1u);
-    record_locked({next_sequence_++, address, value & mask, device, width, true});
+
+    if (observer) {
+        observer(observer_context, address, width, value);
+        std::lock_guard lock(mutex_);
+        --observer_callbacks_in_flight_;
+        if (observer_callbacks_in_flight_ == 0) observer_idle_.notify_all();
+    }
     return true;
+}
+
+bool GuestMmioBus::set_xenos_write_observer(
+    void* context, XenosWriteObserver observer) noexcept {
+    if (!context || !observer) return false;
+    std::lock_guard lock(mutex_);
+    if (xenos_write_observer_ && observer_context_ != context) return false;
+    observer_context_ = context;
+    xenos_write_observer_ = observer;
+    return true;
+}
+
+void GuestMmioBus::clear_xenos_write_observer(void* context) noexcept {
+    if (!context) return;
+    std::unique_lock lock(mutex_);
+    if (observer_context_ != context) return;
+    observer_context_ = nullptr;
+    xenos_write_observer_ = nullptr;
+    observer_idle_.wait(lock, [this] { return observer_callbacks_in_flight_ == 0; });
 }
 
 std::vector<GuestMmioAccess> GuestMmioBus::trace() const {
