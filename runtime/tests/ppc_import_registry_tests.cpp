@@ -1,4 +1,5 @@
 #include "memory/guest_address_space.hpp"
+#include "memory/guest_mmio.hpp"
 #include "ppc/import_registry.hpp"
 #include "ppc/boot_hle.hpp"
 #include "fs/guest_vfs.hpp"
@@ -26,6 +27,14 @@ PPC_FUNC_IMPL(test_default_handler) {
     (void)ctx;
     (void)base;
 }
+
+std::uint32_t ppc_test_load_u32(std::uint8_t* base, std::uint32_t address) {
+    return PPC_LOAD_U32(address);
+}
+void ppc_test_store_u32(std::uint8_t* base, std::uint32_t address,
+                        std::uint32_t value) {
+    PPC_STORE_U32(address, value);
+}
 }
 
 int main() {
@@ -46,6 +55,25 @@ int main() {
     // Reserve writable guest scratch pages after the synthetic function table.
     // The 4 GiB reservation is PROT_NONE until an explicit commit.
     assert(memory.commit_region(0x82012000u, 0x6000u, &error));
+
+    // Scalar generated PPC memory accessors must bypass the PROT_NONE guest
+    // aperture and use the runtime bus for Xenos/XMA, while preserving direct
+    // big-endian RAM behavior for ordinary guest addresses.
+    using toohuman::runtime::GuestMmioBus;
+    using toohuman::runtime::kXenosMmioBase;
+    GuestMmioBus::global().reset();
+    const auto xenos_register = kXenosMmioBase + 0x40u;
+    ppc_test_store_u32(memory.base(), xenos_register, 0x12345678u);
+    assert(ppc_test_load_u32(memory.base(), xenos_register) == 0x12345678u);
+    const auto mmio_trace = GuestMmioBus::global().trace();
+    assert(mmio_trace.size() == 2u);
+    assert(mmio_trace[0].write && mmio_trace[0].value == 0x12345678u);
+    assert(!mmio_trace[1].write && mmio_trace[1].value == 0x12345678u);
+
+    ppc_test_store_u32(memory.base(), 0x82012080u, 0x89ABCDEFu);
+    assert(ppc_test_load_u32(memory.base(), 0x82012080u) == 0x89ABCDEFu);
+    assert(memory.base()[0x82012080u] == 0x89u);
+    assert(memory.base()[0x82012083u] == 0xEFu);
 
     toohuman::runtime::PpcImportRegistry imports;
     assert(imports.register_handler("xboxkrnl.exe", 0x74u,
