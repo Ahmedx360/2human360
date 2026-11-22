@@ -101,12 +101,6 @@ int main() {
     assert(imports.install(memory, metadata, &registered, &error));
     assert(registered == 42u);
     assert(memory.get_function<PPCFunc*>(0x82001100u) != &test_default_handler);
-    // The new volume-information export is registered under the Xbox ordinal 0xEF.
-    PPCContext volume_dispatch_context{};
-    volume_dispatch_context.r3.u32 = 0xDEADBEEFu;
-    call_test_import(0x820011A4u, volume_dispatch_context);
-    assert(volume_dispatch_context.r3.u32 == 0xC0000008u); // Invalid handle.
-
 
     PPCContext context{};
     context.ctr.u32 = 0x82001100u;
@@ -121,6 +115,12 @@ int main() {
         assert(function != nullptr);
         function(ctx, memory.base());
     };
+    // The new volume-information export is registered under Xbox ordinal 0xEF.
+    PPCContext volume_dispatch_context{};
+    volume_dispatch_context.r3.u32 = 0xDEADBEEFu;
+    call_test_import(0x820011A4u, volume_dispatch_context);
+    assert(volume_dispatch_context.r3.u32 == 0xC0000008u); // Invalid handle.
+
     PPCContext boot_context{};
     call_test_import(0x8200110Cu, boot_context); // KeGetCurrentProcessType
     assert(boot_context.r3.u32 == 1u);
