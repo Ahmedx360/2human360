@@ -644,13 +644,16 @@ PPC_FUNC(RtlCompareMemoryUlong) {
     const auto source = ctx.r3.u32;
     const auto length = ctx.r4.u32;
     const auto pattern = ctx.r5.u32;
-    if (source == 0 || (source & 3u) != 0 || (length & 3u) != 0 ||
+    if (source == 0 || (source & 3u) != 0 ||
         static_cast<std::uint64_t>(source) + length > (std::uint64_t{1} << 32)) {
         ctx.r3.u32 = 0;
         return;
     }
+    // Compare complete ULONGs only. The API length is a byte count and may
+    // include a trailing 1-3 bytes that cannot form another ULONG.
+    const auto comparable_length = length & ~std::uint32_t{3};
     std::uint32_t matched_bytes = 0;
-    for (std::uint32_t offset = 0; offset < length; offset += 4) {
+    for (std::uint32_t offset = 0; offset < comparable_length; offset += 4) {
         if (get_be32(at(base, source + offset)) != pattern) break;
         matched_bytes += 4;
     }
