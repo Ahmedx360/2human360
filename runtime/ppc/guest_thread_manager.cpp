@@ -222,13 +222,31 @@ std::optional<GuestThreadHandle> GuestThreadManager::create(
     }
 
     reap_completed_workers();
-    auto record = std::make_shared<Record>(
-        std::move(startup), std::move(entry), std::move(cleanup),
-        initially_suspended ? 1u : 0u);
+    std::shared_ptr<Record> record;
+    try {
+        record = std::make_shared<Record>(
+            std::move(startup), std::move(entry), std::move(cleanup),
+            initially_suspended ? 1u : 0u);
+    } catch (...) {
+        set_error(error, "Could not allocate guest thread bookkeeping");
+        run_cleanup(std::move(cleanup), startup);
+        return std::nullopt;
+    }
 
     std::lock_guard manager_lock(mutex_);
     if (shutting_down_) {
         set_error(error, "Guest thread manager is shutting down");
+        return std::nullopt; // Record destructor invokes cleanup.
+    }
+
+    // Reserve host bookkeeping before publishing the guest handle. Without
+    // this ordering, a vector allocation failure after insert() could leave a
+    // live kernel-object handle that the manager cannot track or close.
+    try {
+        workers_.reserve(workers_.size() + 1u);
+        owned_handles_.reserve(owned_handles_.size() + 1u);
+    } catch (...) {
+        set_error(error, "Could not allocate host bookkeeping for guest thread");
         return std::nullopt; // Record destructor invokes cleanup.
     }
 
@@ -241,6 +259,7 @@ std::optional<GuestThreadHandle> GuestThreadManager::create(
         return std::nullopt; // Record destructor invokes cleanup.
     }
 
+    // Capacity is reserved, and these value insertions are non-throwing.
     workers_.push_back(record);
     owned_handles_.push_back(*handle);
     try {
