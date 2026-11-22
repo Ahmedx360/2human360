@@ -187,7 +187,24 @@ void test_query_volume_information_file() {
     assert(context.r3.u32 == 0u);
     assert(be32(iosb) == 0u);
     assert(be32(iosb + 4u) == 40u);
+    assert(be64(basic_information + 0x00u) > 0u);
+    assert(be64(basic_information + 0x00u) == be64(basic_information + 0x10u));
     assert(be32(basic_information + 0x20u) == 0x80u); // FILE_ATTRIBUTE_NORMAL.
+
+    constexpr std::uint32_t network_information = 0x7B00u;
+    context = {};
+    context.r3.u32 = *handle;
+    context.r4.u32 = iosb;
+    context.r5.u32 = network_information;
+    context.r6.u32 = 56u;
+    context.r7.u32 = 34u; // FileNetworkOpenInformation.
+    boot_hle::NtQueryInformationFile(context, base());
+    assert(context.r3.u32 == 0u);
+    assert(be32(iosb) == 0u);
+    assert(be32(iosb + 4u) == 56u);
+    assert(be64(network_information) == be64(basic_information));
+    assert(be64(network_information + 0x10u) == be64(basic_information + 0x10u));
+    assert(be32(network_information + 0x30u) == 0x80u);
 
     context = {};
     context.r3.u32 = *handle;
