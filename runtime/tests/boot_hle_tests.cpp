@@ -54,6 +54,75 @@ void test_executable_module_lookup() {
     assert(be32(output) == 0);
 }
 
+void test_rtl_image_xex_header_field() {
+    constexpr std::uint32_t header = 0x7000u;
+    constexpr std::uint32_t header_size = 0x80u;
+    std::memset(base() + header, 0, header_size);
+    auto write_be32 = [](std::uint32_t address, std::uint32_t value) {
+        g_mem[address] = static_cast<std::uint8_t>(value >> 24);
+        g_mem[address + 1] = static_cast<std::uint8_t>(value >> 16);
+        g_mem[address + 2] = static_cast<std::uint8_t>(value >> 8);
+        g_mem[address + 3] = static_cast<std::uint8_t>(value);
+    };
+    write_be32(header + 8u, header_size);
+    write_be32(header + 0x14u, 3u);
+    // Inline-valued optional header (key type 0).
+    write_be32(header + 0x18u, 0x00010100u);
+    write_be32(header + 0x1Cu, 0x82A46B18u);
+    // Pointer-to-inline-value optional header (key type 1).
+    write_be32(header + 0x20u, 0x00010101u);
+    write_be32(header + 0x24u, 0x1234u);
+    // Offset-valued optional header (key type 2).
+    write_be32(header + 0x28u, 0x000002FFu);
+    write_be32(header + 0x2Cu, 0x50u);
+
+    PPCContext context{};
+    context.r3.u32 = header;
+    context.r4.u32 = 0x00010100u;
+    boot_hle::RtlImageXexHeaderField(context, base());
+    assert(context.r3.u32 == 0x82A46B18u);
+
+    context = {};
+    context.r3.u32 = header;
+    context.r4.u32 = 0x00010101u;
+    boot_hle::RtlImageXexHeaderField(context, base());
+    assert(context.r3.u32 == header + 0x24u);
+
+    context = {};
+    context.r3.u32 = header;
+    context.r4.u32 = 0x000002FFu;
+    boot_hle::RtlImageXexHeaderField(context, base());
+    assert(context.r3.u32 == header + 0x50u);
+
+    context = {};
+    context.r3.u32 = header;
+    context.r4.u32 = 0x00010200u;
+    boot_hle::RtlImageXexHeaderField(context, base());
+    assert(context.r3.u32 == 0u);
+
+    // Invalid guest pointers and malformed header sizes/counts fail closed.
+    context = {};
+    context.r3.u32 = 0xFFFFFFF0u;
+    context.r4.u32 = 0x00010100u;
+    boot_hle::RtlImageXexHeaderField(context, base());
+    assert(context.r3.u32 == 0u);
+
+    write_be32(header + 8u, 0x17u);
+    context = {};
+    context.r3.u32 = header;
+    context.r4.u32 = 0x00010100u;
+    boot_hle::RtlImageXexHeaderField(context, base());
+    assert(context.r3.u32 == 0u);
+
+    write_be32(header + 8u, header_size);
+    write_be32(header + 0x14u, 0xFFFFFFFFu);
+    context = {};
+    context.r3.u32 = header;
+    context.r4.u32 = 0x00010100u;
+    boot_hle::RtlImageXexHeaderField(context, base());
+    assert(context.r3.u32 == 0u);
+}
+
 void test_critical_sections() {
     constexpr std::uint32_t address = 0x8000u;
     PPCContext context{};
@@ -435,6 +504,7 @@ int main() {
     assert(be32(0x6F04) == 1);
 
     test_executable_module_lookup();
+    test_rtl_image_xex_header_field();
     test_critical_sections();
     test_tls();
     test_events();
