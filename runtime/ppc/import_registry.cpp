@@ -32,6 +32,8 @@ PPC_FUNC_IMPL(toohuman_import_trampoline) {
         std::abort();
     }
     registry->dispatch(ctx, base);
+    static const bool trace_ret = std::getenv("TH_TRACE_IMPORTS") != nullptr;
+    if (trace_ret) std::fprintf(stderr, "    -> r3=%08X\n", static_cast<unsigned>(ctx.r3.u32));
 }
 
 void set_error(std::string* error, const char* message) {
@@ -762,6 +764,33 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
             if (rounded_size == 0 || rounded_size > 0xFFFFFFFFu) {
                 context.r3.u32 = kStatusInvalidParameter;
                 return;
+            }
+
+            if (adjusted_base != 0 && (allocation_type & kMemReserve) == 0) {
+                // MEM_COMMIT inside a region reserved by an earlier call.
+                for (const auto& [region_base, region] : virtual_memory_regions_) {
+                    const auto region_end =
+                        static_cast<std::uint64_t>(region_base) + region.size;
+                    if (adjusted_base < region_base ||
+                        static_cast<std::uint64_t>(adjusted_base) + rounded_size > region_end)
+                        continue;
+                    if (memory_ == nullptr ||
+                        !memory_->protect_region(adjusted_base,
+                                                 static_cast<std::size_t>(rounded_size),
+                                                 host_protection, nullptr)) {
+                        context.r3.u32 = kStatusAccessDenied;
+                        return;
+                    }
+                    if ((allocation_type & kMemNoZero) == 0) {
+                        std::memset(base + adjusted_base, 0,
+                                    static_cast<std::size_t>(rounded_size));
+                    }
+                    store_be32(base + base_pointer, adjusted_base);
+                    store_be32(base + size_pointer,
+                               static_cast<std::uint32_t>(rounded_size));
+                    context.r3.u32 = kStatusSuccess;
+                    return;
+                }
             }
 
             std::optional<std::uint32_t> allocation;

@@ -27,6 +27,7 @@ namespace toohuman::runtime {
 namespace {
 
 constexpr std::uint32_t kStatusSuccess = 0;
+constexpr std::uint32_t kStatusUnsuccessful = 0xC0000001u;
 
 inline std::uint8_t* at(std::uint8_t* base, std::uint32_t guest) { return base + guest; }
 
