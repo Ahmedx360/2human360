@@ -103,24 +103,54 @@ target and stores the progress dword in guest big-endian order. Ring sizing
 uses `1 << (size_log2 + 3)` bytes, matching the reference command processor's
 8-byte sizing unit.
 
-This is a memory/packet bridge, not the Xenos command processor itself. The
-caller must still supply the ring base, size and write pointer; CP register
-programming, asynchronous worker scheduling, MMIO write-pointer notification,
-indirect-buffer execution, interrupts, fences, DMA, and GPU opcode semantics
-are not implemented. Callbacks should avoid partial side effects when they
-reject a packet, because packet-level pointer progress is transactional but
-host callback state is not automatically rolled back.
+The `XenosCommandProcessor` wraps that bridge with primary-ring
+configuration and pointer lifecycle. It validates the ring base and size,
+starts the read pointer at zero, requires a valid dword write pointer before
+pumping, and records the optional read-pointer writeback target.
+`process_available` performs a bounded synchronous pump, advances only across
+fully dispatched packets, and publishes partial progress if a later packet
+fails. A failed writeback is reported separately from a packet-dispatch failure.
+
+This is still not an asynchronous Xenos command processor. The class is not
+yet wired to `VdInitializeRingBuffer`, `VdEnableRingBufferRPtrWriteBack`, or
+the `CP_RB_WPTR` MMIO write path. It does not implement the hardware's
+read-pointer writeback block cadence, indirect-buffer execution, interrupts,
+fences, DMA, or GPU opcode semantics. The writeback block-size value is
+retained for diagnostics; the current synchronous pump writes the read pointer
+after each call that consumes dwords. Callbacks should avoid partial side
+effects when they reject a packet, because packet-level pointer progress is
+transactional but host callback state is not automatically rolled back.
 
 The PM4 stream dispatcher builds on the packet decoder and routes type-0
 sequential/single-register writes and type-1 two-register writes to an explicit
 register callback. Type-3 packets are forwarded with opcode, predicate and a
 bounded payload span to an explicit opcode callback; type-2 and zero-word NOP
 packets are consumed without side effects. Dispatch has a caller-supplied
-packet budget and stops on malformed/truncated input, missing handlers, or a
-callback rejection. It reports only fully consumed packets. This is still not
-a ring-buffer worker: guest physical-address translation, wraparound, CP
-read/write pointers, interrupts, memory writes/fences and GPU state semantics
-must be implemented before it can process the title's real command stream.
+packet budget and stops on malformed/truncated input, missing handlers, or
+a callback rejection. It reports only fully consumed packets. The Xenos
+command-processor pump now owns primary-ring configuration and pointer
+progress, but the guest-memory adapter and pump are not yet connected to
+Too Human's kernel imports or MMIO write-pointer path. It cannot yet process
+the title's real command stream end to end.
+
+## Implemented: bounded Xenos primary-ring pump
+
+`XenosCommandProcessor` validates physical base/size for primary-ring
+configuration and read-pointer writeback, initializes the read pointer,
+validates CP write pointers as dword indices, and runs the bounded guest-ring
+dispatcher on request. It publishes the read pointer in guest big-endian form
+after a pump that consumed commands, including progress before a later
+callback rejection. The caller supplies explicit PM4 callbacks; an unsupported
+Type-3 operation is rejected rather than silently accepted.
+
+The pump is synchronous and currently game-free. It has not yet been bound to
+the two title imports or to writes to Xenos `CP_RB_WPTR` register index
+`0x01C5`. It does not schedule a device worker or model the hardware's
+read-pointer writeback block cadence; it writes once per pump call that
+consumes dwords. Interrupt, indirect-buffer and GPU command semantics remain
+unimplemented. `TooHumanXenosCommandProcessorTests` covers ring configuration,
+write-pointer validation, packet progress, callback rejection and read-pointer
+writeback failure.
 
 ## Startup import priorities and boot HLE
 
