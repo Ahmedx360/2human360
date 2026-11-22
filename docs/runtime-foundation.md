@@ -81,10 +81,20 @@ other device side effects.
 The PM4 framing helper decodes one guest-logical dword stream packet at a time.
 It handles the zero-word NOP, type-0 sequential/single-register writes, type-1
 two-register writes, type-2 no-payload packets, and type-3 opcode/predicate
-headers. It validates payload bounds before returning a packet view. It does
-not execute opcodes, follow indirect buffers, consume a GPU ring buffer, or
-translate shaders. The helper is kept independent of a graphics backend so
-packet framing can be regression-tested before command execution is added.
+headers. It validates payload bounds before returning a packet view. A bounded
+stream dispatcher routes register writes and Type-3 packets through explicit
+callbacks, enforces a packet budget, and reports malformed input, missing
+handlers and rejected callbacks instead of silently treating unknown commands
+as successful.
+
+The circular-ring consumer accepts a caller-provided span of guest-logical
+dwords and read/write indices. It handles packets that cross the physical end
+of the ring, validates pointers and incomplete payloads, enforces a per-call
+packet budget, and returns the read index only after complete packet dispatch.
+The ring consumer does not map guest physical addresses, configure the Xenos
+CP ring registers, write the guest read pointer back, execute indirect buffers,
+or provide GPU command semantics. Those responsibilities remain in the future
+device layer; no guest GPU operation is claimed to work yet.
 
 The PM4 stream dispatcher builds on the packet decoder and routes type-0
 sequential/single-register writes and type-1 two-register writes to an explicit
