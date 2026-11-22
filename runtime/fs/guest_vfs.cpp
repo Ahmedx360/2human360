@@ -176,7 +176,8 @@ std::size_t GuestFile::write(const void* data, std::size_t length,
 }
 
 std::optional<GuestDirectoryEntry> GuestFile::next_directory_entry(
-    const std::string& pattern, bool restart, GuestVfsStatus& status) {
+    const std::string& pattern, bool restart, GuestVfsStatus& status,
+    std::size_t max_name_bytes) {
     std::lock_guard lock(mutex_);
     if (!directory_) {
         status = GuestVfsStatus::NotADirectory;
@@ -258,6 +259,12 @@ std::optional<GuestDirectoryEntry> GuestFile::next_directory_entry(
     if (directory_cursor_ >= directory_entries_.size()) {
         status = directory_entries_.empty() && !pattern.empty()
             ? GuestVfsStatus::NoSuchFile : GuestVfsStatus::NoMoreFiles;
+        return std::nullopt;
+    }
+    const auto& next = directory_entries_[directory_cursor_];
+    if (next.name.size() > max_name_bytes) {
+        // Leave the cursor unchanged so the caller can retry with a larger buffer.
+        status = GuestVfsStatus::BufferOverflow;
         return std::nullopt;
     }
     status = GuestVfsStatus::Success;
