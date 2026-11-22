@@ -139,9 +139,9 @@ TooHumanGuestThreadManagerTests exercises suspend/resume, timeout/completion, ex
 The `NtQueryInformationFile` HLE supports the Xbox `FileBasicInformation`
 (class 4), `FileStandardInformation` (class 5), `FilePositionInformation`
 (class 14), and `FileNetworkOpenInformation` (class 34) records. Basic
-information uses the host file's last-write timestamp for all four time fields
-until the VFS tracks creation/access/change timestamps independently; it
-reports the VFS-derived directory, hidden and normal attributes.
+Basic and NetworkOpen information use the host file's last-write timestamp for
+all four time fields until the VFS tracks creation/access/change timestamps
+independently; both report VFS-derived file attributes.
 
 The host-backed `GuestVfs` maps the title's game volume read-only and save/cache
 volumes beneath a configurable save root. It normalizes Xbox device paths,
