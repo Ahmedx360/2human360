@@ -547,12 +547,14 @@ PPC_FUNC(XexGetModuleSection) {
     constexpr std::uint32_t kInvalidParameter = 0xC000000Du;
 
     const auto module_handle = g_executable_module_handle.load(std::memory_order_acquire);
-    if (module_handle == 0 ||
-        !guest_range_valid(base, module_handle + 0x58u, 4u, GuestMemoryAccess::Read)) {
+    const auto xex_header_field = static_cast<std::uint64_t>(module_handle) + 0x58u;
+    if (module_handle == 0 || xex_header_field + 4u > GuestAddressSpace::kSize ||
+        !guest_range_valid(base, static_cast<std::uint32_t>(xex_header_field),
+                           4u, GuestMemoryAccess::Read)) {
         ctx.r3.u32 = kNotFound;
         return;
     }
-    const auto xex_header = get_be32(at(base, module_handle + 0x58u));
+    const auto xex_header = get_be32(at(base, static_cast<std::uint32_t>(xex_header_field)));
     if (xex_header == 0 ||
         !guest_range_valid(base, xex_header, 0x18u, GuestMemoryAccess::Read)) {
         ctx.r3.u32 = kNotFound;

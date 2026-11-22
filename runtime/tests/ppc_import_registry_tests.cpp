@@ -88,11 +88,13 @@ int main() {
         {"xboxkrnl.exe", 0x000Du, 0, 1, 0x82001188u},
         {"xboxkrnl.exe", 0x0019u, 0, 1, 0x8200118Cu},
         {"xboxkrnl.exe", 0x0092u, 0, 1, 0x82001190u},
-        {"xboxkrnl.exe", 0x00F5u, 0, 1, 0x82001194u}
+        {"xboxkrnl.exe", 0x00F5u, 0, 1, 0x82001194u},
+        {"xboxkrnl.exe", 0x0196u, 0, 1, 0x82001198u},
+        {"xboxkrnl.exe", 0x00DAu, 0, 1, 0x8200119Cu}
     };
     std::size_t registered = 0;
     assert(imports.install(memory, metadata, &registered, &error));
-    assert(registered == 38u);
+    assert(registered == 40u);
     assert(memory.get_function<PPCFunc*>(0x82001100u) != &test_default_handler);
 
     PPCContext context{};
@@ -384,6 +386,57 @@ int main() {
     call_test_import(0x82001160u, boot_context);
     assert(boot_context.r3.u32 == 0xC0000263u);
     assert(guest_be32(procedure_out) == 0);
+
+    // XexGetModuleSection parses the resource-info header (0x2FF) with bounded
+    // offsets and writes its data pointer/size only to committed outputs.
+    write_guest_be32(synthetic_xex_header + 8u, 0x40u);
+    write_guest_be32(synthetic_xex_header + 0x14u, 1u);
+    write_guest_be32(synthetic_xex_header + 0x18u, 0x000002FFu);
+    write_guest_be32(synthetic_xex_header + 0x1Cu, 0x28u);
+    write_guest_be32(synthetic_xex_header + 0x28u, 20u);
+    std::memcpy(memory.base() + synthetic_xex_header + 0x2Cu, "TESTSEC", 7u);
+    memory.base()[synthetic_xex_header + 0x33u] = 0;
+    write_guest_be32(synthetic_xex_header + 0x34u, 0x82015000u);
+    write_guest_be32(synthetic_xex_header + 0x38u, 0x40u);
+    std::memcpy(memory.base() + module_name, "TESTSEC", 7u);
+    memory.base()[module_name + 7u] = 0;
+
+    boot_context = {};
+    boot_context.r3.u32 = fake_module_handle;
+    boot_context.r4.u32 = module_name;
+    boot_context.r5.u32 = module_handle_out;
+    boot_context.r6.u32 = procedure_out;
+    call_test_import(0x82001198u, boot_context);
+    assert(boot_context.r3.u32 == 0u);
+    assert(guest_be32(module_handle_out) == 0x82015000u);
+    assert(guest_be32(procedure_out) == 0x40u);
+
+    boot_context = {};
+    boot_context.r3.u32 = fake_module_handle;
+    boot_context.r4.u32 = module_name;
+    boot_context.r5.u32 = 0x60000000u; // Reserved but not committed.
+    boot_context.r6.u32 = procedure_out;
+    call_test_import(0x82001198u, boot_context);
+    assert(boot_context.r3.u32 == 0xC0000005u);
+
+    write_guest_be32(synthetic_xex_header + 0x28u, 3u); // Must not underflow section size.
+    boot_context = {};
+    boot_context.r3.u32 = fake_module_handle;
+    boot_context.r4.u32 = module_name;
+    boot_context.r5.u32 = module_handle_out;
+    boot_context.r6.u32 = procedure_out;
+    call_test_import(0x82001198u, boot_context);
+    assert(boot_context.r3.u32 == 0xC0000225u);
+
+    toohuman::runtime::set_executable_module_handle(0xFFFFFFF0u);
+    boot_context = {};
+    boot_context.r4.u32 = module_name;
+    boot_context.r5.u32 = module_handle_out;
+    boot_context.r6.u32 = procedure_out;
+    call_test_import(0x82001198u, boot_context);
+    assert(boot_context.r3.u32 == 0xC0000225u);
+    toohuman::runtime::set_executable_module_handle(0);
+
     toohuman::runtime::set_executable_module_handle(0);
 
     // Event create/set/clear/wait/close lifecycle, including manual vs auto reset.
@@ -467,6 +520,40 @@ int main() {
     assert(boot_context.r3.u32 == 0);
     const auto manual_event = guest_be32(handle_out);
     assert(manual_event != 0);
+
+    constexpr std::uint32_t duplicate_out1 = 0x82013020u;
+    constexpr std::uint32_t duplicate_out2 = 0x82013024u;
+    boot_context = {};
+    boot_context.r3.u32 = manual_event;
+    boot_context.r4.u32 = 0x60000000u; // Invalid output pointer must not duplicate.
+    call_test_import(0x8200119Cu, boot_context);
+    assert(boot_context.r3.u32 == 0xC0000005u);
+    assert(toohuman::runtime::process_kernel_objects().lookup(manual_event));
+
+    boot_context = {};
+    boot_context.r3.u32 = manual_event;
+    boot_context.r4.u32 = duplicate_out1;
+    call_test_import(0x8200119Cu, boot_context); // DUPLICATE_SAME_ACCESS default.
+    assert(boot_context.r3.u32 == 0u);
+    const auto duplicated_event1 = guest_be32(duplicate_out1);
+    assert(duplicated_event1 != 0u && duplicated_event1 != manual_event);
+    assert(toohuman::runtime::process_kernel_objects().lookup(duplicated_event1) ==
+           toohuman::runtime::process_kernel_objects().lookup(manual_event));
+
+    boot_context = {};
+    boot_context.r3.u32 = duplicated_event1;
+    boot_context.r4.u32 = duplicate_out2;
+    boot_context.r5.u32 = 1u; // DUPLICATE_CLOSE_SOURCE.
+    call_test_import(0x8200119Cu, boot_context);
+    assert(boot_context.r3.u32 == 0u);
+    const auto duplicated_event2 = guest_be32(duplicate_out2);
+    assert(duplicated_event2 != 0u);
+    assert(!toohuman::runtime::process_kernel_objects().lookup(duplicated_event1));
+    assert(toohuman::runtime::process_kernel_objects().lookup(duplicated_event2));
+    boot_context = {};
+    boot_context.r3.u32 = duplicated_event2;
+    call_test_import(0x82001144u, boot_context); // NtClose.
+    assert(boot_context.r3.u32 == 0u);
     boot_context = {};
     boot_context.r3.u32 = manual_event;
     boot_context.r6.u32 = timeout_in;
