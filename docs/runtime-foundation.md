@@ -152,7 +152,8 @@ buffer, `r9` its byte length, `r10` the optional 8-byte `ANSI_STRING`
 search descriptor, and the ninth `RestartScan` argument is at `r1 + 0x54`.
 It emits a single `FILE_DIRECTORY_INFORMATION` record per synchronous call.
 The record's `EndOfFile` and `AllocationSize` fields are 64-bit big-endian
-values; `IO_STATUS_BLOCK.Information` reports the number of bytes actually
+values; an undersized filename buffer returns `STATUS_BUFFER_OVERFLOW` without
+advancing the enumeration cursor, allowing the caller to retry. `IO_STATUS_BLOCK.Information` reports the number of bytes actually
 written (the 0x40-byte header plus the filename). Optional event handles are
 signaled on completion. APC callbacks, asynchronous I/O completion, other
 directory-information classes, and multi-record batching are not implemented.
