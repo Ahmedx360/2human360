@@ -40,6 +40,7 @@ PPCFunc XexGetProcedureAddress;
 PPCFunc XexCheckExecutablePrivilege;
 PPCFunc XexGetModuleSection;
 PPCFunc NtDuplicateObject;
+PPCFunc ObReferenceObjectByHandle;
 PPCFunc RtlImageXexHeaderField;
 PPCFunc RtlCompareMemoryUlong;
 PPCFunc RtlRaiseException;

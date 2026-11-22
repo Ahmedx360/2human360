@@ -19,6 +19,8 @@ public:
         std::optional<std::chrono::milliseconds> timeout) = 0;
     // Called after the handle is removed from the table, without its mutex held.
     virtual void on_handle_closed() noexcept {}
+    // Guest-visible object body address (e.g. KTHREAD), or 0 when none exists.
+    [[nodiscard]] virtual std::uint32_t guest_object_address() const noexcept { return 0; }
 };
 class GuestEventObject final : public GuestKernelObject {
 public:

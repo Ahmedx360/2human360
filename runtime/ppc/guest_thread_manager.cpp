@@ -45,6 +45,10 @@ struct GuestThreadManager::Record final : GuestKernelObject {
         return GuestKernelObjectType::Thread;
     }
 
+    [[nodiscard]] std::uint32_t guest_object_address() const noexcept override {
+        return startup.kthread_address;
+    }
+
     [[nodiscard]] GuestKernelObjectWaitResult wait(
         std::optional<std::chrono::milliseconds> timeout) override {
         Cleanup deferred_cleanup;

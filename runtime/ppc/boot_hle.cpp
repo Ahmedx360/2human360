@@ -924,6 +924,17 @@ PPC_FUNC(NtDuplicateObject) {
     ctx.r3.u32 = kStatusSuccess;
 }
 
+// xboxkrnl #0x110. ObReferenceObjectByHandle(HANDLE /*r3*/, POBJECT_TYPE /*r4*/, PVOID* out /*r5*/).
+// Thread handles resolve to the guest KTHREAD; other objects fail with STATUS_OBJECT_TYPE_MISMATCH.
+PPC_FUNC(ObReferenceObjectByHandle) {
+    const auto object = process_kernel_objects().lookup(ctx.r3.u32);
+    if (!object) { ctx.r3.u32 = kStatusInvalidHandle; return; }
+    const auto address = object->guest_object_address();
+    if (address == 0) { ctx.r3.u32 = 0xC0000024u; return; }
+    if (ctx.r5.u32 != 0) put_be32(at(base, ctx.r5.u32), address);
+    ctx.r3.u32 = kStatusSuccess;
+}
+
 PPC_FUNC(NtClose) {
     ctx.r3.u32 = process_kernel_objects().close(ctx.r3.u32)
         ? kStatusSuccess : kStatusInvalidHandle;
