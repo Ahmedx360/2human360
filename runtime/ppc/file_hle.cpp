@@ -409,20 +409,27 @@ PPC_FUNC(NtQueryFullAttributesFile) {
         if (!directory->is_directory()) { ctx.r3.u32 = kInvalidParameter; return; }
         root = directory->path();
         root_ptr = &root;
-        root_writable = directory->volume_writable();
+        root_writable = directory->can_write();
     }
 
-    const auto result = process_vfs().open(
-        name, root_ptr, 1u, false, false, root_writable, true);
-    if (result.status != GuestVfsStatus::Success || !result.file) {
-        ctx.r3.u32 = static_cast<std::uint32_t>(result.status);
-        return;
-    }
-    const auto size = result.file->size();
+    bool volume_writable = false;
+    const auto host = process_vfs().resolve(
+        name, root_ptr, &volume_writable, root_writable);
+    if (!host) { ctx.r3.u32 = 0xC0000034u; return; }
+
+    std::error_code ec;
+    const bool exists = std::filesystem::exists(*host, ec);
+    if (ec) { ctx.r3.u32 = kAccessDenied; return; }
+    if (!exists) { ctx.r3.u32 = 0xC0000034u; return; }
+    const bool is_directory = std::filesystem::is_directory(*host, ec);
+    if (ec) { ctx.r3.u32 = kAccessDenied; return; }
+    const auto size = is_directory ? 0u : std::filesystem::file_size(*host, ec);
+    if (ec) { ctx.r3.u32 = kAccessDenied; return; }
+
     std::memset(at(base, out), 0, 56u);
     wr64(base, out + 32u, (size + 0xFFFu) & ~0xFFFull);
     wr64(base, out + 40u, size);
-    wr32(base, out + 48u, result.file->is_directory() ? 0x10u : 0x80u);
+    wr32(base, out + 48u, is_directory ? 0x10u : 0x80u);
     ctx.r3.u32 = kSuccess;
 }
 

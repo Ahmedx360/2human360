@@ -159,9 +159,11 @@ bool GuestFile::resize(std::uint64_t new_size) {
 }
 
 bool GuestFile::flush() {
-    if (!can_write() || directory_) return false;
+    if (directory_) return false;
     std::lock_guard lock(mutex_);
     if (!stream_.is_open()) return false;
+    // A read-only handle has no buffered writes to flush.
+    if (!can_write()) return true;
     stream_.flush();
     return static_cast<bool>(stream_);
 }
@@ -288,8 +290,12 @@ GuestVfsOpenResult GuestVfs::open(
         result.status = GuestVfsStatus::ObjectNameNotFound;
         return result;
     }
-    if ((want_write || (!exists && create_if_missing) || overwrite_existing) &&
-        !volume_writable) {
+    const bool mutating_open = (!exists && create_if_missing) || overwrite_existing;
+    if (mutating_open && !want_write) {
+        result.status = GuestVfsStatus::AccessDenied;
+        return result;
+    }
+    if ((want_write || mutating_open) && !volume_writable) {
         result.status = GuestVfsStatus::AccessDenied;
         return result;
     }

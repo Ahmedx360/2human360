@@ -22,6 +22,28 @@ int main() {
     auto memory = GuestAddressSpace::reserve(&error);
     assert(memory.valid());
 
+    // Reserved pages are inaccessible until committed; protection changes
+    // must be reflected in the HLE pointer-validation helper.
+    constexpr std::uint32_t probe_address = 0x60000000u;
+    const auto probe_size = GuestAddressSpace::page_size();
+    assert(!GuestAddressSpace::is_accessible_range(
+        memory.base(), probe_address, 4u, GuestMemoryAccess::Read));
+    assert(memory.commit_region(probe_address, probe_size, &error));
+    assert(GuestAddressSpace::is_accessible_range(
+        memory.base(), probe_address, 4u, GuestMemoryAccess::Read));
+    assert(GuestAddressSpace::is_accessible_range(
+        memory.base(), probe_address, 4u, GuestMemoryAccess::Write));
+    assert(memory.protect_region(probe_address, probe_size,
+                                  GuestMemoryProtection::ReadOnly, &error));
+    assert(GuestAddressSpace::is_accessible_range(
+        memory.base(), probe_address, 4u, GuestMemoryAccess::Read));
+    assert(!GuestAddressSpace::is_accessible_range(
+        memory.base(), probe_address, 4u, GuestMemoryAccess::Write));
+    assert(memory.protect_region(probe_address, probe_size,
+                                  GuestMemoryProtection::ReadWrite, &error));
+    assert(GuestAddressSpace::is_accessible_range(
+        memory.base(), probe_address, 4u, GuestMemoryAccess::Write));
+
     GuestHeap heap(memory, 0xA0000000u, 0x00100000u);
     GuestHeap stack_heap(memory, 0x70000000u, 0x00100000u);
     assert(heap.initialize(&error));
