@@ -54,9 +54,9 @@ for site in (int(a, 16) for a in sys.argv[3:]):
         cnt = 0
         while cnt < 512 and site + 4 <= code_base + (rd(table + cnt*size) << shift) < nxt:
             cnt += 1
-        default = code_base + (rd(table) << shift)
+        default = (code_base + (rd(table) << shift)) & ~3
         print('  no bounds check: inferred', cnt, 'entries (function end', hex(nxt) + ')')
-    labels = [code_base + (rd(table + i*size) << shift) for i in range(cnt)]
+    labels = [(code_base + (rd(table + i*size) << shift)) & ~3 for i in range(cnt)]
     print(hex(site), 'table', hex(table), 'size', size, 'shift', shift, 'idx r%d' % idx, 'count', cnt, 'default', hex(default))
     out.append('[[switch]]\nbase = 0x%08X\nr = %d\ndefault = 0x%08X\nlabels = [\n%s]\n' % (site, idx, default, ''.join('    0x%08X,\n' % l for l in labels)))
 open(sys.argv[2], 'a').write('# ---- NOP-PADDED COMPUTED JUMPTABLES (add_nop_switch_tables.py) ----\n' + '\n'.join(out))

@@ -1,0 +1,47 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "clang-release",
+      "displayName": "Clang Release (generated game-code library and PPC runtime adapter)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/clang-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "TH_BUILD_RECOMP_LIB": "ON",
+        "BUILD_TESTING": "ON"
+      }
+    },
+    {
+      "name": "validate-only",
+      "displayName": "Validate generated artifacts without compiling PPC",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/validate-only",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "TH_BUILD_RECOMP_LIB": "OFF",
+        "BUILD_TESTING": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "clang-release",
+      "configurePreset": "clang-release",
+      "targets": [ "TooHumanPpcRuntime", "TooHumanPpcImportRegistryTests", "TooHumanXexImportAudit", "TooHumanGuestHeapTests", "TooHumanXexImageTests", "TooHumanGuestMemoryTests", "TooHumanXbox360PeTests" ]
+    },
+    {
+      "name": "validate-only",
+      "configurePreset": "validate-only"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "validate",
+      "configurePreset": "validate-only",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}

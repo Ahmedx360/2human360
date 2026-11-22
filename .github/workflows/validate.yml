@@ -1,0 +1,62 @@
+name: Validate and build Too Human recompilation
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+# Keep only the newest validation for a given PR/ref. This prevents a backlog
+# when several commits are pushed while a build is still queued or running.
+concurrency:
+  group: too-human-validation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate generated artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Configure validation build
+        run: cmake -S . -B build/validate -DTH_BUILD_RECOMP_LIB=OFF -DBUILD_TESTING=ON
+
+      - name: Build validation targets
+        run: cmake --build build/validate --parallel
+
+      - name: Validate generated PowerPC artifacts
+        run: ctest --test-dir build/validate --output-on-failure
+
+  build-generated-library:
+    name: Compile generated PPC library and runtime adapter with Clang
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out repository and pinned toolchain
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang ninja-build
+
+      - name: Configure Clang build
+        run: >-
+          cmake -S . -B build/clang -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_CXX_COMPILER=clang++
+          -DTH_BUILD_RECOMP_LIB=ON
+          -DTH_BUILD_RUNTIME_CORE=ON
+          -DTH_BUILD_RUNTIME_PROBE=ON
+          -DBUILD_TESTING=ON
+
+      - name: Compile the recompiled game-code library
+        run: cmake --build build/clang --target TooHumanRuntimeProbe TooHumanPpcImportRegistryTests TooHumanBootHleTests TooHumanGuestThreadStartupTests TooHumanGuestThreadManagerTests TooHumanGuestThreadRuntimeTests TooHumanGuestVfsTests TooHumanGuestKernelObjectTests TooHumanGuestMemoryTests TooHumanGuestHeapTests TooHumanXbox360PeTests TooHumanXexImageTests --parallel 2
+
+      - name: Test XEX import dispatch
+        run: ctest --test-dir build/clang -R "TooHuman(BootHle|PpcImportRegistry|GuestThreadStartup|GuestThreadManager|GuestThreadRuntime|GuestVfs|GuestKernelObject|GuestMemory|GuestHeap|Xbox360Pe|XexImage)Tests" --output-on-failure

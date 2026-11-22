@@ -150,8 +150,8 @@ index fa91527..6112da4 100644
 +    case PPC_INST_VRLH:
 +        for (size_t i = 0; i < 8; i++)
 +        {
-+            println("\t{}.u8[0] = {}.u8[{}] & 0xF;", temp(), v(insn.operands[2]), i * 2);
-+            println("\t{}.u16[{}] = uint16_t(({}.u16[{}] << {}.u8[0]) | ({}.u16[{}] >> ((16 - {}.u8[0]) & 0xF)));", v(insn.operands[0]), i, v(insn.operands[1]), i, temp(), v(insn.operands[1]), i, temp());
++            println("\t{}.u8 = {}.u8[{}] & 0xF;", temp(), v(insn.operands[2]), i * 2);
++            println("\t{}.u16[{}] = uint16_t(({}.u16[{}] << {}.u8) | ({}.u16[{}] >> ((16 - {}.u8) & 0xF)));", v(insn.operands[0]), i, v(insn.operands[1]), i, temp(), v(insn.operands[1]), i, temp());
 +        }
 +        break;
 +
@@ -190,8 +190,8 @@ index fa91527..6112da4 100644
 +        printSetFlushMode(true);
 +        for (size_t i = 0; i < 4; i++)
 +        {
-+            println("\t{}.f32[0] = {}.f32[{}] * {}f;", temp(), v(insn.operands[1]), i, double(1u << insn.operands[2]));
-+            println("\t{}.u32[{}] = !({}.f32[0] > 0.0f) ? 0u : {}.f32[0] >= 4294967296.0f ? 0xFFFFFFFFu : uint32_t({}.f32[0]);", v(insn.operands[0]), i, temp(), temp(), temp());
++            println("\t{}.f32 = {}.f32[{}] * {:.1f}f;", temp(), v(insn.operands[1]), i, double(1u << insn.operands[2]));
++            println("\t{}.u32[{}] = !({}.f32 > 0.0f) ? 0u : {}.f32 >= 4294967296.0f ? 0xFFFFFFFFu : uint32_t({}.f32);", v(insn.operands[0]), i, temp(), temp(), temp());
 +        }
 +        break;
 +

@@ -1,4 +1,23 @@
+
 # Game binaries are copyrighted - never commit them
-private/
-*.xex
+# Local CMake/Ninja build output
+*.a
 *.exe
+*.lib
+*.o
+*.obj
+*.pdb
+*.xex
+/build/
+/cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+CMakeUserPresets.json
+__pycache__/
+build/
+private/
+build_full.log
+build2.log
+
+# Local build logs
+build*.log
