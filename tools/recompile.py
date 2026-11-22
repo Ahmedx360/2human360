@@ -123,6 +123,8 @@ def build_tools(args: argparse.Namespace) -> None:
         "-B", str(build_dir),
         "-DCMAKE_BUILD_TYPE=Release",
     ]
+    compiler = args.compiler or ("clang-cl" if os.name == "nt" else "clang++")
+    command.append(f"-DCMAKE_CXX_COMPILER={compiler}")
     if args.generator:
         command.extend(["-G", args.generator])
     run_command(command)
@@ -375,6 +377,7 @@ def main() -> int:
     build_parser = subparsers.add_parser("build-tools", help="build XenonAnalyse and XenonRecomp")
     build_parser.add_argument("--build-dir", help="CMake build directory (default: build/xenon-tools)")
     build_parser.add_argument("--generator", help="optional CMake generator, e.g. Ninja")
+    build_parser.add_argument("--compiler", help="C++ compiler (default: clang++ or clang-cl on Windows)")
 
     analyse_parser = subparsers.add_parser(
         "analyze", help="scan the supplied image into a separate switch-table TOML for review"
