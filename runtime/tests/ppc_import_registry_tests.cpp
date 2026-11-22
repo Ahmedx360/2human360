@@ -80,7 +80,7 @@ int main() {
                                     &test_import_handler, &error));
     std::size_t startup_hle_count = 0;
     assert(toohuman::runtime::register_boot_imports(imports, &error, &startup_hle_count));
-    assert(startup_hle_count == 70u);
+    assert(startup_hle_count == 72u);
     const std::vector<toohuman::runtime::XexImport> metadata{
         {"xboxkrnl.exe", 0x74u, 0, 1, 0x82001100u},
         {"xboxkrnl.exe", 0x011Bu, 0, 1, 0x82001104u},
@@ -128,12 +128,35 @@ int main() {
         {"xboxkrnl.exe", 0x01BAu, 0, 1, 0x820011ACu},
         {"xboxkrnl.exe", 0x01C9u, 0, 1, 0x820011B0u},
         {"xboxkrnl.exe", 0x01CAu, 0, 1, 0x820011B4u},
-        {"xam.xex",      0x03D1u, 0, 1, 0x820011B8u}
+        {"xam.xex",      0x03D1u, 0, 1, 0x820011B8u},
+        {"xboxkrnl.exe", 0x01B6u, 0, 1, 0x820011BCu},
+        {"xboxkrnl.exe", 0x01C3u, 0, 1, 0x820011C0u}
     };
     std::size_t registered = 0;
     assert(imports.install(memory, metadata, &registered, &error));
-    assert(registered == 47u);
+    assert(registered == 49u);
     assert(memory.get_function<PPCFunc*>(0x82001100u) != &test_default_handler);
+
+    // The real kernel imports configure the per-title primary Xenos ring.
+    PPCContext ring_init{};
+    ring_init.r3.u32 = 0x00010000u;
+    ring_init.r4.u32 = 2u; // 1 << (2 + 3) = 32-byte primary ring.
+    const auto ring_init_fn = memory.get_function<PPCFunc*>(0x820011C0u);
+    assert(ring_init_fn != nullptr);
+    ring_init_fn(ring_init, memory.base());
+    assert(imports.xenos_command_processor().ring_initialized());
+    assert(imports.xenos_command_processor().ring_physical_base() == 0x00010000u);
+    assert(imports.xenos_command_processor().ring_size_log2() == 2u);
+
+    PPCContext ring_writeback{};
+    ring_writeback.r3.u32 = 0x00020000u;
+    ring_writeback.r4.u32 = 4u;
+    const auto ring_writeback_fn = memory.get_function<PPCFunc*>(0x820011BCu);
+    assert(ring_writeback_fn != nullptr);
+    ring_writeback_fn(ring_writeback, memory.base());
+    assert(imports.xenos_command_processor().read_pointer_writeback_enabled());
+    assert(imports.xenos_command_processor().read_pointer_writeback_physical() == 0x00020000u);
+    assert(imports.xenos_command_processor().read_pointer_writeback_block_size_log2() == 4u);
 
     PPCContext context{};
     context.ctr.u32 = 0x82001100u;
