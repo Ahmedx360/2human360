@@ -36,3 +36,10 @@ endif()
 if(TH_BUILD_RUNTIME_CORE)
     add_subdirectory(runtime)
 endif()
+
+# Generated scalar PPC memory accessors use the host MMIO bus only when both
+# the game-code library and runtime core are part of the same executable.
+if(TH_BUILD_RECOMP_LIB AND TH_BUILD_RUNTIME_CORE)
+    target_compile_definitions(TooHumanRecompLib PUBLIC TOOHUMAN_ENABLE_PPC_MMIO=1)
+    target_compile_definitions(TooHumanRuntimeCore PUBLIC TOOHUMAN_ENABLE_PPC_MMIO=1)
+endif()
