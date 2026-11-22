@@ -92,4 +92,39 @@ struct Pm4DispatchResult {
     const Pm4DispatchCallbacks& callbacks,
     std::size_t max_packets);
 
+
+enum class Pm4RingDispatchError : std::uint8_t {
+    None,
+    InvalidRing,
+    InvalidReadPointer,
+    InvalidWritePointer,
+    PacketDecodeFailed,
+    MissingRegisterHandler,
+    MissingType3Handler,
+    CallbackRejected,
+    PacketLimitReached,
+};
+
+struct Pm4RingDispatchResult {
+    std::size_t packets{};
+    std::size_t dwords_consumed{};
+    std::uint32_t read_index{};
+    Pm4RingDispatchError error{Pm4RingDispatchError::None};
+
+    [[nodiscard]] explicit operator bool() const noexcept {
+        return error == Pm4RingDispatchError::None;
+    }
+};
+
+// Consume the currently available portion of a circular ring, where read and
+// write pointers are dword indices. A packet may cross the physical end of the
+// ring. The caller owns memory mapping and pointer writeback; this routine
+// only advances the returned read index after a packet is fully dispatched.
+[[nodiscard]] Pm4RingDispatchResult dispatch_pm4_ring(
+    std::span<const std::uint32_t> ring,
+    std::uint32_t read_index,
+    std::uint32_t write_index,
+    const Pm4DispatchCallbacks& callbacks,
+    std::size_t max_packets);
+
 } // namespace toohuman::runtime
