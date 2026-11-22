@@ -507,7 +507,7 @@ int main() {
     assert(guest_be64(directory_info + 0x28u) == 3u);
     assert(guest_be64(directory_info + 0x30u) == 0x1000u);
     assert(guest_be32(directory_info + 0x3Cu) == 9u);
-    assert(guest_be32(directory_iosb + 4u) == 0x40u + 9u);
+    assert(guest_be32(directory_iosb + 4u) == 0x80u);
     assert(std::memcmp(memory.base() + directory_info + 0x40u, "alpha.txt", 9u) == 0);
 
     write_guest_be32(directory_restart, 0u);
