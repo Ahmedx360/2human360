@@ -184,6 +184,24 @@ or exact Xbox media geometry. Device-information (class 4) and
 attribute-information (class 5) queries remain unsupported and return
 `STATUS_INVALID_INFO_CLASS`.
 
+## Implemented: display-query HLE compatibility profile
+
+The runtime registers Too Human's `VdQueryVideoMode` (ordinal 0x1CA),
+`VdQueryVideoFlags` (0x1C9), `VdGetCurrentDisplayInformation` (0x1BA),
+`VdGetCurrentDisplayGamma` (0x1B9), and XAM `XGetVideoMode` (0x3D1).
+They expose a deterministic 1280x720 progressive 16:9 HD mode at 60 Hz
+(NTSC), using the Xbox/Xenia-compatible `X_VIDEO_MODE` (0x30-byte) and
+`X_DISPLAY_INFO` (0x58-byte) big-endian layouts. Video flags are 0x3
+(widescreen and at least 1024 pixels wide); gamma defaults to BT.709
+(type 2) with power 2.22222233. Output ranges are checked before writing.
+
+This is a host compatibility profile, not host-monitor enumeration or an
+implemented renderer. `VdSetDisplayMode`, `VdSwap`, GPU command processing,
+ring-buffer interrupts and Xenos register/MMIO handling remain separate work.
+The structure layouts and baseline values follow Xenia's definitions:
+[X_VIDEO_MODE layout](https://github.com/xenia-project/xenia/blob/master/src/xenia/xbox.h)
+and [video HLE](https://github.com/xenia-project/xenia/blob/master/src/xenia/kernel/xboxkrnl/xboxkrnl_video.cc).
+
 ## Next implementation sequence
 
 1. Add explicit MMIO ranges and aliases without exposing them as ordinary RAM.
