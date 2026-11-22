@@ -477,6 +477,21 @@ int main() {
                 directory_pattern.data(), directory_pattern.size());
     write_guest_be32(directory_restart, 1u);
 
+    // An undersized result buffer must not consume the current directory entry.
+    boot_context = {};
+    boot_context.r1.u32 = directory_restart - 0x54u;
+    boot_context.r3.u32 = *directory_handle;
+    boot_context.r7.u32 = directory_iosb;
+    boot_context.r8.u32 = directory_info;
+    boot_context.r9.u32 = 0x48u; // Header fits; "alpha.txt" does not.
+    boot_context.r10.u32 = directory_name_descriptor;
+    call_test_import(0x820011A0u, boot_context);
+    assert(boot_context.r3.u32 == 0x80000005u); // STATUS_BUFFER_OVERFLOW.
+    assert(guest_be32(directory_iosb) == 0x80000005u);
+    assert(guest_be32(directory_iosb + 4u) == 0u);
+
+    // Retry without restarting. The unreturned entry must still be first.
+    write_guest_be32(directory_restart, 0u);
     boot_context = {};
     boot_context.r1.u32 = directory_restart - 0x54u;
     boot_context.r3.u32 = *directory_handle;
