@@ -101,6 +101,18 @@ int main() {
     assert(cp.read_index() == 3u);
     assert(load_be32(memory.base() + kWritebackGuest) == 3u);
 
+    // If command execution succeeds but writeback memory is not committed,
+    // report that separately; the local consumer has still advanced.
+    assert(cp.initialize_ring(0x00010000u, 2u, &error));
+    assert(cp.enable_read_pointer_writeback(0x00030000u, 4u, &error));
+    assert(cp.update_write_pointer(2u, &error));
+    capture.reject_register = false;
+    const auto writeback_failed = cp.process_available(memory, callbacks, 4u);
+    assert(!writeback_failed);
+    assert(writeback_failed.error == XenosCommandProcessorError::ReadPointerWritebackFailed);
+    assert(writeback_failed.ring.dispatch.dwords_consumed == 2u);
+    assert(cp.read_index() == 2u);
+
     // The command processor does not advance over a ring that is not committed.
     assert(cp.initialize_ring(0x00030000u, 2u, &error));
     assert(cp.update_write_pointer(1u, &error));
