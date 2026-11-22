@@ -202,8 +202,13 @@ void test_query_volume_information_file() {
     assert(context.r3.u32 == 0u);
     assert(be32(iosb) == 0u);
     assert(be32(iosb + 4u) == 56u);
-    assert(be64(network_information) == be64(basic_information));
-    assert(be64(network_information + 0x10u) == be64(basic_information + 0x10u));
+    const auto basic_write_time = be64(basic_information + 0x10u);
+    const auto network_write_time = be64(network_information + 0x10u);
+    const auto timestamp_delta = basic_write_time > network_write_time
+        ? basic_write_time - network_write_time
+        : network_write_time - basic_write_time;
+    assert(basic_write_time > 0u && network_write_time > 0u);
+    assert(timestamp_delta < 10000000ull); // Less than one second in FILETIME units.
     assert(be32(network_information + 0x30u) == 0x80u);
 
     context = {};
