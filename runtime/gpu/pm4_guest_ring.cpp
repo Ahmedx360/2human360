@@ -160,6 +160,83 @@ Pm4GuestRingResult dispatch_pm4_guest_ring(
     return result;
 }
 
+Pm4GuestRingResult dispatch_pm4_guest_indirect_buffer(
+    GuestAddressSpace& memory,
+    std::uint32_t physical_address,
+    std::uint32_t dword_count,
+    const Pm4DispatchCallbacks& callbacks,
+    std::size_t max_packets) {
+    Pm4GuestRingResult result{};
+    if (!memory.valid()) {
+        result.error = Pm4GuestRingError::InvalidAddressSpace;
+        return result;
+    }
+    constexpr std::uint32_t kMaxIndirectBufferDwords = 0x00100000u;
+    if (dword_count == 0 || dword_count > kMaxIndirectBufferDwords) {
+        result.error = Pm4GuestRingError::InvalidIndirectBufferLength;
+        return result;
+    }
+    if ((physical_address & 3u) != 0) {
+        result.error = Pm4GuestRingError::InvalidPhysicalRange;
+        return result;
+    }
+
+    const auto byte_count = static_cast<std::size_t>(dword_count) *
+                            sizeof(std::uint32_t);
+    std::uint32_t guest_address = 0;
+    if (!xenos_physical_to_guest_address(
+            physical_address, byte_count, guest_address)) {
+        result.error = Pm4GuestRingError::InvalidPhysicalRange;
+        return result;
+    }
+
+    auto* const guest_base = memory.base();
+    if (!GuestAddressSpace::is_accessible_range(
+            guest_base, guest_address, byte_count, GuestMemoryAccess::Read)) {
+        result.error = Pm4GuestRingError::RingNotReadable;
+        return result;
+    }
+
+    std::array<std::uint32_t, kMaxPacketDwords> packet_words{};
+    std::size_t offset = 0;
+    while (offset < dword_count) {
+        if (result.dispatch.packets >= max_packets) {
+            result.error = Pm4GuestRingError::PacketLimitReached;
+            return result;
+        }
+
+        const auto available = static_cast<std::size_t>(dword_count) - offset;
+        const auto copied = std::min(available, packet_words.size());
+        for (std::size_t i = 0; i < copied; ++i) {
+            const auto byte_offset = (offset + i) * sizeof(std::uint32_t);
+            packet_words[i] = load_be32(
+                guest_base + guest_address + byte_offset);
+        }
+
+        const auto packet_span = std::span<const std::uint32_t>(
+            packet_words.data(), copied);
+        const auto decoded = decode_pm4_packet(packet_span, 0);
+        if (!decoded) {
+            result.error = Pm4GuestRingError::PacketDecodeFailed;
+            return result;
+        }
+
+        const auto packet_dwords = decoded.packet.dword_count;
+        const auto dispatched = dispatch_pm4_stream(
+            packet_span.first(packet_dwords), callbacks, 1);
+        if (!dispatched) {
+            result.error = map_dispatch_error(dispatched.error);
+            return result;
+        }
+
+        offset += packet_dwords;
+        result.dispatch.read_index = static_cast<std::uint32_t>(offset);
+        result.dispatch.dwords_consumed += packet_dwords;
+        ++result.dispatch.packets;
+    }
+    return result;
+}
+
 bool write_pm4_guest_read_pointer(
     GuestAddressSpace& memory, std::uint32_t physical_address,
     std::uint32_t read_index) noexcept {
