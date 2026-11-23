@@ -535,10 +535,7 @@ GuestKernelObjectWaitResult GuestKernelObjectTable::wait_multiple(
         const auto now = Clock::now();
         bool all_ready = true;
         bool invalid_object = false;
-        std::size_t ready_index = 0;
-
-        const auto is_ready = [&](const std::shared_ptr<GuestKernelObject>& object,
-                                  std::size_t index) -> bool {
+        const auto is_ready = [&](const std::shared_ptr<GuestKernelObject>& object) -> bool {
             if (auto event = std::dynamic_pointer_cast<GuestEventObject>(object))
                 return event->signaled_;
 
@@ -568,7 +565,6 @@ GuestKernelObjectWaitResult GuestKernelObjectTable::wait_multiple(
             const auto result = object->wait(std::chrono::milliseconds::zero());
             if (result == GuestKernelObjectWaitResult::InvalidHandle)
                 invalid_object = true;
-            (void)index;
             return result == GuestKernelObjectWaitResult::Signaled;
         };
 
@@ -593,7 +589,7 @@ GuestKernelObjectWaitResult GuestKernelObjectTable::wait_multiple(
 
         if (wait_all) {
             for (std::size_t i = 0; i < objects.size(); ++i) {
-                if (!is_ready(objects[i], i)) {
+                if (!is_ready(objects[i])) {
                     all_ready = false;
                     break;
                 }
