@@ -127,6 +127,8 @@ private:
     mutable std::mutex xenos_command_processor_mutex_;
     std::uint32_t xenos_indirect_depth_{};
     std::size_t xenos_indirect_buffers_this_batch_{};
+    bool xenos_waiting_for_register_{};
+    std::uint32_t xenos_wait_register_index_{};
     std::uint64_t xenos_bin_mask_{~std::uint64_t{0}};
     std::uint64_t xenos_bin_select_{~std::uint64_t{0}};
     GuestAddressSpace* memory_{};
