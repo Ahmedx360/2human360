@@ -578,10 +578,12 @@ void PpcImportRegistry::handle_xenos_mmio_write(
         return;
     }
 
+    xenos_indirect_depth_ = 0;
+    xenos_indirect_buffers_this_batch_ = 0;
     const Pm4DispatchCallbacks callbacks{
         this,
         &PpcImportRegistry::dispatch_xenos_register_write,
-        &PpcImportRegistry::reject_xenos_type3
+        &PpcImportRegistry::dispatch_xenos_type3
     };
     const auto result = xenos_command_processor_.process_available(
         *memory_, callbacks, 4096u);
@@ -607,10 +609,65 @@ bool PpcImportRegistry::dispatch_xenos_register_write(
         address, sizeof(std::uint32_t), value);
 }
 
-bool PpcImportRegistry::reject_xenos_type3(
+bool PpcImportRegistry::dispatch_xenos_type3(
     void* context, std::uint32_t opcode, bool predicate,
     std::span<const std::uint32_t> payload) {
-    (void)context;
+    auto* const registry = static_cast<PpcImportRegistry*>(context);
+    if (!registry) return false;
+
+    constexpr std::uint32_t kPm4Nop = 0x10u;
+    constexpr std::uint32_t kPm4IndirectBuffer = 0x3Fu;
+    constexpr std::uint32_t kPm4IndirectBufferPfd = 0x37u;
+    constexpr std::uint32_t kIndirectLengthMask = 0x000FFFFFu;
+    constexpr std::uint32_t kMaxIndirectBufferDwords = 0x00010000u;
+    constexpr std::size_t kMaxIndirectBuffersPerBatch = 64u;
+    constexpr std::size_t kMaxIndirectPackets = 256u;
+    (void)predicate;
+
+    if (opcode == kPm4Nop)
+        return true;
+
+    if (opcode == kPm4IndirectBuffer || opcode == kPm4IndirectBufferPfd) {
+        if (payload.size() != 2u ||
+            (payload[1] & ~kIndirectLengthMask) != 0 ||
+            payload[1] == 0 || payload[1] > kMaxIndirectBufferDwords ||
+            registry->xenos_indirect_depth_ != 0 ||
+            registry->xenos_indirect_buffers_this_batch_ >=
+                kMaxIndirectBuffersPerBatch) {
+            std::fprintf(stderr,
+                "[TooHuman][Xenos] rejected indirect buffer opcode=0x%02X operands=%zu address=0x%08X length=0x%08X depth=%u buffers=%zu\n",
+                opcode, payload.size(),
+                payload.empty() ? 0u : payload[0],
+                payload.size() < 2u ? 0u : payload[1],
+                registry->xenos_indirect_depth_,
+                registry->xenos_indirect_buffers_this_batch_);
+            return false;
+        }
+
+        ++registry->xenos_indirect_depth_;
+        ++registry->xenos_indirect_buffers_this_batch_;
+        const Pm4DispatchCallbacks indirect_callbacks{
+            registry,
+            &PpcImportRegistry::dispatch_xenos_register_write,
+            &PpcImportRegistry::dispatch_xenos_type3
+        };
+        const auto indirect = dispatch_pm4_guest_indirect_buffer(
+            *registry->memory_, payload[0], payload[1],
+            indirect_callbacks, kMaxIndirectPackets);
+        --registry->xenos_indirect_depth_;
+
+        if (!indirect) {
+            std::fprintf(stderr,
+                "[TooHuman][Xenos] indirect buffer stopped (error=%u packets=%zu dwords=%zu address=0x%08X length=%u)\n",
+                static_cast<unsigned>(indirect.error),
+                indirect.dispatch.packets,
+                indirect.dispatch.dwords_consumed,
+                payload[0], payload[1]);
+            return false;
+        }
+        return true;
+    }
+
     std::fprintf(stderr,
         "[TooHuman][Xenos] unsupported PM4 Type-3 opcode=0x%02X predicate=%u payload_dwords=%zu",
         opcode, predicate ? 1u : 0u, payload.size());
