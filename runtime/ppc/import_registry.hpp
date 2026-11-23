@@ -127,6 +127,8 @@ private:
     mutable std::mutex xenos_command_processor_mutex_;
     std::uint32_t xenos_indirect_depth_{};
     std::size_t xenos_indirect_buffers_this_batch_{};
+    std::uint64_t xenos_bin_mask_{~std::uint64_t{0}};
+    std::uint64_t xenos_bin_select_{~std::uint64_t{0}};
     GuestAddressSpace* memory_{};
     std::unordered_map<std::uint32_t, VirtualMemoryRegion> virtual_memory_regions_;
     mutable std::mutex virtual_memory_regions_mutex_;
