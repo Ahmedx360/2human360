@@ -72,6 +72,10 @@ struct Pm4DispatchCallbacks {
     // Return false to stop dispatch. The payload span excludes the header.
     bool (*type3)(void* context, std::uint32_t opcode, bool predicate,
                   std::span<const std::uint32_t> payload){};
+    // Optional side-effect-free preflight. When supplied, every register
+    // destination in a Type-0/Type-1 packet is checked before any write runs.
+    bool (*validate_register)(void* context, std::uint32_t index,
+                              std::uint32_t value){};
 };
 
 struct Pm4DispatchResult {
