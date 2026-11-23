@@ -176,6 +176,17 @@ int main() {
     assert(write_xenos_guest_physical_dwords(memory, 0x0004010Fu,
                                                std::array<std::uint32_t, 1>{0x11223344u}));
     assert(load_be32(memory.base() + kMemWriteGuest + 12u) == 0x33441122u);
+    const std::array<std::uint32_t, 4> endian_addresses{
+        0x00040100u, 0x00040105u, 0x0004010Au, 0x0004010Fu
+    };
+    for (const auto address : endian_addresses) {
+        std::uint32_t logical_value = 0;
+        assert(read_xenos_guest_physical_dword(
+            memory, address, logical_value));
+        assert(logical_value == 0x11223344u);
+    }
+    assert(!read_xenos_guest_physical_dword(
+        memory, 0x00050000u, guest_address));
 
     store_be32(indirect + 0xFFCu, 0xA5A5A5A5u);
     const std::array<std::uint32_t, 2> crossing_write{0x11111111u, 0x22222222u};
