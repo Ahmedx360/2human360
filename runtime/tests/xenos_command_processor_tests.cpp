@@ -86,6 +86,24 @@ int main() {
             std::pair<std::uint32_t, std::uint32_t>{0x20u, 0x12345678u}));
     assert(load_be32(memory.base() + kWritebackGuest) == 2u);
 
+    // WAIT_REG_MEM is not a fatal callback rejection: it keeps the
+    // packet at RPTR and does not publish spurious progress.
+    store_be32(ring + 2u * 4u, 0xC0000000u | (4u << 16) | (0x3Cu << 8));
+    store_be32(ring + 3u * 4u, 3u);
+    store_be32(ring + 4u * 4u, 0x12345678u);
+    store_be32(ring + 5u * 4u, 0xFFFFFFFFu);
+    store_be32(ring + 6u * 4u, 0u);
+    store_be32(ring + 7u * 4u, 0u);
+    assert(cp.update_write_pointer(8u, &error));
+    const auto pending = cp.process_available(memory, callbacks, 4u);
+    assert(pending);
+    assert(pending.error == XenosCommandProcessorError::CommandDeferred);
+    assert(pending.ring.error == Pm4GuestRingError::CallbackDeferred);
+    assert(pending.ring.dispatch.packets == 0u);
+    assert(pending.ring.dispatch.dwords_consumed == 0u);
+    assert(cp.read_index() == 2u);
+    assert(load_be32(memory.base() + kWritebackGuest) == 2u);
+
     // A NOP is fully consumed before the following register callback rejects.
     store_be32(ring + 2u * 4u, 0u);
     store_be32(ring + 3u * 4u, 0x30u);
