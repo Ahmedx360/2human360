@@ -3,6 +3,7 @@
 #include <array>
 #include <cassert>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -53,6 +54,8 @@ int main() {
     assert(xenos_physical_to_guest_address(0xA0010000u, 4u, guest_address));
     assert(guest_address == 0xA0010000u);
     assert(!xenos_physical_to_guest_address(0x1FFFFFF8u, 16u, guest_address));
+    assert(!xenos_physical_to_guest_address(
+        0x00001000u, std::numeric_limits<std::size_t>::max(), guest_address));
     assert(!xenos_physical_to_guest_address(0x00001000u, 0u, guest_address));
 
     std::string error;
@@ -120,6 +123,9 @@ int main() {
     const auto bad_base = dispatch_pm4_guest_ring(
         memory, 0x1FFFFFF8u, 2u, 0u, 1u, callbacks, 1u);
     assert(bad_base.error == Pm4GuestRingError::InvalidPhysicalRange);
+    const auto unaligned_base = dispatch_pm4_guest_ring(
+        memory, kRingPhysical + 2u, 2u, 0u, 1u, callbacks, 1u);
+    assert(unaligned_base.error == Pm4GuestRingError::InvalidPhysicalRange);
 
     // A valid physical range that has not been committed must fail safely.
     const auto not_mapped = dispatch_pm4_guest_ring(
