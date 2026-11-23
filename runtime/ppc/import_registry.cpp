@@ -626,8 +626,15 @@ Pm4CallbackResult PpcImportRegistry::dispatch_xenos_type3(
 
     constexpr std::uint32_t kPm4Nop = 0x10u;
     constexpr std::uint32_t kPm4RegRmw = 0x21u;
+    constexpr std::uint32_t kPm4WaitForIdle = 0x26u;
+    constexpr std::uint32_t kPm4InvalidateState = 0x3Bu;
     constexpr std::uint32_t kPm4WaitRegMem = 0x3Cu;
     constexpr std::uint32_t kPm4CondWrite = 0x45u;
+    constexpr std::uint32_t kPm4EventWrite = 0x46u;
+    constexpr std::uint32_t kPm4MeInit = 0x48u;
+    constexpr std::uint32_t kPm4EventWriteShd = 0x58u;
+    constexpr std::uint32_t kPm4EventWriteExt = 0x5Au;
+    constexpr std::uint32_t kPm4ContextUpdate = 0x5Eu;
     constexpr std::uint32_t kPm4RegToMem = 0x3Eu;
     constexpr std::uint32_t kPm4MemWrite = 0x3Du;
     constexpr std::uint32_t kPm4IndirectBuffer = 0x3Fu;
@@ -700,6 +707,74 @@ Pm4CallbackResult PpcImportRegistry::dispatch_xenos_type3(
         }
         return matched ? Pm4CallbackResult::Accepted
                        : Pm4CallbackResult::Deferred;
+    }
+
+    // These command markers have no work until a real GPU backend exists.
+    // Consume them explicitly instead of reporting otherwise-valid streams as
+    // unsupported. WAIT_REG_MEM remains a separate deferred condition above.
+    if (opcode == kPm4MeInit || opcode == kPm4WaitForIdle ||
+        opcode == kPm4ContextUpdate || opcode == kPm4InvalidateState)
+        return Pm4CallbackResult::Accepted;
+
+    constexpr std::uint32_t kVgtEventInitiatorRegister = 0x21F9u;
+    constexpr std::uint32_t kRegisterCount =
+        kGuestMmioWindowSize / sizeof(std::uint32_t);
+    if (opcode == kPm4EventWrite) {
+        if (payload.empty() ||
+            !GuestMmioBus::global().write_unobserved(
+                kXenosMmioBase + kVgtEventInitiatorRegister * sizeof(std::uint32_t),
+                sizeof(std::uint32_t), payload[0] & 0x3Fu))
+            return Pm4CallbackResult::Rejected;
+        return Pm4CallbackResult::Accepted;
+    }
+
+    if (opcode == kPm4EventWriteShd) {
+        if (payload.size() != 3u || registry->memory_ == nullptr ||
+            (payload[0] & 0x80000000u) != 0) {
+            std::fprintf(stderr,
+                "[TooHuman][Xenos] rejected EVENT_WRITE_SHD operands=%zu timestamp=%u\n",
+                payload.size(), !payload.empty() && (payload[0] & 0x80000000u) ? 1u : 0u);
+            return Pm4CallbackResult::Rejected;
+        }
+        const std::array<std::uint32_t, 1> data{payload[2]};
+        if (!write_xenos_guest_physical_dwords(
+                *registry->memory_, payload[1], data) ||
+            !GuestMmioBus::global().write_unobserved(
+                kXenosMmioBase + kVgtEventInitiatorRegister * sizeof(std::uint32_t),
+                sizeof(std::uint32_t), payload[0] & 0x3Fu)) {
+            std::fprintf(stderr,
+                "[TooHuman][Xenos] EVENT_WRITE_SHD destination is not writable: 0x%08X\n",
+                payload[1]);
+            return Pm4CallbackResult::Rejected;
+        }
+        return Pm4CallbackResult::Accepted;
+    }
+
+    if (opcode == kPm4EventWriteExt) {
+        if (payload.size() != 2u || registry->memory_ == nullptr) {
+            std::fprintf(stderr,
+                "[TooHuman][Xenos] rejected EVENT_WRITE_EXT operands=%zu\n",
+                payload.size());
+            return Pm4CallbackResult::Rejected;
+        }
+        // Match the reference's six 8-in-16 surface extents: 0..8192/8
+        // for X/Y and 0..1 for Z. The helper validates the full 12-byte
+        // physical destination before applying the endian transform.
+        constexpr std::array<std::uint32_t, 3> kExtentWords{
+            0x00000400u, 0x00000400u, 0x00000001u
+        };
+        const auto physical_address = (payload[1] & ~3u) | 1u;
+        if (!write_xenos_guest_physical_dwords(
+                *registry->memory_, physical_address, kExtentWords) ||
+            !GuestMmioBus::global().write_unobserved(
+                kXenosMmioBase + kVgtEventInitiatorRegister * sizeof(std::uint32_t),
+                sizeof(std::uint32_t), payload[0] & 0x3Fu)) {
+            std::fprintf(stderr,
+                "[TooHuman][Xenos] EVENT_WRITE_EXT destination is not writable: 0x%08X\n",
+                payload[1]);
+            return Pm4CallbackResult::Rejected;
+        }
+        return Pm4CallbackResult::Accepted;
     }
 
     if (opcode == kPm4Nop)
