@@ -27,6 +27,12 @@ std::uint64_t be64(std::uint32_t a) {
     return (std::uint64_t(be32(a)) << 32) | be32(a + 4);
 }
 void put16(std::uint32_t a, std::uint16_t v) { g_mem[a] = v >> 8; g_mem[a + 1] = std::uint8_t(v); }
+void put_be32_test(std::uint32_t a, std::uint32_t v) {
+    g_mem[a] = static_cast<std::uint8_t>(v >> 24);
+    g_mem[a + 1] = static_cast<std::uint8_t>(v >> 16);
+    g_mem[a + 2] = static_cast<std::uint8_t>(v >> 8);
+    g_mem[a + 3] = static_cast<std::uint8_t>(v);
+}
 
 }
 
@@ -303,6 +309,85 @@ void test_xam_controller_disconnected_profile() {
     context.r5.u32 = output;
     boot_hle::XamInputGetKeystrokeEx(context, base());
     assert(context.r3.u32 == kBadArguments);
+}
+
+
+void test_wait_for_multiple_objects_hle() {
+    constexpr std::uint32_t handles_array = 0x7C00u;
+    constexpr std::uint32_t timeout = 0x7C40u;
+    std::memset(base() + timeout, 0, 8u);
+
+    auto first = std::make_shared<GuestEventObject>(false, true);
+    auto second = std::make_shared<GuestEventObject>(false, false);
+    auto first_handle = process_kernel_objects().insert(first);
+    auto second_handle = process_kernel_objects().insert(second);
+    assert(first_handle && second_handle);
+    put_be32_test(handles_array, *first_handle);
+    put_be32_test(handles_array + 4u, *second_handle);
+
+    PPCContext context{};
+    context.r3.u32 = 2u;
+    context.r4.u32 = handles_array;
+    context.r5.u32 = 0u; // WaitAll.
+    context.r6.u32 = 0u;
+    context.r7.u32 = timeout;
+    boot_hle::NtWaitForMultipleObjectsEx(context, base());
+    assert(context.r3.u32 == 0x00000102u); // STATUS_TIMEOUT.
+    // WaitAll must not consume the first auto-reset event when the second is
+    // not ready. The implementation acquires the set atomically under locks.
+    assert(first->is_signaled());
+    assert(!second->is_signaled());
+
+    (void)second->set();
+    context = {};
+    context.r3.u32 = 2u;
+    context.r4.u32 = handles_array;
+    context.r5.u32 = 0u;
+    context.r7.u32 = timeout;
+    boot_hle::NtWaitForMultipleObjectsEx(context, base());
+    assert(context.r3.u32 == 0u);
+    assert(!first->is_signaled());
+    assert(!second->is_signaled());
+
+    (void)first->set();
+    (void)second->set();
+    context = {};
+    context.r3.u32 = 2u;
+    context.r4.u32 = handles_array;
+    context.r5.u32 = 1u; // WaitAny.
+    context.r7.u32 = timeout;
+    boot_hle::NtWaitForMultipleObjectsEx(context, base());
+    assert(context.r3.u32 == 0u); // First signaled handle wins.
+    assert(!first->is_signaled());
+    assert(second->is_signaled());
+
+    context = {};
+    context.r3.u32 = 2u;
+    context.r4.u32 = handles_array;
+    context.r5.u32 = 1u;
+    context.r7.u32 = timeout;
+    boot_hle::NtWaitForMultipleObjectsEx(context, base());
+    assert(context.r3.u32 == 1u);
+    assert(!second->is_signaled());
+
+    context = {};
+    context.r3.u32 = 0u;
+    context.r4.u32 = handles_array;
+    context.r5.u32 = 1u;
+    boot_hle::NtWaitForMultipleObjectsEx(context, base());
+    assert(context.r3.u32 == 0xC000000Du); // STATUS_INVALID_PARAMETER.
+
+    put_be32_test(handles_array + 4u, 0xDEADBEEFu);
+    context = {};
+    context.r3.u32 = 2u;
+    context.r4.u32 = handles_array;
+    context.r5.u32 = 1u;
+    context.r7.u32 = timeout;
+    boot_hle::NtWaitForMultipleObjectsEx(context, base());
+    assert(context.r3.u32 == 0xC0000008u); // STATUS_INVALID_HANDLE.
+
+    assert(process_kernel_objects().close(*first_handle));
+    assert(process_kernel_objects().close(*second_handle));
 }
 
 void test_waitable_timer_hle() {
@@ -971,6 +1056,7 @@ int main() {
     test_video_display_queries();
     test_xam_controller_disconnected_profile();
     test_native_event_dispatcher_object();
+    test_wait_for_multiple_objects_hle();
     test_waitable_timer_hle();
     test_critical_sections();
     test_tls();
