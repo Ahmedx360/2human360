@@ -92,6 +92,51 @@ std::uint64_t get_be64(const std::uint8_t* p) {
     return (std::uint64_t(get_be32(p)) << 32) | get_be32(p + 4);
 }
 
+std::shared_ptr<GuestKernelObject> get_or_create_native_dispatcher_object(
+    std::uint8_t* base, std::uint32_t address) {
+    if (address == 0 || (address & 3u) != 0)
+        return {};
+
+    auto& objects = process_kernel_objects();
+    if (auto existing = objects.lookup(address))
+        return existing;
+
+    if (!guest_range_valid(base, address, 0x10u, GuestMemoryAccess::Read))
+        return {};
+    const auto type = base[address];
+    std::shared_ptr<GuestKernelObject> object;
+    try {
+        if (type == 0u || type == 1u) {
+            const auto signal_state = get_be32(at(base, address + 4u));
+            if (signal_state > 1u)
+                return {};
+            object = std::make_shared<GuestEventObject>(
+                type == 0u, signal_state != 0u, address);
+        } else if (type == 5u) {
+            if (!guest_range_valid(base, address, 0x14u, GuestMemoryAccess::Read))
+                return {};
+            const auto initial_count = get_be32(at(base, address + 4u));
+            const auto maximum_count = get_be32(at(base, address + 0x10u));
+            if (maximum_count == 0u || maximum_count > 0x7FFFFFFFu ||
+                initial_count > maximum_count)
+                return {};
+            object = std::make_shared<GuestSemaphoreObject>(
+                initial_count, maximum_count, address);
+        } else {
+            // Mutants, timers, threads, gates and other dispatcher types are
+            // not synthesized by this runtime yet.
+            return {};
+        }
+    } catch (...) {
+        return {};
+    }
+
+    if (objects.insert_at(address, object))
+        return object;
+    // A concurrent first-touch may have registered the same address.
+    return objects.lookup(address);
+}
+
 std::uint64_t current_guest_filetime_100ns() {
     constexpr std::uint64_t kWindowsEpochOffset100ns = 116444736000000000ull;
     const auto unix_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -1234,7 +1279,7 @@ PPC_FUNC(KeInitializeSemaphore) {
 
 // xboxkrnl #0x88. KeReleaseSemaphore returns the previous count.
 PPC_FUNC(KeReleaseSemaphore) {
-    auto object = process_kernel_objects().lookup(ctx.r3.u32);
+    auto object = get_or_create_native_dispatcher_object(base, ctx.r3.u32);
     auto semaphore = std::dynamic_pointer_cast<GuestSemaphoreObject>(
         std::move(object));
     if (!semaphore) {
@@ -1292,7 +1337,7 @@ PPC_FUNC(KeInitializeEvent) {
 
 // xboxkrnl #0x9D. Return the previous signal state.
 PPC_FUNC(KeSetEvent) {
-    auto object = process_kernel_objects().lookup(ctx.r3.u32);
+    auto object = get_or_create_native_dispatcher_object(base, ctx.r3.u32);
     auto event = std::dynamic_pointer_cast<GuestEventObject>(std::move(object));
     if (!event) {
         ctx.r3.u32 = 0;
@@ -1306,7 +1351,7 @@ PPC_FUNC(KeSetEvent) {
 
 // xboxkrnl #0x8F. Return the previous signal state.
 PPC_FUNC(KeResetEvent) {
-    auto object = process_kernel_objects().lookup(ctx.r3.u32);
+    auto object = get_or_create_native_dispatcher_object(base, ctx.r3.u32);
     auto event = std::dynamic_pointer_cast<GuestEventObject>(std::move(object));
     if (!event) {
         ctx.r3.u32 = 0;
@@ -1320,7 +1365,7 @@ PPC_FUNC(KeResetEvent) {
 
 PPC_FUNC(KeWaitForSingleObject) {
     const auto object_address = ctx.r3.u32;
-    auto object = process_kernel_objects().lookup(object_address);
+    auto object = get_or_create_native_dispatcher_object(base, object_address);
     if (!object) {
         ctx.r3.u32 = kStatusAbandonedWait0;
         return;

@@ -385,6 +385,58 @@ void test_native_event_dispatcher_object() {
     assert(context.r3.u32 == 1u);
     assert(be32(synchronization_event + 4u) == 0u);
     assert(process_kernel_objects().close(synchronization_event));
+
+    // XDK-inlined initialization: a valid native dispatcher header can be
+    // lazily registered when the first KeSet/Wait import is reached.
+    constexpr std::uint32_t lazy_auto_event = 0x7640u;
+    std::memset(base() + lazy_auto_event, 0, 0x10u);
+    g_mem[lazy_auto_event] = 1u; // SynchronizationEvent, initially clear.
+    auto write_be32 = [](std::uint32_t address, std::uint32_t value) {
+        g_mem[address] = static_cast<std::uint8_t>(value >> 24);
+        g_mem[address + 1u] = static_cast<std::uint8_t>(value >> 16);
+        g_mem[address + 2u] = static_cast<std::uint8_t>(value >> 8);
+        g_mem[address + 3u] = static_cast<std::uint8_t>(value);
+    };
+    context = {};
+    context.r3.u32 = lazy_auto_event;
+    context.r4.u32 = 0u;
+    context.r5.u32 = 0u;
+    boot_hle::KeSetEvent(context, base());
+    assert(context.r3.u32 == 0u);
+    assert(be32(lazy_auto_event + 4u) == 1u);
+    context = {};
+    context.r3.u32 = lazy_auto_event;
+    context.r7.u32 = timeout;
+    boot_hle::KeWaitForSingleObject(context, base());
+    assert(context.r3.u32 == 0u);
+    assert(be32(lazy_auto_event + 4u) == 0u);
+    assert(process_kernel_objects().close(lazy_auto_event));
+
+    // The same lazy path recognizes a preinitialized native semaphore (type 5).
+    constexpr std::uint32_t lazy_semaphore = 0x7680u;
+    std::memset(base() + lazy_semaphore, 0, 0x14u);
+    g_mem[lazy_semaphore] = 5u;
+    write_be32(lazy_semaphore + 4u, 1u);
+    write_be32(lazy_semaphore + 0x10u, 2u);
+    context = {};
+    context.r3.u32 = lazy_semaphore;
+    context.r7.u32 = timeout;
+    boot_hle::KeWaitForSingleObject(context, base());
+    assert(context.r3.u32 == 0u);
+    assert(be32(lazy_semaphore + 4u) == 0u);
+    context = {};
+    context.r3.u32 = lazy_semaphore;
+    context.r5.u32 = 1u;
+    boot_hle::KeReleaseSemaphore(context, base());
+    assert(context.r3.u32 == 0u);
+    assert(be32(lazy_semaphore + 4u) == 1u);
+    context = {};
+    context.r3.u32 = lazy_semaphore;
+    context.r7.u32 = timeout;
+    boot_hle::KeWaitForSingleObject(context, base());
+    assert(context.r3.u32 == 0u);
+    assert(be32(lazy_semaphore + 4u) == 0u);
+    assert(process_kernel_objects().close(lazy_semaphore));
 }
 
 void test_video_display_queries() {

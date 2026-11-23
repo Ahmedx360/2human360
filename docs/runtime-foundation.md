@@ -270,8 +270,11 @@ object consumes one count per successful wait, rejects releases that exceed its
 configured limit, and wakes blocked waiters on release. Native guest
 `KSEMAPHORE` records use the 0x14-byte big-endian layout (dispatcher header
 plus limit), and `KeWaitForSingleObject` can wait on the address registered by
-`KeInitializeSemaphore`. Named semaphore attributes and multiple-object waits
-remain unsupported.
+`KeInitializeSemaphore`. When an XDK-inlined initializer bypasses the import,
+first-touch wait/set/reset/release lazily recognizes only validated native
+header types 0/1 (event) and 5 (semaphore). Other dispatcher object types are
+still rejected. Named semaphore attributes and multiple-object waits remain
+unsupported.
 
 The synchronization subset is deliberately bounded. Critical sections use recursive host mutexes and mirror the
 28-byte guest structure's lock count, recursion count, and owner. Events support notification/manual-reset and
