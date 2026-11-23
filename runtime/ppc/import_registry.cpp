@@ -627,7 +627,9 @@ bool PpcImportRegistry::dispatch_xenos_type3(
         return true;
 
     if (opcode == kPm4MemWrite) {
-        if (payload.size() < 2u ||
+        // Predicated commands depend on bin-select state, which is not
+        // implemented; reject rather than execute an unconditional write.
+        if (predicate || payload.size() < 2u ||
             !write_xenos_guest_physical_dwords(
                 *registry->memory_, payload[0], payload.subspan(1))) {
             std::fprintf(stderr,
