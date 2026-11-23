@@ -147,6 +147,7 @@ int main() {
 
     // The real kernel imports configure the per-title primary Xenos ring.
     PPCContext ring_init{};
+    ring_init.ctr.u32 = 0x820011C0u; // PPC bctrl target used by the import trampoline.
     ring_init.r3.u32 = 0x00010000u;
     ring_init.r4.u32 = 6u; // 1 << (6 + 3) = 512-byte primary ring.
     const auto ring_init_fn = memory.get_function<PPCFunc*>(0x820011C0u);
@@ -157,6 +158,7 @@ int main() {
     assert(imports.xenos_command_processor().ring_size_log2() == 6u);
 
     PPCContext ring_writeback{};
+    ring_writeback.ctr.u32 = 0x820011BCu; // PPC bctrl target used by the import trampoline.
     ring_writeback.r3.u32 = 0x00020000u;
     ring_writeback.r4.u32 = 4u;
     const auto ring_writeback_fn = memory.get_function<PPCFunc*>(0x820011BCu);
