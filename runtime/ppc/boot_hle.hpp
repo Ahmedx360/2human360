@@ -106,6 +106,7 @@ PPCFunc NtReleaseSemaphore;
 PPCFunc KeInitializeSemaphore;
 PPCFunc KeReleaseSemaphore;
 PPCFunc KeWaitForSingleObject;
+PPCFunc KeWaitForMultipleObjects;
 PPCFunc NtSetEvent;
 PPCFunc NtClearEvent;
 PPCFunc NtWaitForSingleObjectEx;
