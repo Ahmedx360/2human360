@@ -120,9 +120,11 @@ A 64-bit Xenos MMIO store is delivered to the observer as two ordered
 32-bit writes (high dword first), preserving the title helper's split-register
 semantics. The MMIO bus calls observers outside its register-file lock;
 PM4 type-0/type-1 writes use an unobserved register-file path to avoid
-recursively triggering the command processor. Registry-level locking
-serializes ring setup, write-pointer updates and synchronous pumping.
-Observer teardown waits for in-flight callbacks.
+recursively triggering the command processor. The dispatcher preflights all
+Type-0/Type-1 register destinations before applying any writes, preventing a
+packet with a later invalid register index from partially modifying earlier
+registers. Registry-level locking serializes ring setup, write-pointer updates
+and synchronous pumping. Observer teardown waits for in-flight callbacks.
 
 This is not an asynchronous GPU worker or complete Xenos device. Type-0 and
 type-1 packets currently update the Xenos register-file mirror only. Type-3
@@ -136,8 +138,10 @@ register or checked guest physical dword, followed by a conditional write to
 a register or checked guest physical dword; and indirect-buffer opcodes
 `0x3F` and `0x37` are supported for one non-nested level. Each batch accepts at most 64 indirect
 buffers, each buffer is limited to 64K dwords and 256 packets, and its complete
-physical-memory range must be committed and readable. Predicated `COND_WRITE`/memory writes/indirect buffers, nested indirect
-buffers and all other Type-3 opcodes are logged and rejected. These are
+physical-memory range must be committed and readable. Predicated
+`MEM_WRITE`, `REG_TO_MEM`, `REG_RMW`, `COND_WRITE` and indirect-buffer
+commands are rejected because bin-select evaluation is not implemented.
+Nested indirect buffers and all other Type-3 opcodes are logged and rejected. These are
 bounded command-stream and guest-memory operations, not draw/shader
 execution. The hardware's
 read-pointer writeback block cadence is not modeled; the synchronous pump
