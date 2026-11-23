@@ -182,11 +182,14 @@ title ring-configuration imports and Xenos `CP_RB_WPTR` register index
 read-pointer writeback block cadence; it writes once per pump call that
 consumes dwords. Its Type-3 callback accepts NOP, checked physical MEM_WRITE, and a limited
 one-level indirect-buffer path; other GPU commands, interrupts and GPU
-synchronization remain unimplemented. `TooHumanXenosCommandProcessorTests` covers ring
-configuration, write-pointer validation, packet progress, callback rejection
-and read-pointer writeback failure. `TooHumanPpcImportRegistryTests` also
-covers the kernel-import-to-MMIO path, a bounded indirect-buffer packet, and a
-checked physical MEM_WRITE command.
+synchronization remain unimplemented. Packet predicates are evaluated before
+dispatch, including predicated indirect buffers: a failed bin intersection
+skips the buffer, while a passing predicate executes its bounded contents.
+`TooHumanXenosCommandProcessorTests` covers ring configuration, write-pointer
+validation, packet progress, callback rejection and read-pointer writeback
+failure. `TooHumanPpcImportRegistryTests` covers the kernel-import-to-MMIO
+path, both skipped and passing predicated indirect buffers, and checked
+physical-memory commands.
 
 ## Startup import priorities and boot HLE
 
