@@ -33,14 +33,14 @@ bool validate_register(void* opaque, std::uint32_t index,
     return index != capture.reject_validation_index;
 }
 
-bool type3(void* opaque, std::uint32_t opcode, bool predicate,
+Pm4CallbackResult type3(void* opaque, std::uint32_t opcode, bool predicate,
            std::span<const std::uint32_t> payload) {
     auto& capture = *static_cast<Capture*>(opaque);
-    if (capture.reject_type3) return false;
+    if (capture.reject_type3) return Pm4CallbackResult::Rejected;
     capture.opcode = opcode;
     capture.predicate = predicate;
     capture.type3_payload.assign(payload.begin(), payload.end());
-    return true;
+    return Pm4CallbackResult::Accepted;
 }
 
 } // namespace
