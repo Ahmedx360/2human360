@@ -8,6 +8,8 @@
 
 namespace {
 
+using toohuman::runtime::Pm4CallbackResult;
+
 struct Capture {
     std::vector<std::pair<std::uint32_t, std::uint32_t>> registers;
     bool reject_register{};
