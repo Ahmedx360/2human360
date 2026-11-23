@@ -1686,8 +1686,14 @@ PPC_FUNC(NtWaitForMultipleObjectsEx) {
     // flag is accepted for ABI compatibility; waits remain non-alertable.
     const auto timeout = decode_guest_timeout(base, timeout_address);
     std::size_t signaled_index = 0;
-    const auto result = process_kernel_objects().wait_multiple(
-        handles, wait_type == 0u, timeout, &signaled_index);
+    GuestKernelObjectWaitResult result{};
+    try {
+        result = process_kernel_objects().wait_multiple(
+            handles, wait_type == 0u, timeout, &signaled_index);
+    } catch (...) {
+        ctx.r3.u32 = 0xC0000017u; // STATUS_NO_MEMORY.
+        return;
+    }
     switch (result) {
     case GuestKernelObjectWaitResult::Signaled:
         ctx.r3.u32 = wait_type == 0u ? 0u : static_cast<std::uint32_t>(signaled_index);
