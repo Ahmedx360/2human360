@@ -116,9 +116,13 @@ The pump is wired to Too Human's `VdInitializeRingBuffer` (kernel ordinal
 the per-title `PpcImportRegistry`. A 32-bit scalar Xenos write to
 `CP_RB_WPTR` (register index `0x01C5`, MMIO address `0x7FC80714`) updates
 the command processor's dword write pointer and invokes one bounded pump.
-The MMIO bus calls observers outside its register-file lock; PM4 type-0/type-1
-writes use an unobserved register-file path to avoid recursively triggering
-the command processor. Observer teardown waits for in-flight callbacks.
+A 64-bit Xenos MMIO store is delivered to the observer as two ordered
+32-bit writes (high dword first), preserving the title helper's split-register
+semantics. The MMIO bus calls observers outside its register-file lock;
+PM4 type-0/type-1 writes use an unobserved register-file path to avoid
+recursively triggering the command processor. Registry-level locking
+serializes ring setup, write-pointer updates and synchronous pumping.
+Observer teardown waits for in-flight callbacks.
 
 This is not an asynchronous GPU worker or complete Xenos device. Type-0 and
 type-1 packets currently update the Xenos register-file mirror only. All
