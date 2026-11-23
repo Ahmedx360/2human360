@@ -312,6 +312,98 @@ void test_xam_controller_disconnected_profile() {
 }
 
 
+
+void test_ke_wait_for_multiple_objects() {
+    constexpr std::uint32_t first_event = 0x7D00u;
+    constexpr std::uint32_t second_event = 0x7D20u;
+    constexpr std::uint32_t objects_array = 0x7D40u;
+    constexpr std::uint32_t timeout = 0x7D60u;
+    std::memset(base() + timeout, 0, 8u);
+
+    PPCContext context{};
+    context.r3.u32 = first_event;
+    context.r4.u32 = 1u; // SynchronizationEvent.
+    context.r5.u32 = 1u; // Initially signaled.
+    boot_hle::KeInitializeEvent(context, base());
+    assert(context.r3.u32 == 0u);
+
+    context = {};
+    context.r3.u32 = second_event;
+    context.r4.u32 = 1u;
+    context.r5.u32 = 0u;
+    boot_hle::KeInitializeEvent(context, base());
+    assert(context.r3.u32 == 0u);
+
+    put_be32_test(objects_array, first_event);
+    put_be32_test(objects_array + 4u, second_event);
+
+    context = {};
+    context.r3.u32 = 2u;
+    context.r4.u32 = objects_array;
+    context.r5.u32 = 0u; // WaitAll.
+    context.r6.u32 = 0u; // WaitReason.
+    context.r7.u32 = 0u; // KernelMode.
+    context.r8.u32 = 0u; // Not alertable.
+    context.r9.u32 = timeout;
+    boot_hle::KeWaitForMultipleObjects(context, base());
+    assert(context.r3.u32 == 0x00000102u); // STATUS_TIMEOUT.
+    assert(be32(first_event + 4u) == 1u);
+    assert(be32(second_event + 4u) == 0u);
+
+    context = {};
+    context.r3.u32 = second_event;
+    context.r4.u32 = 0u;
+    context.r5.u32 = 0u;
+    boot_hle::KeSetEvent(context, base());
+    assert(context.r3.u32 == 0u);
+
+    context = {};
+    context.r3.u32 = 2u;
+    context.r4.u32 = objects_array;
+    context.r5.u32 = 0u;
+    context.r7.u32 = 0u;
+    context.r9.u32 = timeout;
+    boot_hle::KeWaitForMultipleObjects(context, base());
+    assert(context.r3.u32 == 0u);
+    assert(be32(first_event + 4u) == 0u);
+    assert(be32(second_event + 4u) == 0u);
+
+    context = {};
+    context.r3.u32 = first_event;
+    context.r4.u32 = 0u;
+    context.r5.u32 = 0u;
+    boot_hle::KeSetEvent(context, base());
+    context = {};
+    context.r3.u32 = second_event;
+    context.r4.u32 = 0u;
+    context.r5.u32 = 0u;
+    boot_hle::KeSetEvent(context, base());
+
+    context = {};
+    context.r3.u32 = 2u;
+    context.r4.u32 = objects_array;
+    context.r5.u32 = 1u; // WaitAny.
+    context.r7.u32 = 0u;
+    context.r9.u32 = timeout;
+    boot_hle::KeWaitForMultipleObjects(context, base());
+    assert(context.r3.u32 == 0u);
+    assert(be32(first_event + 4u) == 0u);
+    assert(be32(second_event + 4u) == 1u);
+
+    context = {};
+    context.r3.u32 = 2u;
+    context.r4.u32 = objects_array;
+    context.r5.u32 = 1u;
+    context.r7.u32 = 0u;
+    context.r9.u32 = timeout;
+    boot_hle::KeWaitForMultipleObjects(context, base());
+    assert(context.r3.u32 == 1u);
+    assert(be32(second_event + 4u) == 0u);
+
+    assert(process_kernel_objects().close(first_event));
+    assert(process_kernel_objects().close(second_event));
+}
+
 void test_wait_for_multiple_objects_hle() {
     constexpr std::uint32_t handles_array = 0x7C00u;
     constexpr std::uint32_t timeout = 0x7C40u;
@@ -1098,6 +1190,7 @@ int main() {
     test_video_display_queries();
     test_xam_controller_disconnected_profile();
     test_native_event_dispatcher_object();
+    test_ke_wait_for_multiple_objects();
     test_wait_for_multiple_objects_hle();
     test_waitable_timer_hle();
     test_critical_sections();
