@@ -128,20 +128,23 @@ and synchronous pumping. Observer teardown waits for in-flight callbacks.
 
 This is not an asynchronous GPU worker or complete Xenos device. Type-0 and
 type-1 packets currently update the Xenos register-file mirror only. Type-3
-NOP (opcode `0x10`) is consumed; `MEM_WRITE` (opcode `0x3D`) writes its
-dword payload to a prevalidated guest physical range using the address's
-Xenos endian mode; `REG_TO_MEM` (opcode `0x3E`) copies a mirrored Xenos
-register to a prevalidated guest physical dword; `REG_RMW` (opcode `0x21`)
-applies immediate/register AND/OR operands to the mirrored register file;
+NOP (opcode `0x10`) is consumed; bin-mask/bin-select state is tracked through
+`SET_BIN_MASK`/`SET_BIN_SELECT` (opcodes `0x50`/`0x51`) and their low/high
+dword forms (`0x60`-`0x63`); `MEM_WRITE` (opcode `0x3D`) writes its dword
+payload to a prevalidated guest physical range using the address's Xenos
+endian mode; `REG_TO_MEM` (opcode `0x3E`) copies a mirrored Xenos register to
+a prevalidated guest physical dword; `REG_RMW` (opcode `0x21`) applies
+immediate/register AND/OR operands to the mirrored register file;
 `COND_WRITE` (opcode `0x45`) supports masked comparisons against either a
 register or checked guest physical dword, followed by a conditional write to
 a register or checked guest physical dword; and indirect-buffer opcodes
-`0x3F` and `0x37` are supported for one non-nested level. Each batch accepts at most 64 indirect
-buffers, each buffer is limited to 64K dwords and 256 packets, and its complete
-physical-memory range must be committed and readable. Predicated
-`MEM_WRITE`, `REG_TO_MEM`, `REG_RMW`, `COND_WRITE` and indirect-buffer
-commands are rejected because bin-select evaluation is not implemented.
-Nested indirect buffers and all other Type-3 opcodes are logged and rejected. These are
+`0x3F` and `0x37` are supported for one non-nested level. The predicate bit
+is evaluated against the current `bin_select & bin_mask` intersection, so a
+predicated command is skipped when that intersection is zero and is dispatched
+when nonzero. Each batch accepts at most 64 indirect buffers, each buffer is
+limited to 64K dwords and 256 packets, and its complete physical-memory range
+must be committed and readable. Nested indirect buffers and all other Type-3
+opcodes are logged and rejected. These are
 bounded command-stream and guest-memory operations, not draw/shader
 execution. The hardware's
 read-pointer writeback block cadence is not modeled; the synchronous pump
