@@ -125,15 +125,19 @@ serializes ring setup, write-pointer updates and synchronous pumping.
 Observer teardown waits for in-flight callbacks.
 
 This is not an asynchronous GPU worker or complete Xenos device. Type-0 and
-type-1 packets currently update the Xenos register-file mirror only. All
-Type-3 opcodes are logged and rejected, so packet progress stops at the first
-unsupported command rather than being reported as successful. The hardware's
-read-pointer writeback block cadence is not modeled; the current synchronous
-pump writes the read pointer after each call that consumes dwords. Indirect
-buffers, interrupts, fences, DMA, register side effects and GPU opcode
-semantics remain unimplemented. Callbacks should avoid partial side effects
-when they reject a packet, because packet-level pointer progress is
-transactional but host callback state is not automatically rolled back.
+type-1 packets currently update the Xenos register-file mirror only. Type-3
+NOP (opcode `0x10`) is consumed, and indirect-buffer opcodes `0x3F` and
+`0x37` are supported for one non-nested level: each batch accepts at most 64
+indirect buffers, each buffer is limited to 64K dwords and 256 packets, and
+its complete physical-memory range must be committed and readable. Nested
+indirect buffers and all other Type-3 opcodes are logged and rejected. This is
+bounded command-stream traversal, not draw/shader execution. The hardware's
+read-pointer writeback block cadence is not modeled; the synchronous pump
+writes the read pointer after each call that consumes dwords. Interrupts,
+fences, DMA, register side effects and GPU opcode semantics remain
+unimplemented. Callbacks should avoid partial side effects when they reject a
+packet, because packet-level pointer progress is transactional but host
+callback state is not automatically rolled back.
 
 The PM4 stream dispatcher builds on the packet decoder and routes type-0
 sequential/single-register writes and type-1 two-register writes to an explicit
