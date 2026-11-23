@@ -580,7 +580,8 @@ void PpcImportRegistry::handle_xenos_mmio_write(
     if (width == sizeof(std::uint32_t) &&
         address >= scratch_register_address &&
         address <= kXenosMmioBase +
-            kScratchRegisterLast * sizeof(std::uint32_t)) {
+            kScratchRegisterLast * sizeof(std::uint32_t) &&
+        ((address - kXenosMmioBase) % sizeof(std::uint32_t)) == 0) {
         const auto index = (address - kXenosMmioBase) /
                            sizeof(std::uint32_t);
         std::uint32_t physical_address = 0;

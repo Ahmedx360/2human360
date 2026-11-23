@@ -474,14 +474,26 @@ int main() {
     ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x057Bu * 4u, 0x44444444u);
     assert(read_guest_be32(0xA006004Cu) == 0x44444444u);
 
+    // Type-3 REG_RMW writes also pass through the scratch writeback path.
+    put_guest_be32(0xA001001Cu,
+        0xC0000000u | (2u << 16) | (0x21u << 8)); // REG_RMW, three operands.
+    put_guest_be32(0xA0010020u, 0x057Au);         // Scratch slot 2.
+    put_guest_be32(0xA0010024u, 0xFFFFFFFFu);
+    put_guest_be32(0xA0010028u, 0x80000000u);
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 11u);
+    assert(imports.xenos_command_processor().read_index() == 11u);
+    assert(GuestMmioBus::global().read(
+        kXenosMmioBase + 0x057Au * 4u, 4) == 0xB3333333u);
+    assert(read_guest_be32(0xA0060048u) == 0xB3333333u);
+
     // Invalid scratch destinations reject the PM4 packet before the register
     // mirror or previously committed scratch memory is modified.
-    put_guest_be32(0xA001001Cu, 0x8000u | 0x01DDu); // SCRATCH_ADDR = uncommitted page.
-    put_guest_be32(0xA0010020u, 0x00080000u);
-    put_guest_be32(0xA0010024u, 0x8000u | 0x0578u); // One write to scratch slot 0.
-    put_guest_be32(0xA0010028u, 0x99999999u);
-    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 11u);
-    assert(imports.xenos_command_processor().read_index() == 9u);
+    put_guest_be32(0xA001002Cu, 0x8000u | 0x01DDu); // SCRATCH_ADDR = uncommitted page.
+    put_guest_be32(0xA0010030u, 0x00080000u);
+    put_guest_be32(0xA0010034u, 0x8000u | 0x0578u); // One write to scratch slot 0.
+    put_guest_be32(0xA0010038u, 0x99999999u);
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 15u);
+    assert(imports.xenos_command_processor().read_index() == 13u);
     assert(GuestMmioBus::global().read(
         kXenosMmioBase + 0x0578u * 4u, 4) == 0x11111111u);
     assert(read_guest_be32(0xA0060040u) == 0x11111111u);
