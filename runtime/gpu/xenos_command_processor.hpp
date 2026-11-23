@@ -14,6 +14,7 @@ enum class XenosCommandProcessorError : std::uint8_t {
     WritePointerNotInitialized,
     InvalidWritePointer,
     GuestRingFailure,
+    CommandDeferred,
     ReadPointerWritebackFailed,
 };
 
@@ -22,7 +23,8 @@ struct XenosCommandProcessorResult {
     XenosCommandProcessorError error{XenosCommandProcessorError::None};
 
     [[nodiscard]] explicit operator bool() const noexcept {
-        return error == XenosCommandProcessorError::None && static_cast<bool>(ring);
+        return error == XenosCommandProcessorError::None ||
+               error == XenosCommandProcessorError::CommandDeferred;
     }
 };
 
