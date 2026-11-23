@@ -12,6 +12,7 @@ enum class Pm4GuestRingError : std::uint8_t {
     None,
     InvalidAddressSpace,
     InvalidRingSize,
+    InvalidIndirectBufferLength,
     InvalidPhysicalRange,
     InvalidReadPointer,
     InvalidWritePointer,
@@ -50,6 +51,16 @@ struct Pm4GuestRingResult {
     std::uint32_t size_log2,
     std::uint32_t read_index,
     std::uint32_t write_index,
+    const Pm4DispatchCallbacks& callbacks,
+    std::size_t max_packets);
+
+// Dispatch a linear indirect command buffer from guest physical memory. The
+// caller supplies the Xenos dword count (not bytes); this helper has no ring
+// wraparound and reports the linear dword offset consumed.
+[[nodiscard]] Pm4GuestRingResult dispatch_pm4_guest_indirect_buffer(
+    GuestAddressSpace& memory,
+    std::uint32_t physical_address,
+    std::uint32_t dword_count,
     const Pm4DispatchCallbacks& callbacks,
     std::size_t max_packets);
 
