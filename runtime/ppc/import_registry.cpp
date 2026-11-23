@@ -897,7 +897,7 @@ Pm4CallbackResult PpcImportRegistry::dispatch_xenos_type3(
                 registry->xenos_wait_memory_guest_address_ = 0;
                 GuestMmioBus::global().set_guest_memory_write_notifications_enabled(false);
                 std::fprintf(stderr,
-                    "[TooHuman][Xenos] WAIT_REG_MEM physical poll is unreadable: 0x%08X\\n",
+                    "[TooHuman][Xenos] WAIT_REG_MEM physical poll is unreadable: 0x%08X\n",
                     poll_address);
                 return Pm4CallbackResult::Rejected;
             }

@@ -558,6 +558,10 @@ int main() {
     assert(GuestMmioBus::global().read(
         kXenosMmioBase + 0x34u * 4u, 4) == 0u);
 
+    // An adjacent dword does not wake the wait; only an overlapping store does.
+    ppc_test_store_u32(memory.base(), 0xA0060004u, 0xCAFEBABEu);
+    assert(imports.xenos_command_processor().read_index() == 0u);
+
     ppc_test_store_u32(memory.base(), 0xA0060000u, 0xCAFEBABEu);
     assert(imports.xenos_command_processor().read_index() == 8u);
     assert(GuestMmioBus::global().read(
