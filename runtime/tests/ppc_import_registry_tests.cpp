@@ -567,6 +567,30 @@ int main() {
     assert(GuestMmioBus::global().read(
         kXenosMmioBase + 0x34u * 4u, 4) == 0x0BADF00Du);
 
+    // Big-endian scalar stores performed by boot HLE also wake a memory wait.
+    // VdQueryVideoMode writes its width first; that dword satisfies the wait
+    // and allows the following ring packet to execute without another WPTR.
+    assert(imports.initialize_xenos_ring(0x00010000u, 6u, &error));
+    put_guest_be32(0xA0010000u,
+        0xC0000000u | (4u << 16) | (0x3Cu << 8));
+    put_guest_be32(0xA0010004u, 0x13u);           // Equal, memory source.
+    put_guest_be32(0xA0010008u, 0x00060000u);     // Physical address -> A0060000.
+    put_guest_be32(0xA001000Cu, 1280u);
+    put_guest_be32(0xA0010010u, 0xFFFFFFFFu);
+    put_guest_be32(0xA0010014u, 0u);
+    put_guest_be32(0xA0010018u, 0x35u);
+    put_guest_be32(0xA001001Cu, 0xC0DEC0DEu);
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 8u);
+    assert(imports.xenos_command_processor().read_index() == 0u);
+
+    PPCContext hle_video_mode{};
+    hle_video_mode.r3.u32 = 0xA0060000u;
+    boot_hle::VdQueryVideoMode(hle_video_mode, memory.base());
+    assert(hle_video_mode.r3.u32 == 0xA0060000u);
+    assert(imports.xenos_command_processor().read_index() == 8u);
+    assert(GuestMmioBus::global().read(
+        kXenosMmioBase + 0x35u * 4u, 4) == 0xC0DEC0DEu);
+
     const auto call_test_import = [&](std::uint32_t thunk, PPCContext& ctx) {
         ctx.ctr.u32 = thunk;
         const auto function = memory.get_function<PPCFunc*>(thunk);

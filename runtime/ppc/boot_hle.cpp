@@ -3,6 +3,7 @@
 #include "ppc/guest_thread_execution.hpp"
 #include "kernel/guest_kernel_objects.hpp"
 #include "memory/guest_address_space.hpp"
+#include "memory/guest_mmio.hpp"
 
 #include <algorithm>
 #include <array>
@@ -41,12 +42,14 @@ inline bool guest_range_valid(
 inline void put_be16(std::uint8_t* p, std::uint16_t v) {
     p[0] = static_cast<std::uint8_t>(v >> 8);
     p[1] = static_cast<std::uint8_t>(v);
+    guest_memory_write_observed(p, 2);
 }
 inline void put_be32(std::uint8_t* p, std::uint32_t v) {
     p[0] = static_cast<std::uint8_t>(v >> 24);
     p[1] = static_cast<std::uint8_t>(v >> 16);
     p[2] = static_cast<std::uint8_t>(v >> 8);
     p[3] = static_cast<std::uint8_t>(v);
+    guest_memory_write_observed(p, 4);
 }
 inline void put_be64(std::uint8_t* p, std::uint64_t v) {
     put_be32(p, static_cast<std::uint32_t>(v >> 32));

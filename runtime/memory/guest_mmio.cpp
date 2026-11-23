@@ -178,8 +178,8 @@ void GuestMmioBus::set_guest_memory_write_notifications_enabled(
 }
 
 void GuestMmioBus::notify_guest_memory_write(
-    std::uint32_t address, std::uint8_t width) noexcept {
-    if (width == 0 ||
+    const void* host_address, std::uint8_t width) noexcept {
+    if (!host_address || width == 0 ||
         !guest_memory_write_notifications_enabled_.load(
             std::memory_order_acquire))
         return;
@@ -197,7 +197,7 @@ void GuestMmioBus::notify_guest_memory_write(
         ++guest_memory_observer_callbacks_in_flight_;
     }
 
-    observer(observer_context, address, width);
+    observer(observer_context, host_address, width);
 
     {
         std::lock_guard lock(mutex_);
@@ -243,9 +243,9 @@ void guest_mmio_write(std::uint32_t address, std::uint8_t width,
     (void)GuestMmioBus::global().write(address, width, value);
 }
 
-void guest_memory_write_observed(std::uint32_t address,
+void guest_memory_write_observed(const void* host_address,
                                  std::uint8_t width) noexcept {
-    GuestMmioBus::global().notify_guest_memory_write(address, width);
+    GuestMmioBus::global().notify_guest_memory_write(host_address, width);
 }
 
 } // namespace toohuman::runtime

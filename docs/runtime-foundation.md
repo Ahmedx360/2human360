@@ -74,9 +74,10 @@ not modelled yet.
 at `0x7FC80000` and XMA aperture at `0x7FEA0000`. It preserves guest
 big-endian byte lanes, keeps independent register-file readback for each
 aperture, rejects out-of-window accesses, and records a bounded 4096-entry
-access trace. This is deliberately a storage/diagnostic foundation: writes do
-not yet trigger GPU command processing, XMA decoding, interrupts, fences, or
-other device side effects.
+access trace. The register file itself remains a conservative readback model;
+the title runtime layers the bounded primary-ring PM4 pump and explicitly
+listed register/packet behaviors below on top. This is not complete Xenos
+emulation, XMA decoding, interrupt delivery, fence handling or rendering.
 
 The PM4 framing helper decodes one guest-logical dword stream packet at a time.
 It handles the zero-word NOP, type-0 sequential/single-register writes, type-1
@@ -170,11 +171,11 @@ seven comparison operations. When its condition is not satisfied, the callback
 returns a distinct deferred result: the command remains at RPTR without
 blocking the guest thread. Register-polled waits are retried when the guest
 writes the exact Xenos register being polled. Memory-polled waits arm a
-low-overhead observer for translated PPC scalar stores; a store overlapping
-the polled guest physical dword retries the packet immediately without another
-CP write-pointer update. Direct host/HLE memory writes and internal PM4 DMA
-writes are not yet connected to this observer and still require a later CP
-notification. The wait interval is not slept and there is no independent
+low-overhead observer for translated PPC scalar stores and the boot HLE
+big-endian scalar-store helpers; a write overlapping the polled guest physical
+dword retries the packet immediately without another CP write-pointer update.
+Bulk HLE `memset`/`memcpy` operations and internal PM4 DMA writes are not yet
+connected to this observer and still require a later CP notification. The wait interval is not slept and there is no independent
 asynchronous polling worker. Linear indirect buffers preserve their inner
 read cursor when a nested command defers or fails, so a primary-ring retry
 resumes after completed inner packets instead of replaying them. The hardware's
@@ -364,11 +365,13 @@ the guest address space's default `PROT_NONE` reservation. Ordinary RAM
 retains the original direct big-endian access path. The `PPC_MM_*` aliases
 use the same checked accessors.
 
-This is an interception and diagnostics foundation, not GPU/XMA emulation.
-It does not implement register side effects, command processor state,
-interrupts, DMA, XMA decoding, vector/atomic MMIO operations, or a renderer.
-Returning zero for an untouched register is only the register-file default;
-the trace must be used to identify accesses that need real device semantics.
+This remains an interception/diagnostics foundation rather than full device
+emulation. Only the bounded PM4 command-processor subset and narrow Xenos
+register effects documented earlier are implemented. Interrupts, a hardware
+DMA engine, XMA decoding, vector/atomic MMIO operations, shader/draw execution
+and a renderer remain absent. Returning zero for an untouched register is
+only the register-file default; the trace must identify accesses that need
+additional device semantics.
 `TooHumanGuestMmioTests` covers range boundaries, independent apertures,
 big-endian subword lanes, readback, invalid accesses and bounded tracing.
 `TooHumanPpcImportRegistryTests` also verifies that generated scalar loads
@@ -386,19 +389,21 @@ They expose a deterministic 1280x720 progressive 16:9 HD mode at 60 Hz
 (type 2) with power 2.22222233. Output ranges are checked before writing.
 
 This is a host compatibility profile, not host-monitor enumeration or an
-implemented renderer. `VdSetDisplayMode`, `VdSwap`, GPU command processing,
-ring-buffer interrupts and Xenos register/MMIO handling remain separate work.
+implemented renderer. `VdSetDisplayMode`, `VdSwap` and presentation remain
+unsupported. A bounded synchronous primary-ring PM4 path and a limited subset
+of Xenos register effects exist as documented above, but ring-buffer
+interrupts, draw/shader execution and a functioning GPU backend do not.
 The structure layouts and baseline values follow Xenia's definitions:
 [X_VIDEO_MODE layout](https://github.com/xenia-project/xenia/blob/master/src/xenia/xbox.h)
 and [video HLE](https://github.com/xenia-project/xenia/blob/master/src/xenia/kernel/xboxkrnl/xboxkrnl_video.cc).
 
 ## Next implementation sequence
 
-1. Replace the scalar MMIO register-file stubs with device-specific Xenos/XMA side effects and add the register accesses actually observed in Too Human.
-2. Add GPU command capture/decoding and ring-buffer execution before attempting a renderer.
-3. Extend scalar interception to vector and atomic PPC memory operations used by the title.
-4. Add XMA decoding and controller services after the graphics/boot traces identify their required ABIs.
-5. Run the real XEX entry point, capture the first unsupported import/MMIO access, and implement only behavior supported by call-site evidence.
+1. Capture the title's actual Xenos register/PM4 traffic and extend the bounded decoder only for observed command formats and register semantics; keep a clear rejection path for unsupported opcodes.
+2. Build a real Xenos execution backend (resource memory, draw/shader pipeline, synchronization and presentation) behind the existing PM4 bridge.
+3. Extend PPC vector/atomic access interception only for operations confirmed to target device or aliased memory ranges.
+4. Add XMA decoding and controller services after graphics/boot traces identify the required formats and ABIs.
+5. Run the title from a matching decrypted XEX, capture the first unsupported import/MMIO access, and implement only behavior supported by call-site evidence.
 
 Every step should have game-free tests and diagnostics before integration with the title.
 

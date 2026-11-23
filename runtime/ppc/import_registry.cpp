@@ -576,24 +576,28 @@ void PpcImportRegistry::xenos_mmio_write_observer(
 }
 
 void PpcImportRegistry::guest_memory_write_observer(
-    void* context, std::uint32_t address, std::uint8_t width) noexcept {
+    void* context, const void* host_address, std::uint8_t width) noexcept {
     auto* registry = static_cast<PpcImportRegistry*>(context);
-    if (registry) registry->handle_guest_memory_write(address, width);
+    if (registry) registry->handle_guest_memory_write(host_address, width);
 }
 
 void PpcImportRegistry::handle_guest_memory_write(
-    std::uint32_t address, std::uint8_t width) noexcept {
-    if (width == 0) return;
+    const void* host_address, std::uint8_t width) noexcept {
+    if (!host_address || width == 0) return;
     std::lock_guard lock(xenos_command_processor_mutex_);
     if (!xenos_waiting_for_memory_ ||
         !xenos_command_processor_.ring_initialized() ||
         !xenos_command_processor_.write_pointer_initialized() || !memory_)
         return;
 
-    const auto write_begin = static_cast<std::uint64_t>(address);
+    const auto max_address = std::numeric_limits<std::uintptr_t>::max();
+    const auto write_begin = reinterpret_cast<std::uintptr_t>(host_address);
+    if (write_begin > max_address - width) return;
     const auto write_end = write_begin + width;
-    const auto poll_begin = static_cast<std::uint64_t>(
-        xenos_wait_memory_guest_address_);
+    const auto guest_base = reinterpret_cast<std::uintptr_t>(memory_->base());
+    if (guest_base > max_address - xenos_wait_memory_guest_address_) return;
+    const auto poll_begin = guest_base + xenos_wait_memory_guest_address_;
+    if (poll_begin > max_address - sizeof(std::uint32_t)) return;
     const auto poll_end = poll_begin + sizeof(std::uint32_t);
     if (write_end <= poll_begin || write_begin >= poll_end)
         return;

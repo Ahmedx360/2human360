@@ -55,7 +55,7 @@ inline bool is_guest_mmio_address(uint32_t address, uint8_t width) noexcept {
 }
 uint64_t guest_mmio_read(uint32_t address, uint8_t width) noexcept;
 void guest_mmio_write(uint32_t address, uint8_t width, uint64_t value) noexcept;
-void guest_memory_write_observed(uint32_t address, uint8_t width) noexcept;
+void guest_memory_write_observed(const void* host_address, uint8_t width) noexcept;
 } // namespace toohuman::runtime
 
 static inline uint8_t ppc_guest_load_u8(uint8_t* base, uint32_t address) noexcept {
@@ -85,7 +85,7 @@ static inline void ppc_guest_store_u8(uint8_t* base, uint32_t address,
         return;
     }
     *(volatile uint8_t*)(base + address) = value;
-    toohuman::runtime::guest_memory_write_observed(address, 1);
+    toohuman::runtime::guest_memory_write_observed(base + address, 1);
 }
 static inline void ppc_guest_store_u16(uint8_t* base, uint32_t address,
                                        uint16_t value) noexcept {
@@ -94,7 +94,7 @@ static inline void ppc_guest_store_u16(uint8_t* base, uint32_t address,
         return;
     }
     *(volatile uint16_t*)(base + address) = __builtin_bswap16(value);
-    toohuman::runtime::guest_memory_write_observed(address, 2);
+    toohuman::runtime::guest_memory_write_observed(base + address, 2);
 }
 static inline void ppc_guest_store_u32(uint8_t* base, uint32_t address,
                                        uint32_t value) noexcept {
@@ -103,7 +103,7 @@ static inline void ppc_guest_store_u32(uint8_t* base, uint32_t address,
         return;
     }
     *(volatile uint32_t*)(base + address) = __builtin_bswap32(value);
-    toohuman::runtime::guest_memory_write_observed(address, 4);
+    toohuman::runtime::guest_memory_write_observed(base + address, 4);
 }
 static inline void ppc_guest_store_u64(uint8_t* base, uint32_t address,
                                        uint64_t value) noexcept {
@@ -112,7 +112,7 @@ static inline void ppc_guest_store_u64(uint8_t* base, uint32_t address,
         return;
     }
     *(volatile uint64_t*)(base + address) = __builtin_bswap64(value);
-    toohuman::runtime::guest_memory_write_observed(address, 8);
+    toohuman::runtime::guest_memory_write_observed(base + address, 8);
 }
 #endif
 

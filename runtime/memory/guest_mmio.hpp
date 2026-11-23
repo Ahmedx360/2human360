@@ -35,7 +35,7 @@ class GuestMmioBus final {
 public:
     using XenosWriteObserver = void (*)(void* context, std::uint32_t address,
                                         std::uint8_t width, std::uint64_t value) noexcept;
-    using GuestMemoryWriteObserver = void (*)(void* context, std::uint32_t address,
+    using GuestMemoryWriteObserver = void (*)(void* context, const void* host_address,
                                               std::uint8_t width) noexcept;
     static constexpr std::size_t kTraceCapacity = 4096;
 
@@ -71,12 +71,14 @@ public:
     void clear_xenos_write_observer(void* context) noexcept;
 
     // Guest RAM writes are observed only while a memory-polled Xenos wait is
-    // pending. The atomic gate keeps the normal translated store path cheap.
+    // pending. Callers pass a host pointer into the guest mapping so translated
+    // PPC stores and selected HLE stores share the same overlap check. The
+    // atomic gate keeps the normal translated store path cheap.
     [[nodiscard]] bool set_guest_memory_write_observer(
         void* context, GuestMemoryWriteObserver observer) noexcept;
     void clear_guest_memory_write_observer(void* context) noexcept;
     void set_guest_memory_write_notifications_enabled(bool enabled) noexcept;
-    void notify_guest_memory_write(std::uint32_t address,
+    void notify_guest_memory_write(const void* host_address,
                                    std::uint8_t width) noexcept;
 
     [[nodiscard]] std::vector<GuestMmioAccess> trace() const;
@@ -115,7 +117,7 @@ private:
                                             std::uint8_t width) noexcept;
 void guest_mmio_write(std::uint32_t address, std::uint8_t width,
                       std::uint64_t value) noexcept;
-void guest_memory_write_observed(std::uint32_t address,
+void guest_memory_write_observed(const void* host_address,
                                  std::uint8_t width) noexcept;
 
 } // namespace toohuman::runtime
