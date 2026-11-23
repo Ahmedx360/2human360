@@ -672,8 +672,9 @@ bool PpcImportRegistry::dispatch_xenos_type3(
 
     if (opcode == kPm4SetBinMask || opcode == kPm4SetBinSelect) {
         if (payload.size() != 2u) return false;
-        const auto value = (static_cast<std::uint64_t>(payload[0]) << 32) |
-                           payload[1];
+        // Packet order is low dword first, high dword second.
+        const auto value = (static_cast<std::uint64_t>(payload[1]) << 32) |
+                           payload[0];
         if (opcode == kPm4SetBinMask)
             registry->xenos_bin_mask_ = value;
         else
