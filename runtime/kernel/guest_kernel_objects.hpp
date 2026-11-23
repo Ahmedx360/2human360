@@ -149,6 +149,10 @@ public:
         std::span<const GuestKernelHandle> handles, bool wait_all,
         std::optional<std::chrono::milliseconds> timeout = std::nullopt,
         std::size_t* signaled_index = nullptr) const;
+    [[nodiscard]] GuestKernelObjectWaitResult wait_multiple_objects(
+        std::span<const std::shared_ptr<GuestKernelObject>> objects, bool wait_all,
+        std::optional<std::chrono::milliseconds> timeout = std::nullopt,
+        std::size_t* signaled_index = nullptr) const;
     [[nodiscard]] std::size_t size() const;
 private:
     struct ObjectHandleState {
