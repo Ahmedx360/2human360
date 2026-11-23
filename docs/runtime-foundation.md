@@ -169,9 +169,12 @@ supports register and checked physical-memory polling, and implements the
 seven comparison operations. When its condition is not satisfied, the callback
 returns a distinct deferred result: the command remains at RPTR without
 blocking the guest thread. Register-polled waits are retried when the guest
-writes the exact Xenos register being polled. Memory-polled waits are retried
-on a later CP write-pointer notification because ordinary guest RAM stores
-are not observed. The wait interval is not slept and there is no independent
+writes the exact Xenos register being polled. Memory-polled waits arm a
+low-overhead observer for translated PPC scalar stores; a store overlapping
+the polled guest physical dword retries the packet immediately without another
+CP write-pointer update. Direct host/HLE memory writes and internal PM4 DMA
+writes are not yet connected to this observer and still require a later CP
+notification. The wait interval is not slept and there is no independent
 asynchronous polling worker. Linear indirect buffers preserve their inner
 read cursor when a nested command defers or fails, so a primary-ring retry
 resumes after completed inner packets instead of replaying them. The hardware's

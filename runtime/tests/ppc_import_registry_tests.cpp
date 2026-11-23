@@ -541,6 +541,28 @@ int main() {
     assert(GuestMmioBus::global().read(
         kXenosMmioBase + 0x33u * 4u, 4) == 0xBEEFF00Du);
 
+    // Guest-memory WAIT_REG_MEM wakes from a translated PPC RAM store that
+    // overlaps the watched physical dword; no extra CP_RB_WPTR is required.
+    assert(imports.initialize_xenos_ring(0x00010000u, 6u, &error));
+    put_guest_be32(0xA0010000u,
+        0xC0000000u | (4u << 16) | (0x3Cu << 8)); // WAIT_REG_MEM, five operands.
+    put_guest_be32(0xA0010004u, 0x13u);           // Equal, memory source.
+    put_guest_be32(0xA0010008u, 0x00060000u);     // Physical address -> A0060000.
+    put_guest_be32(0xA001000Cu, 0xCAFEBABEu);
+    put_guest_be32(0xA0010010u, 0xFFFFFFFFu);
+    put_guest_be32(0xA0010014u, 0u);
+    put_guest_be32(0xA0010018u, 0x34u);           // Register write after the wait.
+    put_guest_be32(0xA001001Cu, 0x0BADF00Du);
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 8u);
+    assert(imports.xenos_command_processor().read_index() == 0u);
+    assert(GuestMmioBus::global().read(
+        kXenosMmioBase + 0x34u * 4u, 4) == 0u);
+
+    ppc_test_store_u32(memory.base(), 0xA0060000u, 0xCAFEBABEu);
+    assert(imports.xenos_command_processor().read_index() == 8u);
+    assert(GuestMmioBus::global().read(
+        kXenosMmioBase + 0x34u * 4u, 4) == 0x0BADF00Du);
+
     const auto call_test_import = [&](std::uint32_t thunk, PPCContext& ctx) {
         ctx.ctr.u32 = thunk;
         const auto function = memory.get_function<PPCFunc*>(thunk);

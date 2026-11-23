@@ -164,6 +164,9 @@ bool PpcImportRegistry::initialize_xenos_ring(
     xenos_indirect_continuation_length_ = 0;
     xenos_indirect_continuation_read_index_ = 0;
     xenos_waiting_for_register_ = false;
+    xenos_waiting_for_memory_ = false;
+    xenos_wait_memory_guest_address_ = 0;
+    GuestMmioBus::global().set_guest_memory_write_notifications_enabled(false);
     return true;
 }
 
@@ -219,7 +222,9 @@ std::uint32_t PpcImportRegistry::resume_guest_kernel_thread(PPCContext& context)
 }
 
 PpcImportRegistry::~PpcImportRegistry() {
-    // Stop new CP_RB_WPTR callbacks and wait for a callback already executing.
+    // Stop new device and guest-memory callbacks before releasing registry state.
+    GuestMmioBus::global().set_guest_memory_write_notifications_enabled(false);
+    GuestMmioBus::global().clear_guest_memory_write_observer(this);
     GuestMmioBus::global().clear_xenos_write_observer(this);
     // Move the service out under the mutex, then join it without holding the
     // mutex: a worker already inside an HLE handler must be allowed to finish.
@@ -535,11 +540,20 @@ bool PpcImportRegistry::install(GuestAddressSpace& memory,
         set_error(error, "Another title already owns the Xenos MMIO write observer");
         return false;
     }
+    if (!GuestMmioBus::global().set_guest_memory_write_observer(
+            this, &PpcImportRegistry::guest_memory_write_observer)) {
+        GuestMmioBus::global().clear_xenos_write_observer(this);
+        memory_ = previous_memory;
+        g_active_registry.store(nullptr, std::memory_order_release);
+        set_error(error, "Another title already owns the guest-memory write observer");
+        return false;
+    }
 
     imports_by_thunk_ = std::move(pending);
     for (const auto& [address, binding] : imports_by_thunk_) {
         (void)binding;
         if (!memory.set_function(address, &toohuman_import_trampoline)) {
+            GuestMmioBus::global().clear_guest_memory_write_observer(this);
             GuestMmioBus::global().clear_xenos_write_observer(this);
             memory_ = previous_memory;
             g_active_registry.store(nullptr, std::memory_order_release);
@@ -559,6 +573,32 @@ void PpcImportRegistry::xenos_mmio_write_observer(
     std::uint64_t value) noexcept {
     auto* registry = static_cast<PpcImportRegistry*>(context);
     if (registry) registry->handle_xenos_mmio_write(address, width, value);
+}
+
+void PpcImportRegistry::guest_memory_write_observer(
+    void* context, std::uint32_t address, std::uint8_t width) noexcept {
+    auto* registry = static_cast<PpcImportRegistry*>(context);
+    if (registry) registry->handle_guest_memory_write(address, width);
+}
+
+void PpcImportRegistry::handle_guest_memory_write(
+    std::uint32_t address, std::uint8_t width) noexcept {
+    if (width == 0) return;
+    std::lock_guard lock(xenos_command_processor_mutex_);
+    if (!xenos_waiting_for_memory_ ||
+        !xenos_command_processor_.ring_initialized() ||
+        !xenos_command_processor_.write_pointer_initialized() || !memory_)
+        return;
+
+    const auto write_begin = static_cast<std::uint64_t>(address);
+    const auto write_end = write_begin + width;
+    const auto poll_begin = static_cast<std::uint64_t>(
+        xenos_wait_memory_guest_address_);
+    const auto poll_end = poll_begin + sizeof(std::uint32_t);
+    if (write_end <= poll_begin || write_begin >= poll_end)
+        return;
+
+    pump_xenos_commands("guest-memory-write");
 }
 
 void PpcImportRegistry::handle_xenos_mmio_write(
@@ -662,6 +702,13 @@ void PpcImportRegistry::handle_xenos_mmio_write(
         return;
     }
 
+    pump_xenos_commands(write_pointer_update ? "CP_RB_WPTR" : "register-wakeup");
+}
+
+void PpcImportRegistry::pump_xenos_commands(const char* trigger) noexcept {
+    if (!memory_ || !xenos_command_processor_.ring_initialized() ||
+        !xenos_command_processor_.write_pointer_initialized())
+        return;
     const Pm4DispatchCallbacks callbacks{
         this,
         &PpcImportRegistry::dispatch_xenos_register_write,
@@ -672,9 +719,10 @@ void PpcImportRegistry::handle_xenos_mmio_write(
         *memory_, callbacks, 4096u);
     if (!result) {
         std::fprintf(stderr,
-            "[TooHuman][Xenos] PM4 pump stopped (error=%u packet_error=%u opcode_context=CP_RB_WPTR packets=%zu dwords=%zu rptr=0x%08X wptr=0x%08X)\n",
+            "[TooHuman][Xenos] PM4 pump stopped (error=%u packet_error=%u trigger=%s packets=%zu dwords=%zu rptr=0x%08X wptr=0x%08X)\n",
             static_cast<unsigned>(result.error),
             static_cast<unsigned>(result.ring.error),
+            trigger ? trigger : "unknown",
             result.ring.dispatch.packets,
             result.ring.dispatch.dwords_consumed,
             xenos_command_processor_.read_index(),
@@ -828,14 +876,35 @@ Pm4CallbackResult PpcImportRegistry::dispatch_xenos_type3(
         const bool is_memory = (wait_info & 0x10u) != 0;
         std::uint32_t observed = 0;
         if (is_memory) {
+            std::uint32_t poll_guest_address = 0;
+            if (!xenos_physical_to_guest_address(
+                    poll_address & ~std::uint32_t{3},
+                    sizeof(std::uint32_t), poll_guest_address)) {
+                registry->xenos_waiting_for_memory_ = false;
+                registry->xenos_wait_memory_guest_address_ = 0;
+                GuestMmioBus::global().set_guest_memory_write_notifications_enabled(false);
+                return Pm4CallbackResult::Rejected;
+            }
+            // Arm notification before reading, so a concurrent guest store
+            // cannot race between the initial poll and installing the watch.
+            registry->xenos_waiting_for_memory_ = true;
+            registry->xenos_waiting_for_register_ = false;
+            registry->xenos_wait_memory_guest_address_ = poll_guest_address;
+            GuestMmioBus::global().set_guest_memory_write_notifications_enabled(true);
             if (!read_xenos_guest_physical_dword(
                     *registry->memory_, poll_address, observed)) {
+                registry->xenos_waiting_for_memory_ = false;
+                registry->xenos_wait_memory_guest_address_ = 0;
+                GuestMmioBus::global().set_guest_memory_write_notifications_enabled(false);
                 std::fprintf(stderr,
-                    "[TooHuman][Xenos] WAIT_REG_MEM physical poll is unreadable: 0x%08X\n",
+                    "[TooHuman][Xenos] WAIT_REG_MEM physical poll is unreadable: 0x%08X\\n",
                     poll_address);
                 return Pm4CallbackResult::Rejected;
             }
         } else {
+            registry->xenos_waiting_for_memory_ = false;
+            registry->xenos_wait_memory_guest_address_ = 0;
+            GuestMmioBus::global().set_guest_memory_write_notifications_enabled(false);
             if (poll_address >= kRegisterCount)
                 return Pm4CallbackResult::Rejected;
             observed = static_cast<std::uint32_t>(GuestMmioBus::global().read(
@@ -865,9 +934,13 @@ Pm4CallbackResult PpcImportRegistry::dispatch_xenos_type3(
         }
         if (matched) {
             registry->xenos_waiting_for_register_ = false;
+            registry->xenos_waiting_for_memory_ = false;
+            registry->xenos_wait_memory_guest_address_ = 0;
+            GuestMmioBus::global().set_guest_memory_write_notifications_enabled(false);
             return Pm4CallbackResult::Accepted;
         }
         registry->xenos_waiting_for_register_ = !is_memory;
+        registry->xenos_waiting_for_memory_ = is_memory;
         if (!is_memory)
             registry->xenos_wait_register_index_ = poll_address;
         return Pm4CallbackResult::Deferred;

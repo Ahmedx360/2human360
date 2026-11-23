@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
@@ -34,6 +35,8 @@ class GuestMmioBus final {
 public:
     using XenosWriteObserver = void (*)(void* context, std::uint32_t address,
                                         std::uint8_t width, std::uint64_t value) noexcept;
+    using GuestMemoryWriteObserver = void (*)(void* context, std::uint32_t address,
+                                              std::uint8_t width) noexcept;
     static constexpr std::size_t kTraceCapacity = 4096;
 
     GuestMmioBus() = default;
@@ -67,6 +70,15 @@ public:
         void* context, XenosWriteObserver observer) noexcept;
     void clear_xenos_write_observer(void* context) noexcept;
 
+    // Guest RAM writes are observed only while a memory-polled Xenos wait is
+    // pending. The atomic gate keeps the normal translated store path cheap.
+    [[nodiscard]] bool set_guest_memory_write_observer(
+        void* context, GuestMemoryWriteObserver observer) noexcept;
+    void clear_guest_memory_write_observer(void* context) noexcept;
+    void set_guest_memory_write_notifications_enabled(bool enabled) noexcept;
+    void notify_guest_memory_write(std::uint32_t address,
+                                   std::uint8_t width) noexcept;
+
     [[nodiscard]] std::vector<GuestMmioAccess> trace() const;
     [[nodiscard]] std::uint64_t dropped_trace_entries() const noexcept;
     void reset() noexcept;
@@ -84,6 +96,10 @@ private:
     void* observer_context_{};
     XenosWriteObserver xenos_write_observer_{};
     std::size_t observer_callbacks_in_flight_{};
+    void* guest_memory_observer_context_{};
+    GuestMemoryWriteObserver guest_memory_write_observer_{};
+    std::size_t guest_memory_observer_callbacks_in_flight_{};
+    std::atomic<bool> guest_memory_write_notifications_enabled_{false};
     std::array<std::uint8_t, kGuestMmioWindowSize> xenos_{};
     std::array<std::uint8_t, kGuestMmioWindowSize> xma_{};
     std::array<GuestMmioAccess, kTraceCapacity> trace_{};
@@ -99,5 +115,7 @@ private:
                                             std::uint8_t width) noexcept;
 void guest_mmio_write(std::uint32_t address, std::uint8_t width,
                       std::uint64_t value) noexcept;
+void guest_memory_write_observed(std::uint32_t address,
+                                 std::uint8_t width) noexcept;
 
 } // namespace toohuman::runtime

@@ -103,8 +103,13 @@ private:
     static void xenos_mmio_write_observer(
         void* context, std::uint32_t address, std::uint8_t width,
         std::uint64_t value) noexcept;
+    static void guest_memory_write_observer(
+        void* context, std::uint32_t address, std::uint8_t width) noexcept;
     void handle_xenos_mmio_write(std::uint32_t address, std::uint8_t width,
                                  std::uint64_t value) noexcept;
+    void handle_guest_memory_write(std::uint32_t address,
+                                   std::uint8_t width) noexcept;
+    void pump_xenos_commands(const char* trigger) noexcept;
     [[nodiscard]] bool resolve_xenos_scratch_write(
         std::uint32_t index, std::uint32_t& physical_address,
         bool& writeback_enabled) const noexcept;
@@ -136,6 +141,8 @@ private:
     std::uint32_t xenos_indirect_continuation_read_index_{};
     bool xenos_waiting_for_register_{};
     std::uint32_t xenos_wait_register_index_{};
+    bool xenos_waiting_for_memory_{};
+    std::uint32_t xenos_wait_memory_guest_address_{};
     std::uint64_t xenos_bin_mask_{~std::uint64_t{0}};
     std::uint64_t xenos_bin_select_{~std::uint64_t{0}};
     GuestAddressSpace* memory_{};

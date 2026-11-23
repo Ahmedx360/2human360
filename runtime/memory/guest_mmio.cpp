@@ -146,6 +146,67 @@ void GuestMmioBus::clear_xenos_write_observer(void* context) noexcept {
     observer_idle_.wait(lock, [this] { return observer_callbacks_in_flight_ == 0; });
 }
 
+bool GuestMmioBus::set_guest_memory_write_observer(
+    void* context, GuestMemoryWriteObserver observer) noexcept {
+    if (!context || !observer) return false;
+    std::lock_guard lock(mutex_);
+    if (guest_memory_write_observer_ &&
+        guest_memory_observer_context_ != context)
+        return false;
+    guest_memory_observer_context_ = context;
+    guest_memory_write_observer_ = observer;
+    return true;
+}
+
+void GuestMmioBus::clear_guest_memory_write_observer(void* context) noexcept {
+    if (!context) return;
+    std::unique_lock lock(mutex_);
+    if (guest_memory_observer_context_ != context) return;
+    guest_memory_write_notifications_enabled_.store(
+        false, std::memory_order_release);
+    guest_memory_observer_context_ = nullptr;
+    guest_memory_write_observer_ = nullptr;
+    observer_idle_.wait(lock, [this] {
+        return guest_memory_observer_callbacks_in_flight_ == 0;
+    });
+}
+
+void GuestMmioBus::set_guest_memory_write_notifications_enabled(
+    bool enabled) noexcept {
+    guest_memory_write_notifications_enabled_.store(
+        enabled, std::memory_order_release);
+}
+
+void GuestMmioBus::notify_guest_memory_write(
+    std::uint32_t address, std::uint8_t width) noexcept {
+    if (width == 0 ||
+        !guest_memory_write_notifications_enabled_.load(
+            std::memory_order_acquire))
+        return;
+
+    GuestMemoryWriteObserver observer = nullptr;
+    void* observer_context = nullptr;
+    {
+        std::lock_guard lock(mutex_);
+        if (!guest_memory_write_notifications_enabled_.load(
+                std::memory_order_relaxed) ||
+            !guest_memory_write_observer_)
+            return;
+        observer = guest_memory_write_observer_;
+        observer_context = guest_memory_observer_context_;
+        ++guest_memory_observer_callbacks_in_flight_;
+    }
+
+    observer(observer_context, address, width);
+
+    {
+        std::lock_guard lock(mutex_);
+        --guest_memory_observer_callbacks_in_flight_;
+        if (guest_memory_observer_callbacks_in_flight_ == 0)
+            observer_idle_.notify_all();
+    }
+}
+
 std::vector<GuestMmioAccess> GuestMmioBus::trace() const {
     std::lock_guard lock(mutex_);
     std::vector<GuestMmioAccess> result;
@@ -180,6 +241,11 @@ std::uint64_t guest_mmio_read(std::uint32_t address,
 void guest_mmio_write(std::uint32_t address, std::uint8_t width,
                       std::uint64_t value) noexcept {
     (void)GuestMmioBus::global().write(address, width, value);
+}
+
+void guest_memory_write_observed(std::uint32_t address,
+                                 std::uint8_t width) noexcept {
+    GuestMmioBus::global().notify_guest_memory_write(address, width);
 }
 
 } // namespace toohuman::runtime
