@@ -1754,12 +1754,10 @@ PPC_FUNC(NtWaitForMultipleObjectsEx) {
                 ctx.r3.u32 = kStatusInvalidHandle;
                 return;
             }
-            if (wait_type == 0u) {
-                for (const auto& previous : objects) {
-                    if (previous.get() == object.get()) {
-                        ctx.r3.u32 = kStatusInvalidParameter;
-                        return;
-                    }
+            for (const auto& previous : objects) {
+                if (previous.get() == object.get()) {
+                    ctx.r3.u32 = kStatusInvalidParameter;
+                    return;
                 }
             }
             objects.push_back(std::move(object));
