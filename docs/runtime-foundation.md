@@ -147,8 +147,9 @@ packets are consumed without side effects. Dispatch has a caller-supplied
 packet budget and stops on malformed/truncated input, missing handlers, or
 a callback rejection. It reports only fully consumed packets. The Xenos
 command-processor pump is connected to the title's ring setup imports and
-scalar `CP_RB_WPTR` MMIO write path, but it rejects unsupported Type-3
-operations and cannot process the title's real command stream end to end.
+scalar `CP_RB_WPTR` MMIO write path. It traverses a bounded subset of indirect
+buffers but rejects unsupported Type-3 operations and cannot process the
+title's real command stream end to end.
 
 ## Implemented: bounded Xenos primary-ring pump
 
@@ -160,14 +161,16 @@ after a pump that consumed commands, including progress before a later
 callback rejection. The caller supplies explicit PM4 callbacks; an unsupported
 Type-3 operation is rejected rather than silently accepted.
 
-The pump is synchronous and currently game-free. It has not yet been bound to
-the two title imports or to writes to Xenos `CP_RB_WPTR` register index
+The pump is synchronous and currently game-free. It is wired to the two
+title ring-configuration imports and Xenos `CP_RB_WPTR` register index
 `0x01C5`. It does not schedule a device worker or model the hardware's
 read-pointer writeback block cadence; it writes once per pump call that
-consumes dwords. Interrupt, indirect-buffer and GPU command semantics remain
-unimplemented. `TooHumanXenosCommandProcessorTests` covers ring configuration,
-write-pointer validation, packet progress, callback rejection and read-pointer
-writeback failure.
+consumes dwords. Its Type-3 callback accepts NOP and a limited one-level
+indirect-buffer path; other GPU commands, interrupts and GPU synchronization
+remain unimplemented. `TooHumanXenosCommandProcessorTests` covers ring
+configuration, write-pointer validation, packet progress, callback rejection
+and read-pointer writeback failure. `TooHumanPpcImportRegistryTests` also
+covers the kernel-import-to-MMIO path and a bounded indirect-buffer packet.
 
 ## Startup import priorities and boot HLE
 
