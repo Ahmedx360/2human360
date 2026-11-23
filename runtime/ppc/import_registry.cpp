@@ -12,6 +12,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstring>
+#include <limits>
 #include <thread>
 #include <cstdio>
 #include <cstdlib>
@@ -587,7 +588,7 @@ void PpcImportRegistry::handle_xenos_mmio_write(
         if (!resolve_xenos_scratch_write(
                 index, physical_address, writeback_enabled)) {
             std::fprintf(stderr,
-                "[TooHuman][Xenos] scratch register writeback rejected (register=0x%04X value=0x%08X)\\n",
+                "[TooHuman][Xenos] scratch register writeback rejected (register=0x%04X value=0x%08X)\n",
                 index, static_cast<std::uint32_t>(value));
         } else if (writeback_enabled) {
             const std::array<std::uint32_t, 1> data{
@@ -596,7 +597,7 @@ void PpcImportRegistry::handle_xenos_mmio_write(
             if (!write_xenos_guest_physical_dwords(
                     *memory_, physical_address, data)) {
                 std::fprintf(stderr,
-                    "[TooHuman][Xenos] scratch register writeback failed (register=0x%04X address=0x%08X)\\n",
+                    "[TooHuman][Xenos] scratch register writeback failed (register=0x%04X address=0x%08X)\n",
                     index, physical_address);
             }
         }
