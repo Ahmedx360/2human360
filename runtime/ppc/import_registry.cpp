@@ -807,8 +807,7 @@ bool PpcImportRegistry::dispatch_xenos_type3(
     }
 
     if (opcode == kPm4MemWrite) {
-        // Predicated commands depend on bin-select state, which is not
-        // implemented; reject rather than execute an unconditional write.
+        // The packet-level predicate was already evaluated against bin state.
         if (payload.size() < 2u ||
             !write_xenos_guest_physical_dwords(
                 *registry->memory_, payload[0], payload.subspan(1))) {
@@ -822,9 +821,8 @@ bool PpcImportRegistry::dispatch_xenos_type3(
     }
 
     if (opcode == kPm4IndirectBuffer || opcode == kPm4IndirectBufferPfd) {
-        // Bin-select predication is not modelled yet. Never execute a
-        // predicated indirect buffer as though its predicate were true.
-        if (predicate || payload.size() != 2u ||
+        // The packet-level predicate has already been evaluated above.
+        if (payload.size() != 2u ||
             (payload[1] & ~kIndirectLengthMask) != 0 ||
             payload[1] == 0 || payload[1] > kMaxIndirectBufferDwords ||
             registry->xenos_indirect_depth_ != 0 ||
