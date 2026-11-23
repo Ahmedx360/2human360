@@ -109,10 +109,10 @@ int main() {
     store_be32(ring + 5u * 4u, 3u);
     store_be32(ring + 6u * 4u, 0x12345678u);
     store_be32(ring + 7u * 4u, 0xFFFFFFFFu);
-    store_be32(ring + 8u * 4u, 0u);
-    store_be32(ring + 9u * 4u, 0u);
+    store_be32(ring + 0u * 4u, 0u);
+    store_be32(ring + 1u * 4u, 0u);
     const auto pending = dispatch_pm4_guest_ring(
-        memory, kRingPhysical, 2u, 4u, 10u, callbacks, 4u);
+        memory, kRingPhysical, 2u, 4u, 2u, callbacks, 4u);
     assert(pending.error == Pm4GuestRingError::CallbackDeferred);
     assert(pending.dispatch.packets == 0u);
     assert(pending.dispatch.dwords_consumed == 0u);
