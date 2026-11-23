@@ -202,94 +202,120 @@ int main() {
            0xAABBCCDDu);
     assert(read_guest_be32(0xA0020000u) == 5u);
 
-    // A Type-3 NOP is accepted; an unsupported predicated indirect buffer is
-    // rejected without advancing the primary read pointer.
+    // A Type-3 NOP is accepted.
     put_guest_be32(0xA0010014u, 0xC0001000u); // PM4_NOP, one operand.
     put_guest_be32(0xA0010018u, 0u);
     ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 7u);
     assert(imports.xenos_command_processor().read_index() == 7u);
     assert(read_guest_be32(0xA0020000u) == 7u);
 
+    // Disable every bin with SET_BIN_MASK, then select all bins. A predicated
+    // indirect buffer is consumed but skipped while (select & mask) is zero.
     put_guest_be32(0xA001001Cu,
-        0xC0000000u | (1u << 16) | (0x3Fu << 8) | 1u);
-    put_guest_be32(0xA0010020u, 0x00030000u);
-    put_guest_be32(0xA0010024u, 2u);
+        0xC0000000u | (1u << 16) | (0x50u << 8)); // SET_BIN_MASK, low then high.
+    put_guest_be32(0xA0010020u, 0u);
+    put_guest_be32(0xA0010024u, 0u);
     ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 10u);
-    assert(imports.xenos_command_processor().read_index() == 7u);
-    assert(read_guest_be32(0xA0020000u) == 7u);
-    assert(GuestMmioBus::global().read(kXenosMmioBase + 0x31u * 4u, 4) == 0u);
+    assert(imports.xenos_command_processor().read_index() == 10u);
+
+    put_guest_be32(0xA0010028u,
+        0xC0000000u | (1u << 16) | (0x51u << 8)); // SET_BIN_SELECT.
+    put_guest_be32(0xA001002Cu, 0xFFFFFFFFu);
+    put_guest_be32(0xA0010030u, 0xFFFFFFFFu);
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 13u);
+    assert(imports.xenos_command_processor().read_index() == 13u);
+
+    put_guest_be32(0xA0010034u,
+        0xC0000000u | (1u << 16) | (0x3Fu << 8) | 1u);
+    put_guest_be32(0xA0010038u, 0x00030000u);
+    put_guest_be32(0xA001003Cu, 2u);
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 16u);
+    assert(imports.xenos_command_processor().read_index() == 16u);
+    assert(read_guest_be32(0xA0020000u) == 16u);
+    assert(GuestMmioBus::global().read(
+        kXenosMmioBase + 0x31u * 4u, 4) == 0u); // Predicated IB was skipped.
+
+    // Restore an all-ones bin mask so unpredicated commands and passing
+    // predicated commands execute normally again.
+    put_guest_be32(0xA0010040u,
+        0xC0000000u | (1u << 16) | (0x50u << 8));
+    put_guest_be32(0xA0010044u, 0xFFFFFFFFu);
+    put_guest_be32(0xA0010048u, 0xFFFFFFFFu);
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 19u);
+    assert(imports.xenos_command_processor().read_index() == 19u);
 
     // PM4 MEM_WRITE stores guest big-endian dwords at a validated physical
     // target; invalid ranges reject before any data is written.
-    put_guest_be32(0xA001001Cu,
+    put_guest_be32(0xA001004Cu,
         0xC0000000u | (1u << 16) | (0x3Du << 8)); // MEM_WRITE, address + one value.
-    put_guest_be32(0xA0010020u, 0x00060000u);
-    put_guest_be32(0xA0010024u, 0xCAFEBABEu);
-    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 10u);
-    assert(imports.xenos_command_processor().read_index() == 10u);
-    assert(read_guest_be32(0xA0020000u) == 10u);
+    put_guest_be32(0xA0010050u, 0x00060000u);
+    put_guest_be32(0xA0010054u, 0xCAFEBABEu);
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 22u);
+    assert(imports.xenos_command_processor().read_index() == 22u);
+    assert(read_guest_be32(0xA0020000u) == 22u);
     assert(read_guest_be32(0xA0060000u) == 0xCAFEBABEu);
 
     // REG_TO_MEM copies the register mirror to validated guest physical memory.
-    put_guest_be32(0xA0010028u,
+    put_guest_be32(0xA0010058u,
         0xC0000000u | (1u << 16) | (0x3Eu << 8));
-    put_guest_be32(0xA001002Cu, 0x30u);
-    put_guest_be32(0xA0010030u, 0x00070000u);
-    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 13u);
-    assert(imports.xenos_command_processor().read_index() == 13u);
+    put_guest_be32(0xA001005Cu, 0x30u);
+    put_guest_be32(0xA0010060u, 0x00070000u);
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 25u);
+    assert(imports.xenos_command_processor().read_index() == 25u);
     assert(read_guest_be32(0xA0070000u) == 0xCAFEBABEu);
 
     // REG_RMW applies immediate AND/OR masks to a selected Xenos register.
-    put_guest_be32(0xA0010034u,
+    put_guest_be32(0xA0010064u,
         0xC0000000u | (2u << 16) | (0x21u << 8));
-    put_guest_be32(0xA0010038u, 0x30u);
-    put_guest_be32(0xA001003Cu, 0x00FF00FFu);
-    put_guest_be32(0xA0010040u, 0x550000AAu);
-    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 17u);
-    assert(imports.xenos_command_processor().read_index() == 17u);
+    put_guest_be32(0xA0010068u, 0x30u);
+    put_guest_be32(0xA001006Cu, 0x00FF00FFu);
+    put_guest_be32(0xA0010070u, 0x550000AAu);
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 29u);
+    assert(imports.xenos_command_processor().read_index() == 29u);
     assert(GuestMmioBus::global().read(kXenosMmioBase + 0x30u * 4u, 4) ==
            0x55BB00FFu);
 
-    // COND_WRITE compares an Xenos register and conditionally updates a
-    // second register when the masked value matches.
-    put_guest_be32(0xA0010044u,
+    // COND_WRITE compares a guest physical dword and conditionally updates a
+    // register when the masked value matches.
+    put_guest_be32(0xA0010074u,
         0xC0000000u | (5u << 16) | (0x45u << 8));
-    put_guest_be32(0xA0010048u, 0x13u); // Equal, memory source, register target.
-    put_guest_be32(0xA001004Cu, 0x00060000u);
-    put_guest_be32(0xA0010050u, 0xCAFEBABEu);
-    put_guest_be32(0xA0010054u, 0xFFFFFFFFu);
-    put_guest_be32(0xA0010058u, 0x31u);
-    put_guest_be32(0xA001005Cu, 0x0BADF00Du);
-    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 24u);
-    assert(imports.xenos_command_processor().read_index() == 24u);
+    put_guest_be32(0xA0010078u, 0x13u); // Equal, memory source, register target.
+    put_guest_be32(0xA001007Cu, 0x00060000u);
+    put_guest_be32(0xA0010080u, 0xCAFEBABEu);
+    put_guest_be32(0xA0010084u, 0xFFFFFFFFu);
+    put_guest_be32(0xA0010088u, 0x31u);
+    put_guest_be32(0xA001008Cu, 0x0BADF00Du);
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 36u);
+    assert(imports.xenos_command_processor().read_index() == 36u);
     assert(GuestMmioBus::global().read(kXenosMmioBase + 0x31u * 4u, 4) ==
            0x0BADF00Du);
 
-    // A memory-target COND_WRITE uses the checked physical write path.
-    put_guest_be32(0xA0010060u,
+    // A memory-target COND_WRITE uses a checked register comparison and
+    // the checked physical write path.
+    put_guest_be32(0xA0010090u,
         0xC0000000u | (5u << 16) | (0x45u << 8));
-    put_guest_be32(0xA0010064u, 0x103u); // Equal, register poll, memory target.
-    put_guest_be32(0xA0010068u, 0x30u);
-    put_guest_be32(0xA001006Cu, 0x55BB00FFu);
-    put_guest_be32(0xA0010070u, 0xFFFFFFFFu);
-    put_guest_be32(0xA0010074u, 0x00060004u);
-    put_guest_be32(0xA0010078u, 0x11223344u);
-    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 31u);
-    assert(imports.xenos_command_processor().read_index() == 31u);
+    put_guest_be32(0xA0010094u, 0x103u); // Equal, register poll, memory target.
+    put_guest_be32(0xA0010098u, 0x30u);
+    put_guest_be32(0xA001009Cu, 0x55BB00FFu);
+    put_guest_be32(0xA00100A0u, 0xFFFFFFFFu);
+    put_guest_be32(0xA00100A4u, 0x00060004u);
+    put_guest_be32(0xA00100A8u, 0x11223344u);
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 43u);
+    assert(imports.xenos_command_processor().read_index() == 43u);
     assert(read_guest_be32(0xA0060004u) == 0x11223344u);
-    assert(read_guest_be32(0xA0020000u) == 31u);
+    assert(read_guest_be32(0xA0020000u) == 43u);
 
     // A non-matching condition consumes the packet without writing its target.
-    put_guest_be32(0xA001007Cu,
+    put_guest_be32(0xA00100ACu,
         0xC0000000u | (5u << 16) | (0x45u << 8));
-    put_guest_be32(0xA0010080u, 3u); // Equal, register source, register target.
-    put_guest_be32(0xA0010084u, 0x30u);
-    put_guest_be32(0xA0010088u, 0xFFFFFFFFu); // Does not equal current 0x55BB00FF.
-    put_guest_be32(0xA001008Cu, 0xFFFFFFFFu);
-    put_guest_be32(0xA0010090u, 0x32u);
-    put_guest_be32(0xA0010094u, 0x12345678u);
-    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 38u);
-    assert(imports.xenos_command_processor().read_index() == 38u);
+    put_guest_be32(0xA00100B0u, 3u); // Equal, register source, register target.
+    put_guest_be32(0xA00100B4u, 0x30u);
+    put_guest_be32(0xA00100B8u, 0xFFFFFFFFu); // Does not equal current 0x55BB00FF.
+    put_guest_be32(0xA00100BCu, 0xFFFFFFFFu);
+    put_guest_be32(0xA00100C0u, 0x32u);
+    put_guest_be32(0xA00100C4u, 0x12345678u);
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 50u);
+    assert(imports.xenos_command_processor().read_index() == 50u);
     assert(GuestMmioBus::global().read(kXenosMmioBase + 0x32u * 4u, 4) == 0u);
 
     // A multi-register Type-0 packet crosses the ring end and MMIO aperture
@@ -302,7 +328,6 @@ int main() {
     assert(read_guest_be32(0xA0020000u) == 127u);
     assert(GuestMmioBus::global().read(
         kXenosMmioBase + 0x3FFFu * 4u, 4) == 0u);
-
     PPCContext context{};
     context.ctr.u32 = 0x82001100u;
     const auto import_thunk = memory.get_function<PPCFunc*>(0x82001100u);
