@@ -513,6 +513,34 @@ int main() {
         kXenosMmioBase + 0x0578u * 4u, 4) == 0x55555555u);
     assert(read_guest_be32(0xA0060040u) == 0x55555555u);
 
+    // COHER_STATUS_HOST is set by CPU and PM4 writes. A WAIT_REG_MEM
+    // reading this register acknowledges the pending coherency flag before
+    // evaluating its comparison, allowing the following packet to proceed.
+    constexpr std::uint32_t kCoherStatusHost = 0x0A31u;
+    ppc_test_store_u32(memory.base(),
+        kXenosMmioBase + kCoherStatusHost * 4u, 0x01000000u);
+    assert(GuestMmioBus::global().read(
+        kXenosMmioBase + kCoherStatusHost * 4u, 4) == 0x81000000u);
+
+    assert(imports.initialize_xenos_ring(0x00010000u, 6u, &error));
+    put_guest_be32(0xA0010000u, kCoherStatusHost);
+    put_guest_be32(0xA0010004u, 0x03000000u);
+    put_guest_be32(0xA0010008u,
+        0xC0000000u | (4u << 16) | (0x3Cu << 8)); // WAIT_REG_MEM, five operands.
+    put_guest_be32(0xA001000Cu, 3u); // Equal, register source.
+    put_guest_be32(0xA0010010u, kCoherStatusHost);
+    put_guest_be32(0xA0010014u, 0u); // Reference: zero after acknowledgement.
+    put_guest_be32(0xA0010018u, 0x80000000u);
+    put_guest_be32(0xA001001Cu, 0u); // No delay.
+    put_guest_be32(0xA0010020u, 0x33u); // Type-0 command following the wait.
+    put_guest_be32(0xA0010024u, 0xBEEFF00Du);
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 10u);
+    assert(imports.xenos_command_processor().read_index() == 10u);
+    assert(GuestMmioBus::global().read(
+        kXenosMmioBase + kCoherStatusHost * 4u, 4) == 0u);
+    assert(GuestMmioBus::global().read(
+        kXenosMmioBase + 0x33u * 4u, 4) == 0xBEEFF00Du);
+
     const auto call_test_import = [&](std::uint32_t thunk, PPCContext& ctx) {
         ctx.ctr.u32 = thunk;
         const auto function = memory.get_function<PPCFunc*>(thunk);

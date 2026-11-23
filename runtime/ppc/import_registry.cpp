@@ -604,6 +604,17 @@ void PpcImportRegistry::handle_xenos_mmio_write(
         }
     }
 
+    // Xenia sets the coherency status flag whenever the guest writes
+    // COHER_STATUS_HOST. WAIT_REG_MEM later acknowledges it.
+    constexpr std::uint32_t kCoherStatusHost = 0x0A31u;
+    const auto coher_status_address =
+        kXenosMmioBase + kCoherStatusHost * sizeof(std::uint32_t);
+    if (address == coher_status_address && width == sizeof(std::uint32_t)) {
+        (void)GuestMmioBus::global().write_unobserved(
+            coher_status_address, sizeof(std::uint32_t),
+            static_cast<std::uint32_t>(value) | 0x80000000u);
+    }
+
     if (!write_pointer_update) {
         // A guest CPU write to the register currently polled by WAIT_REG_MEM
         // is an observable wake-up. The write has already reached the MMIO
@@ -730,6 +741,10 @@ bool PpcImportRegistry::dispatch_xenos_register_write(
             return false;
     }
 
+    constexpr std::uint32_t kCoherStatusHost = 0x0A31u;
+    if (index == kCoherStatusHost)
+        value |= 0x80000000u;
+
     const auto address = kXenosMmioBase + index * sizeof(std::uint32_t);
     return GuestMmioBus::global().write_unobserved(
         address, sizeof(std::uint32_t), value);
@@ -825,6 +840,16 @@ Pm4CallbackResult PpcImportRegistry::dispatch_xenos_type3(
                 return Pm4CallbackResult::Rejected;
             observed = static_cast<std::uint32_t>(GuestMmioBus::global().read(
                 kXenosMmioBase + poll_address * sizeof(std::uint32_t), 4));
+            // Match Xenia's MakeCoherent handshake. The runtime has no texture
+            // or vertex cache yet, so acknowledge the status bit only.
+            constexpr std::uint32_t kCoherStatusHost = 0x0A31u;
+            if (poll_address == kCoherStatusHost &&
+                (observed & 0x80000000u) != 0) {
+                (void)GuestMmioBus::global().write_unobserved(
+                    kXenosMmioBase + kCoherStatusHost * sizeof(std::uint32_t),
+                    sizeof(std::uint32_t), 0u);
+                observed = 0;
+            }
         }
 
         bool matched = false;

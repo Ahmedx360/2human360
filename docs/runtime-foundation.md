@@ -133,8 +133,12 @@ when the corresponding bit is enabled in SCRATCH_UMSK (0x1DC); the base
 address comes from SCRATCH_ADDR (0x1DD). The complete dword destination is
 checked for committed writable guest memory before a PM4 packet is accepted.
 Direct scalar CPU MMIO writes and register-target REG_RMW/COND_WRITE use the
-same writeback behavior. This follows Xenia's documented register table and
-command-processor write path:
+same writeback behavior. Writes to COHER_STATUS_HOST (0x0A31) set its pending
+status bit; WAIT_REG_MEM against that register acknowledges it by clearing the
+register before comparison. This mirrors Xenia's MakeCoherent handshake, but
+does not flush texture/vertex caches because no resource cache exists yet.
+This follows Xenia's documented register table and command-processor write
+path:
 [register table](https://github.com/xenia-project/xenia/blob/95a5c3ee250f80c3b9d139658649d9ffb6db3eec/src/xenia/gpu/register_table.inc),
 [write path](https://github.com/xenia-project/xenia/blob/95a5c3ee250f80c3b9d139658649d9ffb6db3eec/src/xenia/gpu/command_processor.cc).
 Type-3
