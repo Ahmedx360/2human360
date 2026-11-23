@@ -1742,10 +1742,8 @@ PPC_FUNC(NtWaitForMultipleObjectsEx) {
         return;
     }
 
-    std::vector<GuestKernelHandle> handles;
     std::vector<std::shared_ptr<GuestKernelObject>> objects;
     try {
-        handles.reserve(count);
         objects.reserve(count);
         for (std::uint32_t i = 0; i < count; ++i) {
             const auto handle = get_be32(at(base, handles_address + i * 4u));
@@ -1762,7 +1760,6 @@ PPC_FUNC(NtWaitForMultipleObjectsEx) {
                     }
                 }
             }
-            handles.push_back(handle);
             objects.push_back(std::move(object));
         }
     } catch (...) {
@@ -1776,8 +1773,8 @@ PPC_FUNC(NtWaitForMultipleObjectsEx) {
     std::size_t signaled_index = 0;
     GuestKernelObjectWaitResult result{};
     try {
-        result = process_kernel_objects().wait_multiple(
-            handles, wait_type == 0u, timeout, &signaled_index);
+        result = process_kernel_objects().wait_multiple_objects(
+            objects, wait_type == 0u, timeout, &signaled_index);
     } catch (...) {
         ctx.r3.u32 = 0xC0000017u; // STATUS_NO_MEMORY.
         return;
