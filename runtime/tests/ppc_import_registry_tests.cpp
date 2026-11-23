@@ -350,6 +350,55 @@ int main() {
     assert(imports.xenos_command_processor().read_index() == 59u);
     assert(read_guest_be32(0xA0020000u) == 59u);
 
+    // EVENT_WRITE updates the VGT event initiator register.
+    put_guest_be32(0xA00100ECu,
+        0xC0000000u | (0u << 16) | (0x46u << 8));
+    put_guest_be32(0xA00100F0u, 0x123u);
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 61u);
+    assert(imports.xenos_command_processor().read_index() == 61u);
+    assert(GuestMmioBus::global().read(
+        kXenosMmioBase + 0x21F9u * 4u, 4) == 0x23u);
+
+    // EVENT_WRITE_SHD writes its supplied value to checked physical memory
+    // and records the low six event-initiator bits. Timestamp mode is rejected.
+    put_guest_be32(0xA00100F4u,
+        0xC0000000u | (2u << 16) | (0x58u << 8));
+    put_guest_be32(0xA00100F8u, 0x35u);
+    put_guest_be32(0xA00100FCu, 0x00060010u);
+    put_guest_be32(0xA0010100u, 0xF00DBAADu);
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 65u);
+    assert(imports.xenos_command_processor().read_index() == 65u);
+    assert(read_guest_be32(0xA0060010u) == 0xF00DBAADu);
+    assert(GuestMmioBus::global().read(
+        kXenosMmioBase + 0x21F9u * 4u, 4) == 0x35u);
+
+    // EVENT_WRITE_EXT stores the fixed 8-in-16 surface extent record.
+    put_guest_be32(0xA0010104u,
+        0xC0000000u | (1u << 16) | (0x5Au << 8));
+    put_guest_be32(0xA0010108u, 0x29u);
+    put_guest_be32(0xA001010Cu, 0x00060020u);
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 68u);
+    assert(imports.xenos_command_processor().read_index() == 68u);
+    assert(read_guest_be32(0xA0060020u) == 0x00000004u);
+    assert(read_guest_be32(0xA0060024u) == 0x00000004u);
+    assert(read_guest_be32(0xA0060028u) == 0x00000100u);
+    assert(GuestMmioBus::global().read(
+        kXenosMmioBase + 0x21F9u * 4u, 4) == 0x29u);
+
+    // ME_INIT, WAIT_FOR_IDLE, CONTEXT_UPDATE and INVALIDATE_STATE are
+    // accepted as side-effect-free markers pending GPU backend integration.
+    const std::array<std::uint32_t, 4> marker_opcodes{0x48u, 0x26u, 0x5Eu, 0x3Bu};
+    std::uint32_t marker_write_pointer = 68u;
+    for (const auto opcode : marker_opcodes) {
+        put_guest_be32(0xA0010000u + marker_write_pointer * 4u,
+            0xC0000000u | (opcode << 8));
+        put_guest_be32(0xA0010004u + marker_write_pointer * 4u, 0u);
+        marker_write_pointer += 2u;
+        ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u,
+                           marker_write_pointer);
+        assert(imports.xenos_command_processor().read_index() == marker_write_pointer);
+    }
+
     // A multi-register Type-0 packet crosses the ring end and MMIO aperture
     // boundary; packet-wide preflight rejects it before the first write.
     put_guest_be32(0xA00101FCu, (1u << 16) | 0x3FFFu); // Ring dword 127.
