@@ -54,12 +54,19 @@ struct Pm4DecodeResult {
     std::size_t dword_offset) noexcept;
 
 
+enum class Pm4CallbackResult : std::uint8_t {
+    Accepted,
+    Deferred,
+    Rejected,
+};
+
 enum class Pm4DispatchError : std::uint8_t {
     None,
     PacketDecodeFailed,
     MissingRegisterHandler,
     MissingType3Handler,
     CallbackRejected,
+    CallbackDeferred,
     PacketLimitReached,
 };
 
@@ -69,9 +76,10 @@ struct Pm4DispatchCallbacks {
     // write the same index; ordinary type-0 packets increment it per value.
     bool (*write_register)(void* context, std::uint32_t index,
                            std::uint32_t value){};
-    // Return false to stop dispatch. The payload span excludes the header.
-    bool (*type3)(void* context, std::uint32_t opcode, bool predicate,
-                  std::span<const std::uint32_t> payload){};
+    // The payload span excludes the header. Deferred leaves the current packet
+    // unconsumed so a later pump can retry it without blocking the guest thread.
+    Pm4CallbackResult (*type3)(void* context, std::uint32_t opcode, bool predicate,
+                               std::span<const std::uint32_t> payload){};
     // Optional side-effect-free preflight. When supplied, every register
     // destination in a Type-0/Type-1 packet is checked before any write runs.
     bool (*validate_register)(void* context, std::uint32_t index,
@@ -106,6 +114,7 @@ enum class Pm4RingDispatchError : std::uint8_t {
     MissingRegisterHandler,
     MissingType3Handler,
     CallbackRejected,
+    CallbackDeferred,
     PacketLimitReached,
 };
 
