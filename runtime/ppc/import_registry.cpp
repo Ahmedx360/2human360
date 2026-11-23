@@ -626,6 +626,7 @@ bool PpcImportRegistry::dispatch_xenos_type3(
 
     constexpr std::uint32_t kPm4Nop = 0x10u;
     constexpr std::uint32_t kPm4RegRmw = 0x21u;
+    constexpr std::uint32_t kPm4CondWrite = 0x45u;
     constexpr std::uint32_t kPm4RegToMem = 0x3Eu;
     constexpr std::uint32_t kPm4MemWrite = 0x3Du;
     constexpr std::uint32_t kPm4IndirectBuffer = 0x3Fu;
@@ -636,6 +637,71 @@ bool PpcImportRegistry::dispatch_xenos_type3(
     constexpr std::size_t kMaxIndirectPackets = 256u;
     if (opcode == kPm4Nop)
         return true;
+
+    if (opcode == kPm4CondWrite) {
+        if (predicate || payload.size() != 6u) {
+            std::fprintf(stderr,
+                "[TooHuman][Xenos] rejected PM4 COND_WRITE predicate=%u payload_dwords=%zu\n",
+                predicate ? 1u : 0u, payload.size());
+            return false;
+        }
+
+        constexpr std::uint32_t kRegisterCount =
+            kGuestMmioWindowSize / sizeof(std::uint32_t);
+        const auto wait_info = payload[0];
+        const auto poll_address = payload[1];
+        const auto reference = payload[2];
+        const auto mask = payload[3];
+        const auto write_address = payload[4];
+        const auto write_data = payload[5];
+
+        std::uint32_t observed = 0;
+        if ((wait_info & 0x10u) != 0) {
+            if (!read_xenos_guest_physical_dword(
+                    *registry->memory_, poll_address, observed)) {
+                std::fprintf(stderr,
+                    "[TooHuman][Xenos] COND_WRITE poll address is unreadable: 0x%08X\n",
+                    poll_address);
+                return false;
+            }
+        } else {
+            if (poll_address >= kRegisterCount) return false;
+            observed = static_cast<std::uint32_t>(
+                GuestMmioBus::global().read(
+                    kXenosMmioBase + poll_address * sizeof(std::uint32_t), 4));
+        }
+
+        bool matched = false;
+        switch (wait_info & 0x7u) {
+        case 0: matched = false; break;
+        case 1: matched = (observed & mask) < reference; break;
+        case 2: matched = (observed & mask) <= reference; break;
+        case 3: matched = (observed & mask) == reference; break;
+        case 4: matched = (observed & mask) != reference; break;
+        case 5: matched = (observed & mask) >= reference; break;
+        case 6: matched = (observed & mask) > reference; break;
+        case 7: matched = true; break;
+        }
+        if (!matched) return true;
+
+        if ((wait_info & 0x100u) != 0) {
+            const std::array<std::uint32_t, 1> data{write_data};
+            if (!write_xenos_guest_physical_dwords(
+                    *registry->memory_, write_address, data)) {
+                std::fprintf(stderr,
+                    "[TooHuman][Xenos] COND_WRITE destination is not writable: 0x%08X\n",
+                    write_address);
+                return false;
+            }
+        } else {
+            if (write_address >= kRegisterCount) return false;
+            if (!GuestMmioBus::global().write_unobserved(
+                    kXenosMmioBase + write_address * sizeof(std::uint32_t),
+                    sizeof(std::uint32_t), write_data))
+                return false;
+        }
+        return true;
+    }
 
     if (opcode == kPm4RegRmw) {
         if (predicate || payload.size() != 3u) {
