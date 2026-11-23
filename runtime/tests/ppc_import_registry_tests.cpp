@@ -486,17 +486,32 @@ int main() {
         kXenosMmioBase + 0x057Au * 4u, 4) == 0xB3333333u);
     assert(read_guest_be32(0xA0060048u) == 0xB3333333u);
 
+    // A register-target COND_WRITE also uses the scratch writeback path.
+    put_guest_be32(0xA001002Cu,
+        0xC0000000u | (5u << 16) | (0x45u << 8)); // Six payload dwords.
+    put_guest_be32(0xA0010030u, 3u);             // Equal, register poll, register target.
+    put_guest_be32(0xA0010034u, 0x30u);
+    put_guest_be32(0xA0010038u, 0x55BB00FFu);
+    put_guest_be32(0xA001003Cu, 0xFFFFFFFFu);
+    put_guest_be32(0xA0010040u, 0x0578u);         // Scratch slot 0.
+    put_guest_be32(0xA0010044u, 0x55555555u);
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 18u);
+    assert(imports.xenos_command_processor().read_index() == 18u);
+    assert(GuestMmioBus::global().read(
+        kXenosMmioBase + 0x0578u * 4u, 4) == 0x55555555u);
+    assert(read_guest_be32(0xA0060040u) == 0x55555555u);
+
     // Invalid scratch destinations reject the PM4 packet before the register
     // mirror or previously committed scratch memory is modified.
-    put_guest_be32(0xA001002Cu, 0x8000u | 0x01DDu); // SCRATCH_ADDR = uncommitted page.
-    put_guest_be32(0xA0010030u, 0x00080000u);
-    put_guest_be32(0xA0010034u, 0x8000u | 0x0578u); // One write to scratch slot 0.
-    put_guest_be32(0xA0010038u, 0x99999999u);
-    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 15u);
-    assert(imports.xenos_command_processor().read_index() == 13u);
+    put_guest_be32(0xA0010048u, 0x8000u | 0x01DDu); // SCRATCH_ADDR = uncommitted page.
+    put_guest_be32(0xA001004Cu, 0x00080000u);
+    put_guest_be32(0xA0010050u, 0x8000u | 0x0578u); // One write to scratch slot 0.
+    put_guest_be32(0xA0010054u, 0x99999999u);
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 22u);
+    assert(imports.xenos_command_processor().read_index() == 20u);
     assert(GuestMmioBus::global().read(
-        kXenosMmioBase + 0x0578u * 4u, 4) == 0x11111111u);
-    assert(read_guest_be32(0xA0060040u) == 0x11111111u);
+        kXenosMmioBase + 0x0578u * 4u, 4) == 0x55555555u);
+    assert(read_guest_be32(0xA0060040u) == 0x55555555u);
 
     const auto call_test_import = [&](std::uint32_t thunk, PPCContext& ctx) {
         ctx.ctr.u32 = thunk;
