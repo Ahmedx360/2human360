@@ -835,7 +835,8 @@ Pm4CallbackResult PpcImportRegistry::dispatch_xenos_type3(
         value |= ((info >> 30) & 1u) != 0
             ? read_register(or_operand & kRegisterMask) : or_operand;
         return GuestMmioBus::global().write_unobserved(
-            kXenosMmioBase + target * sizeof(std::uint32_t), 4, value);
+            kXenosMmioBase + target * sizeof(std::uint32_t), 4, value)
+            ? Pm4CallbackResult::Accepted : Pm4CallbackResult::Rejected;
     }
 
     if (opcode == kPm4RegToMem) {
