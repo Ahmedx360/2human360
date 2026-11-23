@@ -495,6 +495,9 @@ GuestKernelObjectWaitResult GuestKernelObjectTable::wait_multiple_objects(
     std::size_t* signaled_index) const {
     if (objects.empty() || objects.size() > 64u)
         return GuestKernelObjectWaitResult::InvalidHandle;
+    for (const auto& object : objects) {
+        if (!object) return GuestKernelObjectWaitResult::InvalidHandle;
+    }
     if (wait_all) {
         for (std::size_t i = 0; i < objects.size(); ++i) {
             for (std::size_t j = i + 1; j < objects.size(); ++j) {
