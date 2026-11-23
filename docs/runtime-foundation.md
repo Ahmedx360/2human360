@@ -144,9 +144,15 @@ predicated command is skipped when that intersection is zero and is dispatched
 when nonzero. Each batch accepts at most 64 indirect buffers, each buffer is
 limited to 64K dwords and 256 packets, and its complete physical-memory range
 must be committed and readable. Nested indirect buffers and all other Type-3
-opcodes are logged and rejected. These are
+opcodes except `WAIT_REG_MEM` are logged and rejected. These are
 bounded command-stream and guest-memory operations, not draw/shader
-execution. The hardware's
+execution. `WAIT_REG_MEM` (opcode `0x3C`) validates its five operands,
+supports register and checked physical-memory polling, and implements the
+seven comparison operations. When its condition is not satisfied, the callback
+returns a distinct deferred result: the command remains at RPTR and can be
+retried by a later pump without blocking the guest thread. The wait interval is
+not slept and there is no asynchronous poll/wakeup worker, so guest progress
+still depends on a later CP write-pointer notification. The hardware's
 read-pointer writeback block cadence is not modeled; the synchronous pump
 writes the read pointer after each call that consumes dwords. Interrupts,
 fences, DMA, register side effects and GPU opcode semantics remain
@@ -180,16 +186,21 @@ The pump is synchronous and currently game-free. It is wired to the two
 title ring-configuration imports and Xenos `CP_RB_WPTR` register index
 `0x01C5`. It does not schedule a device worker or model the hardware's
 read-pointer writeback block cadence; it writes once per pump call that
-consumes dwords. Its Type-3 callback accepts NOP, checked physical MEM_WRITE, and a limited
-one-level indirect-buffer path; other GPU commands, interrupts and GPU
-synchronization remain unimplemented. Packet predicates are evaluated before
+consumes dwords. Its Type-3 callback accepts NOP, checked physical MEM_WRITE,
+`WAIT_REG_MEM`, and a limited one-level indirect-buffer path; other GPU
+commands, interrupts and full GPU synchronization remain unimplemented. For an
+unmet `WAIT_REG_MEM` predicate, the dispatcher reports a deferred packet,
+leaves the read pointer unchanged, and retries only when the caller pumps
+again. This avoids blocking the guest CPU but is not a substitute for the
+hardware's independent polling worker. Packet predicates are evaluated before
 dispatch, including predicated indirect buffers: a failed bin intersection
 skips the buffer, while a passing predicate executes its bounded contents.
 `TooHumanXenosCommandProcessorTests` covers ring configuration, write-pointer
-validation, packet progress, callback rejection and read-pointer writeback
-failure. `TooHumanPpcImportRegistryTests` covers the kernel-import-to-MMIO
-path, both skipped and passing predicated indirect buffers, and checked
-physical-memory commands.
+validation, packet progress, callback rejection, deferred-command retention
+and read-pointer writeback failure. `TooHumanPpcImportRegistryTests` covers
+the kernel-import-to-MMIO path, skipped and passing predicated indirect
+buffers, and a `WAIT_REG_MEM` command retried after its register condition
+changes.
 
 ## Startup import priorities and boot HLE
 
