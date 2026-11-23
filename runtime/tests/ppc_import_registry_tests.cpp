@@ -279,7 +279,7 @@ int main() {
     put_guest_be32(0xA0010060u, 0x00070000u);
     ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 25u);
     assert(imports.xenos_command_processor().read_index() == 25u);
-    assert(read_guest_be32(0xA0070000u) == 0xCAFEBABEu);
+    assert(read_guest_be32(0xA0070000u) == 0xAABBCCDDu);
 
     // REG_RMW applies immediate AND/OR masks to a selected Xenos register.
     put_guest_be32(0xA0010064u,

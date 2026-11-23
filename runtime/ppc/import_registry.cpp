@@ -630,7 +630,7 @@ void PpcImportRegistry::handle_xenos_mmio_write(
                 index, physical_address, writeback_enabled)) {
             std::fprintf(stderr,
                 "[TooHuman][Xenos] scratch register writeback rejected (register=0x%04X value=0x%08X)\n",
-                index, static_cast<std::uint32_t>(value));
+                static_cast<unsigned int>(index), static_cast<std::uint32_t>(value));
         } else if (writeback_enabled) {
             const std::array<std::uint32_t, 1> data{
                 static_cast<std::uint32_t>(value)
@@ -639,7 +639,7 @@ void PpcImportRegistry::handle_xenos_mmio_write(
                     *memory_, physical_address, data)) {
                 std::fprintf(stderr,
                     "[TooHuman][Xenos] scratch register writeback failed (register=0x%04X address=0x%08X)\n",
-                    index, physical_address);
+                    static_cast<unsigned int>(index), static_cast<unsigned int>(physical_address));
             }
         }
     }
