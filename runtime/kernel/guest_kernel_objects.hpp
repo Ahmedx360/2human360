@@ -31,8 +31,10 @@ public:
         std::optional<std::chrono::milliseconds> timeout) override;
     [[nodiscard]] bool set();
     [[nodiscard]] bool reset();
+    [[nodiscard]] bool pulse();
     void clear();
     [[nodiscard]] bool is_signaled() noexcept;
+    [[nodiscard]] std::size_t waiting_count() noexcept;
     [[nodiscard]] std::uint32_t guest_object_address() const noexcept override {
         return guest_object_address_;
     }
@@ -40,6 +42,9 @@ private:
     const bool manual_reset_;
     const std::uint32_t guest_object_address_{};
     bool signaled_{};
+    std::size_t waiting_count_{};
+    std::uint64_t pulse_generation_{};
+    std::size_t pulse_tokens_{};
     std::mutex mutex_;
     std::condition_variable condition_;
 };

@@ -94,6 +94,8 @@ PPCFunc NtCreateEvent;
 PPCFunc KeInitializeEvent;
 PPCFunc KeSetEvent;
 PPCFunc KeResetEvent;
+PPCFunc KePulseEvent;
+PPCFunc NtPulseEvent;
 PPCFunc NtCreateSemaphore;
 PPCFunc NtReleaseSemaphore;
 PPCFunc KeInitializeSemaphore;

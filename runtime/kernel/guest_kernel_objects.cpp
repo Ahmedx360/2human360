@@ -19,15 +19,33 @@ GuestKernelObjectType GuestEventObject::type() const noexcept {
 GuestKernelObjectWaitResult GuestEventObject::wait(
     std::optional<std::chrono::milliseconds> timeout) {
     std::unique_lock lock(mutex_);
-    const auto ready = [&] { return signaled_; };
-    if (!signaled_) {
-        if (timeout) {
-            if (!condition_.wait_for(lock, *timeout, ready))
-                return GuestKernelObjectWaitResult::Timeout;
-        } else {
+    const auto initial_pulse_generation = pulse_generation_;
+    const bool queued = !signaled_;
+    if (queued) ++waiting_count_;
+
+    const auto ready = [&] {
+        return signaled_ ||
+               (pulse_generation_ != initial_pulse_generation && pulse_tokens_ != 0);
+    };
+    if (!ready()) {
+        bool awakened = true;
+        if (timeout)
+            awakened = condition_.wait_for(lock, *timeout, ready);
+        else
             condition_.wait(lock, ready);
+        if (!awakened) {
+            if (queued) --waiting_count_;
+            return GuestKernelObjectWaitResult::Timeout;
         }
     }
+
+    if (queued) --waiting_count_;
+    if (pulse_generation_ != initial_pulse_generation && pulse_tokens_ != 0) {
+        --pulse_tokens_;
+        return GuestKernelObjectWaitResult::Signaled;
+    }
+    if (!signaled_)
+        return GuestKernelObjectWaitResult::Timeout;
     if (!manual_reset_) signaled_ = false;
     return GuestKernelObjectWaitResult::Signaled;
 }
@@ -51,8 +69,32 @@ bool GuestEventObject::reset() {
     return previous;
 }
 
+bool GuestEventObject::pulse() {
+    bool previous = false;
+    bool wake_waiters = false;
+    {
+        std::lock_guard lock(mutex_);
+        previous = signaled_;
+        signaled_ = false;
+        ++pulse_generation_;
+        pulse_tokens_ = manual_reset_ ? waiting_count_
+                                      : (waiting_count_ != 0 ? 1u : 0u);
+        wake_waiters = pulse_tokens_ != 0;
+    }
+    if (wake_waiters) {
+        if (manual_reset_) condition_.notify_all();
+        else condition_.notify_one();
+    }
+    return previous;
+}
+
 void GuestEventObject::clear() {
     (void)reset();
+}
+
+std::size_t GuestEventObject::waiting_count() noexcept {
+    std::lock_guard lock(mutex_);
+    return waiting_count_;
 }
 
 bool GuestEventObject::is_signaled() noexcept {

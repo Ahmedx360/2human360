@@ -88,7 +88,7 @@ int main() {
                                     &test_import_handler, &error));
     std::size_t startup_hle_count = 0;
     assert(toohuman::runtime::register_boot_imports(imports, &error, &startup_hle_count));
-    assert(startup_hle_count == 84u);
+    assert(startup_hle_count == 86u);
     const std::vector<toohuman::runtime::XexImport> metadata{
         {"xboxkrnl.exe", 0x0777u, 0, 1, 0x82001100u},
         {"xboxkrnl.exe", 0x011Bu, 0, 1, 0x82001104u},
@@ -149,12 +149,14 @@ int main() {
         {"xboxkrnl.exe", 0x0070u, 0, 1, 0x820011E8u},
         {"xboxkrnl.exe", 0x009Du, 0, 1, 0x820011ECu},
         {"xboxkrnl.exe", 0x008Fu, 0, 1, 0x820011F0u},
+        {"xboxkrnl.exe", 0x007Fu, 0, 1, 0x820011F4u},
+        {"xboxkrnl.exe", 0x00E2u, 0, 1, 0x820011F8u},
         {"xboxkrnl.exe", 0x01B6u, 0, 1, 0x820011BCu},
         {"xboxkrnl.exe", 0x01C3u, 0, 1, 0x820011C0u}
     };
     std::size_t registered = 0;
     assert(imports.install(memory, metadata, &registered, &error));
-    assert(registered == 61u);
+    assert(registered == 63u);
     assert(memory.get_function<PPCFunc*>(0x82001100u) != &test_default_handler);
 
     // The real kernel imports configure the per-title primary Xenos ring.
@@ -786,6 +788,27 @@ int main() {
     release_semaphore.r4.u32 = 1u;
     call_test_import(0x820011DCu, release_semaphore);
     assert(release_semaphore.r3.u32 == 0xC0000047u);
+    // NtPulseEvent uses the handle form and reports the previous signal state.
+    constexpr std::uint32_t pulse_event_handle_output = 0x82013068u;
+    constexpr std::uint32_t pulse_event_previous_output = 0x8201306Cu;
+    PPCContext create_pulse_event{};
+    create_pulse_event.r3.u32 = pulse_event_handle_output;
+    create_pulse_event.r5.u32 = 1u;
+    create_pulse_event.r6.u32 = 0u;
+    call_test_import(0x82001134u, create_pulse_event);
+    assert(create_pulse_event.r3.u32 == 0u);
+    const auto pulse_event_handle = read_guest_be32(pulse_event_handle_output);
+    PPCContext pulse_handle_event{};
+    pulse_handle_event.r3.u32 = pulse_event_handle;
+    pulse_handle_event.r4.u32 = pulse_event_previous_output;
+    call_test_import(0x820011F8u, pulse_handle_event);
+    assert(pulse_handle_event.r3.u32 == 0u);
+    assert(read_guest_be32(pulse_event_previous_output) == 0u);
+    PPCContext close_pulse_event{};
+    close_pulse_event.r3.u32 = pulse_event_handle;
+    call_test_import(0x82001144u, close_pulse_event);
+    assert(close_pulse_event.r3.u32 == 0u);
+
     PPCContext close_semaphore{};
     close_semaphore.r3.u32 = semaphore_handle;
     call_test_import(0x82001144u, close_semaphore);
@@ -872,6 +895,11 @@ int main() {
     call_test_import(0x820011E4u, wait_native_event);
     assert(wait_native_event.r3.u32 == 0u);
     assert(read_guest_be32(native_notification_event + 4u) == 1u);
+    PPCContext pulse_native_event{};
+    pulse_native_event.r3.u32 = native_notification_event;
+    call_test_import(0x820011F4u, pulse_native_event);
+    assert(pulse_native_event.r3.u32 == 1u);
+    assert(read_guest_be32(native_notification_event + 4u) == 0u);
     assert(toohuman::runtime::process_kernel_objects().close(
         native_notification_event));
 

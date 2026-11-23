@@ -1349,6 +1349,21 @@ PPC_FUNC(KeSetEvent) {
     ctx.r3.u32 = previous;
 }
 
+// xboxkrnl #0x7F. Pulse only threads already waiting on the native event.
+PPC_FUNC(KePulseEvent) {
+    auto object = get_or_create_native_dispatcher_object(base, ctx.r3.u32);
+    auto event = std::dynamic_pointer_cast<GuestEventObject>(std::move(object));
+    if (!event) {
+        ctx.r3.u32 = 0;
+        return;
+    }
+    const auto previous = event->pulse() ? 1u : 0u;
+    if (event->guest_object_address() != 0)
+        put_be32(at(base, event->guest_object_address() + 4u),
+                 event->is_signaled() ? 1u : 0u);
+    ctx.r3.u32 = previous;
+}
+
 // xboxkrnl #0x8F. Return the previous signal state.
 PPC_FUNC(KeResetEvent) {
     auto object = get_or_create_native_dispatcher_object(base, ctx.r3.u32);
@@ -1410,6 +1425,30 @@ PPC_FUNC(NtSetEvent) {
     if (ctx.r4.u32 != 0) put_be32(at(base, ctx.r4.u32), previous);
     ctx.r3.u32 = kStatusSuccess;
 }
+// xboxkrnl #0xE2. Pulse a handle-backed event and optionally return prior state.
+PPC_FUNC(NtPulseEvent) {
+    const auto handle = ctx.r3.u32;
+    const auto previous_output = ctx.r4.u32;
+    if (previous_output != 0 &&
+        !guest_range_valid(base, previous_output, 4u, GuestMemoryAccess::Write)) {
+        ctx.r3.u32 = kStatusAccessViolation;
+        return;
+    }
+    auto object = process_kernel_objects().lookup(handle);
+    auto event = std::dynamic_pointer_cast<GuestEventObject>(std::move(object));
+    if (!event) {
+        ctx.r3.u32 = kStatusInvalidHandle;
+        return;
+    }
+    const auto previous = event->pulse() ? 1u : 0u;
+    if (event->guest_object_address() != 0)
+        put_be32(at(base, event->guest_object_address() + 4u),
+                 event->is_signaled() ? 1u : 0u);
+    if (previous_output != 0)
+        put_be32(at(base, previous_output), previous);
+    ctx.r3.u32 = kStatusSuccess;
+}
+
 PPC_FUNC(NtClearEvent) {
     auto object = process_kernel_objects().lookup(ctx.r3.u32);
     auto event = std::dynamic_pointer_cast<GuestEventObject>(std::move(object));

@@ -5,7 +5,7 @@
 namespace toohuman::runtime {
 namespace {
 
-constexpr std::array<TitleExportName, 254> kTitleImports{{
+constexpr std::array<TitleExportName, 256> kTitleImports{{
     {"xam.xex", 0x0001, "NetDll_WSAStartup", false},
     {"xam.xex", 0x0003, "NetDll_socket", false},
     {"xam.xex", 0x0004, "NetDll_closesocket", false},
@@ -122,6 +122,7 @@ constexpr std::array<TitleExportName, 254> kTitleImports{{
     {"xboxkrnl.exe", 0x0070, "KeInitializeEvent", false},
     {"xboxkrnl.exe", 0x0074, "KeInitializeSemaphore", false},
     {"xboxkrnl.exe", 0x007d, "KeLeaveCriticalRegion", false},
+    {"xboxkrnl.exe", 0x007f, "KePulseEvent", false},
     {"xboxkrnl.exe", 0x0083, "KeQueryPerformanceFrequency", false},
     {"xboxkrnl.exe", 0x0084, "KeQuerySystemTime", false},
     {"xboxkrnl.exe", 0x0085, "KeRaiseIrqlToDpcLevel", false},
@@ -156,6 +157,7 @@ constexpr std::array<TitleExportName, 254> kTitleImports{{
     {"xboxkrnl.exe", 0x00db, "NtFlushBuffersFile", false},
     {"xboxkrnl.exe", 0x00dc, "NtFreeVirtualMemory", false},
     {"xboxkrnl.exe", 0x00df, "NtOpenFile", false},
+    {"xboxkrnl.exe", 0x00e2, "NtPulseEvent", false},
     {"xboxkrnl.exe", 0x00e4, "NtQueryDirectoryFile", false},
     {"xboxkrnl.exe", 0x00e7, "NtQueryFullAttributesFile", false},
     {"xboxkrnl.exe", 0x00e8, "NtQueryInformationFile", false},

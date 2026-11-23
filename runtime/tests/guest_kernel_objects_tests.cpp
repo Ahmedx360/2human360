@@ -120,6 +120,58 @@ int main() {
     assert(!native_auto_event->is_signaled()); // Synchronization wait consumes state.
     assert(objects.close(native_auto_event_address));
 
+    // Pulse is nonpersistent and releases only waiters queued before it:
+    // one for a synchronization event, all for a notification event.
+    auto pulse_sync = std::make_shared<GuestEventObject>(false, false);
+    const auto pulse_sync_handle = objects.insert(pulse_sync);
+    assert(pulse_sync_handle);
+    std::atomic<bool> pulse_sync_started{false};
+    GuestKernelObjectWaitResult pulse_sync_result =
+        GuestKernelObjectWaitResult::InvalidHandle;
+    std::thread pulse_sync_waiter([&] {
+        pulse_sync_started.store(true, std::memory_order_release);
+        pulse_sync_result = objects.wait(*pulse_sync_handle, 2s);
+    });
+    while (!pulse_sync_started.load(std::memory_order_acquire) ||
+           pulse_sync->waiting_count() != 1u)
+        std::this_thread::yield();
+    assert(!pulse_sync->pulse());
+    pulse_sync_waiter.join();
+    assert(pulse_sync_result == GuestKernelObjectWaitResult::Signaled);
+    assert(objects.wait(*pulse_sync_handle, 0ms) ==
+           GuestKernelObjectWaitResult::Timeout);
+    assert(objects.close(*pulse_sync_handle));
+
+    auto pulse_notification = std::make_shared<GuestEventObject>(true, false);
+    const auto pulse_notification_handle = objects.insert(pulse_notification);
+    assert(pulse_notification_handle);
+    std::atomic<bool> pulse_notification_started_a{false};
+    std::atomic<bool> pulse_notification_started_b{false};
+    GuestKernelObjectWaitResult pulse_notification_result_a =
+        GuestKernelObjectWaitResult::InvalidHandle;
+    GuestKernelObjectWaitResult pulse_notification_result_b =
+        GuestKernelObjectWaitResult::InvalidHandle;
+    std::thread pulse_notification_waiter_a([&] {
+        pulse_notification_started_a.store(true, std::memory_order_release);
+        pulse_notification_result_a = objects.wait(*pulse_notification_handle, 2s);
+    });
+    std::thread pulse_notification_waiter_b([&] {
+        pulse_notification_started_b.store(true, std::memory_order_release);
+        pulse_notification_result_b = objects.wait(*pulse_notification_handle, 2s);
+    });
+    while (!pulse_notification_started_a.load(std::memory_order_acquire) ||
+           !pulse_notification_started_b.load(std::memory_order_acquire) ||
+           pulse_notification->waiting_count() != 2u)
+        std::this_thread::yield();
+    assert(!pulse_notification->pulse());
+    pulse_notification_waiter_a.join();
+    pulse_notification_waiter_b.join();
+    assert(pulse_notification_result_a == GuestKernelObjectWaitResult::Signaled);
+    assert(pulse_notification_result_b == GuestKernelObjectWaitResult::Signaled);
+    assert(objects.wait(*pulse_notification_handle, 0ms) ==
+           GuestKernelObjectWaitResult::Timeout);
+    assert(objects.close(*pulse_notification_handle));
+
     // Native semaphore objects can be found by their guest KSEMAPHORE address.
     constexpr GuestKernelHandle native_semaphore_address = 0xA0123400u;
     auto native_semaphore = std::make_shared<GuestSemaphoreObject>(

@@ -260,9 +260,10 @@ Native `KEVENT` support shares the same waitable-object table: `KeInitializeEven
 registers the 0x10-byte guest dispatcher record by address, `KeSetEvent` and
 `KeResetEvent` change both host wait state and the guest signal-state field, and
 `KeWaitForSingleObject` consumes synchronization events while leaving notification
-events signaled. The `KeSetEvent` priority increment and wait-switch hint are
-currently ignored; pulse-event behavior and multiple-object waits remain
-unimplemented.
+events signaled. `KePulseEvent` and `NtPulseEvent` release only threads already queued at the
+pulse instant (one for synchronization events, all for notification events)
+and leave the event unsignaled. Priority increment and wait-switch hints are
+ignored; multiple-object waits remain unimplemented.
 
 Semaphore support now includes `NtCreateSemaphore`/`NtReleaseSemaphore` handles and
 native `KeInitializeSemaphore`/`KeReleaseSemaphore` objects. The counting
