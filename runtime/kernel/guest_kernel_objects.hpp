@@ -6,10 +6,11 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <thread>
 #include <unordered_map>
 namespace toohuman::runtime {
 using GuestKernelHandle = std::uint32_t;
-enum class GuestKernelObjectType { Event, Semaphore, Thread, File };
+enum class GuestKernelObjectType { Event, Semaphore, Mutant, Thread, File };
 enum class GuestKernelObjectWaitResult { Signaled, Timeout, InvalidHandle };
 class GuestKernelObject {
 public:
@@ -71,6 +72,23 @@ private:
     const std::uint32_t maximum_count_{};
     const std::uint32_t guest_object_address_{};
     mutable std::mutex mutex_;
+    std::condition_variable condition_;
+};
+
+class GuestMutantObject final : public GuestKernelObject {
+public:
+    explicit GuestMutantObject(bool initially_owned = false);
+    [[nodiscard]] GuestKernelObjectType type() const noexcept override;
+    [[nodiscard]] GuestKernelObjectWaitResult wait(
+        std::optional<std::chrono::milliseconds> timeout) override;
+    // A mutant may only be released by its current owner. Recursive acquisition
+    // is supported and requires the same number of releases.
+    [[nodiscard]] bool release() noexcept;
+    [[nodiscard]] std::uint32_t recursion_count() noexcept;
+private:
+    std::thread::id owner_{};
+    std::uint32_t recursion_count_{};
+    std::mutex mutex_;
     std::condition_variable condition_;
 };
 

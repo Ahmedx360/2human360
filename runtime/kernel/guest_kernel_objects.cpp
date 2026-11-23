@@ -102,6 +102,59 @@ bool GuestEventObject::is_signaled() noexcept {
     return signaled_;
 }
 
+GuestMutantObject::GuestMutantObject(bool initially_owned) {
+    if (initially_owned) {
+        owner_ = std::this_thread::get_id();
+        recursion_count_ = 1u;
+    }
+}
+
+GuestKernelObjectType GuestMutantObject::type() const noexcept {
+    return GuestKernelObjectType::Mutant;
+}
+
+GuestKernelObjectWaitResult GuestMutantObject::wait(
+    std::optional<std::chrono::milliseconds> timeout) {
+    std::unique_lock lock(mutex_);
+    const auto current = std::this_thread::get_id();
+    if (recursion_count_ != 0 && owner_ == current) {
+        ++recursion_count_;
+        return GuestKernelObjectWaitResult::Signaled;
+    }
+
+    const auto available = [&] { return recursion_count_ == 0; };
+    if (!available()) {
+        if (timeout) {
+            if (!condition_.wait_for(lock, *timeout, available))
+                return GuestKernelObjectWaitResult::Timeout;
+        } else {
+            condition_.wait(lock, available);
+        }
+    }
+    owner_ = current;
+    recursion_count_ = 1u;
+    return GuestKernelObjectWaitResult::Signaled;
+}
+
+bool GuestMutantObject::release() noexcept {
+    {
+        std::lock_guard lock(mutex_);
+        if (recursion_count_ == 0 || owner_ != std::this_thread::get_id())
+            return false;
+        --recursion_count_;
+        if (recursion_count_ != 0)
+            return true;
+        owner_ = {};
+    }
+    condition_.notify_one();
+    return true;
+}
+
+std::uint32_t GuestMutantObject::recursion_count() noexcept {
+    std::lock_guard lock(mutex_);
+    return recursion_count_;
+}
+
 GuestSemaphoreObject::GuestSemaphoreObject(
     std::uint32_t initial_count, std::uint32_t maximum_count,
     std::uint32_t guest_object_address)

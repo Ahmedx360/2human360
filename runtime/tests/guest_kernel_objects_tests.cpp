@@ -52,6 +52,39 @@ int main() {
     assert(objects.wait(*synchronization_handle, 0ms) == GuestKernelObjectWaitResult::Timeout);
     assert(!synchronization->set());
     assert(objects.wait(*synchronization_handle, 0ms) == GuestKernelObjectWaitResult::Signaled);
+    // Mutants are recursive mutex objects owned by the calling host thread.
+    auto mutant = std::make_shared<GuestMutantObject>(true);
+    const auto mutant_handle = objects.insert(mutant);
+    assert(mutant_handle);
+    assert(mutant->type() == GuestKernelObjectType::Mutant);
+    assert(mutant->recursion_count() == 1u);
+    assert(objects.wait(*mutant_handle, 0ms) ==
+           GuestKernelObjectWaitResult::Signaled);
+    assert(mutant->recursion_count() == 2u);
+
+    std::atomic<bool> mutant_nonowner_release{true};
+    std::atomic<GuestKernelObjectWaitResult> mutant_other_wait{
+        GuestKernelObjectWaitResult::Signaled};
+    std::thread mutant_nonowner([&] {
+        mutant_nonowner_release.store(mutant->release(), std::memory_order_release);
+        mutant_other_wait.store(objects.wait(*mutant_handle, 0ms),
+                                std::memory_order_release);
+    });
+    mutant_nonowner.join();
+    assert(!mutant_nonowner_release.load(std::memory_order_acquire));
+    assert(mutant_other_wait.load(std::memory_order_acquire) ==
+           GuestKernelObjectWaitResult::Timeout);
+
+    assert(mutant->release());
+    assert(mutant->recursion_count() == 1u);
+    assert(mutant->release());
+    assert(mutant->recursion_count() == 0u);
+    assert(!mutant->release());
+    assert(objects.wait(*mutant_handle, 0ms) ==
+           GuestKernelObjectWaitResult::Signaled);
+    assert(mutant->release());
+    assert(objects.close(*mutant_handle));
+
     // Semaphores count available signals; each wait consumes one.
     auto semaphore = std::make_shared<GuestSemaphoreObject>(1u, 3u);
     const auto semaphore_handle = objects.insert(semaphore);

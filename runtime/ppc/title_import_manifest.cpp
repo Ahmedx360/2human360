@@ -5,7 +5,7 @@
 namespace toohuman::runtime {
 namespace {
 
-constexpr std::array<TitleExportName, 256> kTitleImports{{
+constexpr std::array<TitleExportName, 258> kTitleImports{{
     {"xam.xex", 0x0001, "NetDll_WSAStartup", false},
     {"xam.xex", 0x0003, "NetDll_socket", false},
     {"xam.xex", 0x0004, "NetDll_closesocket", false},
@@ -150,6 +150,7 @@ constexpr std::array<TitleExportName, 256> kTitleImports{{
     {"xboxkrnl.exe", 0x00cf, "NtClose", false},
     {"xboxkrnl.exe", 0x00d1, "NtCreateEvent", false},
     {"xboxkrnl.exe", 0x00d2, "NtCreateFile", false},
+    {"xboxkrnl.exe", 0x00d4, "NtCreateMutant", false},
     {"xboxkrnl.exe", 0x00d5, "NtCreateSemaphore", false},
     {"xboxkrnl.exe", 0x00d7, "NtCreateTimer", false},
     {"xboxkrnl.exe", 0x00d9, "NtDeviceIoControlFile", false},
@@ -165,6 +166,7 @@ constexpr std::array<TitleExportName, 256> kTitleImports{{
     {"xboxkrnl.exe", 0x00ef, "NtQueryVolumeInformationFile", false},
     {"xboxkrnl.exe", 0x00f0, "NtReadFile", false},
     {"xboxkrnl.exe", 0x00f1, "NtReadFileScatter", false},
+    {"xboxkrnl.exe", 0x00f2, "NtReleaseMutant", false},
     {"xboxkrnl.exe", 0x00f3, "NtReleaseSemaphore", false},
     {"xboxkrnl.exe", 0x00f5, "NtResumeThread", false},
     {"xboxkrnl.exe", 0x00f6, "NtSetEvent", false},

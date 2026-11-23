@@ -88,7 +88,7 @@ int main() {
                                     &test_import_handler, &error));
     std::size_t startup_hle_count = 0;
     assert(toohuman::runtime::register_boot_imports(imports, &error, &startup_hle_count));
-    assert(startup_hle_count == 86u);
+    assert(startup_hle_count == 88u);
     const std::vector<toohuman::runtime::XexImport> metadata{
         {"xboxkrnl.exe", 0x0777u, 0, 1, 0x82001100u},
         {"xboxkrnl.exe", 0x011Bu, 0, 1, 0x82001104u},
@@ -142,6 +142,8 @@ int main() {
         {"xam.xex",      0x0192u, 0, 1, 0x820011CCu},
         {"xam.xex",      0x0198u, 0, 1, 0x820011D0u},
         {"xboxkrnl.exe", 0x0074u, 0, 1, 0x820011D4u},
+        {"xboxkrnl.exe", 0x00D4u, 0, 1, 0x820011FCu},
+        {"xboxkrnl.exe", 0x00F2u, 0, 1, 0x82001200u},
         {"xboxkrnl.exe", 0x00D5u, 0, 1, 0x820011D8u},
         {"xboxkrnl.exe", 0x00F3u, 0, 1, 0x820011DCu},
         {"xboxkrnl.exe", 0x0088u, 0, 1, 0x820011E0u},
@@ -156,7 +158,7 @@ int main() {
     };
     std::size_t registered = 0;
     assert(imports.install(memory, metadata, &registered, &error));
-    assert(registered == 63u);
+    assert(registered == 65u);
     assert(memory.get_function<PPCFunc*>(0x82001100u) != &test_default_handler);
 
     // The real kernel imports configure the per-title primary Xenos ring.
@@ -722,6 +724,50 @@ int main() {
     input_keystroke.r5.u32 = 0x82013050u;
     call_test_import(0x820011D0u, input_keystroke);
     assert(input_keystroke.r3.u32 == 0x48Fu);
+
+    // A mutant initially owned by the creator supports recursive waits and
+    // must be released the same number of times before it becomes available.
+    constexpr std::uint32_t mutant_handle_output = 0x82013078u;
+    PPCContext create_mutant{};
+    create_mutant.r3.u32 = mutant_handle_output;
+    create_mutant.r5.u32 = 1u; // Initial owner = calling host thread.
+    call_test_import(0x820011FCu, create_mutant);
+    assert(create_mutant.r3.u32 == 0u);
+    const auto mutant_handle = read_guest_be32(mutant_handle_output);
+    assert(mutant_handle != 0u);
+
+    PPCContext wait_mutant{};
+    wait_mutant.r3.u32 = mutant_handle;
+    wait_mutant.r6.u32 = 0x82013004u;
+    call_test_import(0x82001140u, wait_mutant);
+    assert(wait_mutant.r3.u32 == 0u); // Recursive acquisition succeeds.
+
+    PPCContext release_mutant{};
+    release_mutant.r3.u32 = mutant_handle;
+    call_test_import(0x82001200u, release_mutant);
+    assert(release_mutant.r3.u32 == 0u); // Still recursively owned.
+    release_mutant = {};
+    release_mutant.r3.u32 = mutant_handle;
+    call_test_import(0x82001200u, release_mutant);
+    assert(release_mutant.r3.u32 == 0u); // Fully released.
+    release_mutant = {};
+    release_mutant.r3.u32 = mutant_handle;
+    call_test_import(0x82001200u, release_mutant);
+    assert(release_mutant.r3.u32 == 0xC0000046u); // STATUS_MUTANT_NOT_OWNED.
+
+    wait_mutant = {};
+    wait_mutant.r3.u32 = mutant_handle;
+    wait_mutant.r6.u32 = 0x82013004u;
+    call_test_import(0x82001140u, wait_mutant);
+    assert(wait_mutant.r3.u32 == 0u); // Free mutant can be acquired.
+    release_mutant = {};
+    release_mutant.r3.u32 = mutant_handle;
+    call_test_import(0x82001200u, release_mutant);
+    assert(release_mutant.r3.u32 == 0u);
+    PPCContext close_mutant{};
+    close_mutant.r3.u32 = mutant_handle;
+    call_test_import(0x82001144u, close_mutant);
+    assert(close_mutant.r3.u32 == 0u);
 
     // NtCreateSemaphore exposes a handle; each successful wait consumes one
     // count, and releases return the previous count before waking waiters.

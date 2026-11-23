@@ -265,6 +265,12 @@ pulse instant (one for synchronization events, all for notification events)
 and leave the event unsignaled. Priority increment and wait-switch hints are
 ignored; multiple-object waits remain unimplemented.
 
+The NT mutant handle subset registers `NtCreateMutant`/`NtReleaseMutant`.
+Mutants are recursive, host-thread-owned mutex objects; initial ownership,
+same-thread recursive waits, owner-only release, invalid-handle and
+not-owned errors are modelled. Named mutants, native `KMUTANT` structures,
+abandonment recovery and priority/wait-switch semantics remain unsupported.
+
 Semaphore support now includes `NtCreateSemaphore`/`NtReleaseSemaphore` handles and
 native `KeInitializeSemaphore`/`KeReleaseSemaphore` objects. The counting
 object consumes one count per successful wait, rejects releases that exceed its

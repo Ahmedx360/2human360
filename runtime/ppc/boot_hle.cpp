@@ -1160,6 +1160,58 @@ PPC_FUNC(NtCreateEvent) {
     put_be32(at(base, ctx.r3.u32), *handle);
     ctx.r3.u32 = kStatusSuccess;
 }
+// xboxkrnl #0xD4. Only unnamed NT mutant objects are modelled.
+PPC_FUNC(NtCreateMutant) {
+    const auto handle_output = ctx.r3.u32;
+    if (handle_output == 0) {
+        ctx.r3.u32 = kStatusInvalidParameter;
+        return;
+    }
+    if (!guest_range_valid(base, handle_output, 4u, GuestMemoryAccess::Write)) {
+        ctx.r3.u32 = kStatusAccessViolation;
+        return;
+    }
+    if (ctx.r4.u32 != 0) {
+        ctx.r3.u32 = 0xC00000BBu; // STATUS_NOT_SUPPORTED: named objects.
+        return;
+    }
+    if (ctx.r5.u32 > 1u) {
+        put_be32(at(base, handle_output), 0u);
+        ctx.r3.u32 = kStatusInvalidParameter;
+        return;
+    }
+
+    std::shared_ptr<GuestMutantObject> mutant;
+    try {
+        mutant = std::make_shared<GuestMutantObject>(ctx.r5.u32 != 0);
+    } catch (...) {
+        ctx.r3.u32 = 0xC0000017u; // STATUS_NO_MEMORY.
+        return;
+    }
+    const auto handle = process_kernel_objects().insert(mutant);
+    if (!handle) {
+        ctx.r3.u32 = 0xC0000017u;
+        return;
+    }
+    put_be32(at(base, handle_output), *handle);
+    ctx.r3.u32 = kStatusSuccess;
+}
+
+// xboxkrnl #0xF2. The reserved second argument must be zero.
+PPC_FUNC(NtReleaseMutant) {
+    if (ctx.r4.u32 != 0) {
+        ctx.r3.u32 = kStatusInvalidParameter;
+        return;
+    }
+    auto object = process_kernel_objects().lookup(ctx.r3.u32);
+    auto mutant = std::dynamic_pointer_cast<GuestMutantObject>(std::move(object));
+    if (!mutant) {
+        ctx.r3.u32 = kStatusInvalidHandle;
+        return;
+    }
+    ctx.r3.u32 = mutant->release() ? kStatusSuccess : 0xC0000046u;
+}
+
 // xboxkrnl #0xD5. Named object attributes are not modelled by this handle table.
 PPC_FUNC(NtCreateSemaphore) {
     const auto handle_output = ctx.r3.u32;
