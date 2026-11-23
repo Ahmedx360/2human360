@@ -1723,10 +1723,12 @@ PPC_FUNC(NtWaitForMultipleObjectsEx) {
     const auto count = ctx.r3.u32;
     const auto handles_address = ctx.r4.u32;
     const auto wait_type = ctx.r5.u32;
-    const auto alertable = ctx.r6.u32;
-    const auto timeout_address = ctx.r7.u32;
+    const auto wait_mode = ctx.r6.u32;
+    const auto alertable = ctx.r7.u32;
+    const auto timeout_address = ctx.r8.u32;
 
-    if (count == 0u || count > 64u || wait_type > 1u || alertable > 1u) {
+    if (count == 0u || count > 64u || wait_type > 1u ||
+        wait_mode > 1u || alertable > 1u) {
         ctx.r3.u32 = kStatusInvalidParameter;
         return;
     }
