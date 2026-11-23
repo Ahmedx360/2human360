@@ -127,6 +127,10 @@ private:
     mutable std::mutex xenos_command_processor_mutex_;
     std::uint32_t xenos_indirect_depth_{};
     std::size_t xenos_indirect_buffers_this_batch_{};
+    bool xenos_indirect_continuation_pending_{};
+    std::uint32_t xenos_indirect_continuation_physical_{};
+    std::uint32_t xenos_indirect_continuation_length_{};
+    std::uint32_t xenos_indirect_continuation_read_index_{};
     bool xenos_waiting_for_register_{};
     std::uint32_t xenos_wait_register_index_{};
     std::uint64_t xenos_bin_mask_{~std::uint64_t{0}};

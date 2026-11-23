@@ -56,15 +56,17 @@ struct Pm4GuestRingResult {
     const Pm4DispatchCallbacks& callbacks,
     std::size_t max_packets);
 
-// Dispatch a linear indirect command buffer from guest physical memory. The
-// caller supplies the Xenos dword count (not bytes); this helper has no ring
-// wraparound and reports the linear dword offset consumed.
+// Dispatch or resume a linear indirect command buffer from guest physical
+// memory. The caller supplies the Xenos dword count (not bytes); start_dword
+// is a continuation cursor returned in dispatch.read_index after a partial
+// execution. The helper has no ring wraparound.
 [[nodiscard]] Pm4GuestRingResult dispatch_pm4_guest_indirect_buffer(
     GuestAddressSpace& memory,
     std::uint32_t physical_address,
     std::uint32_t dword_count,
     const Pm4DispatchCallbacks& callbacks,
-    std::size_t max_packets);
+    std::size_t max_packets,
+    std::uint32_t start_dword = 0u);
 
 // Write the command processor's read-pointer writeback as a guest big-endian
 // dword through the same physical-memory alias. This is separate from dispatch

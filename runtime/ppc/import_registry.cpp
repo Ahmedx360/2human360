@@ -153,8 +153,17 @@ bool PpcImportRegistry::initialize_xenos_ring(
     std::uint32_t physical_base, std::uint32_t size_log2,
     std::string* error) noexcept {
     std::lock_guard lock(xenos_command_processor_mutex_);
-    return xenos_command_processor_.initialize_ring(
-        physical_base, size_log2, error);
+    if (!xenos_command_processor_.initialize_ring(
+            physical_base, size_log2, error))
+        return false;
+    xenos_indirect_depth_ = 0;
+    xenos_indirect_buffers_this_batch_ = 0;
+    xenos_indirect_continuation_pending_ = false;
+    xenos_indirect_continuation_physical_ = 0;
+    xenos_indirect_continuation_length_ = 0;
+    xenos_indirect_continuation_read_index_ = 0;
+    xenos_waiting_for_register_ = false;
+    return true;
 }
 
 bool PpcImportRegistry::enable_xenos_read_pointer_writeback(
@@ -596,8 +605,13 @@ void PpcImportRegistry::handle_xenos_mmio_write(
                          static_cast<std::uint32_t>(value));
             return;
         }
-        xenos_indirect_depth_ = 0;
-        xenos_indirect_buffers_this_batch_ = 0;
+        // Keep the indirect-buffer quota/cursor alive when this write pointer
+        // update is retrying a partially executed IB. A fresh batch starts
+        // with a clean quota only when there is no pending continuation.
+        if (!xenos_indirect_continuation_pending_) {
+            xenos_indirect_depth_ = 0;
+            xenos_indirect_buffers_this_batch_ = 0;
+        }
     } else if (!xenos_command_processor_.write_pointer_initialized()) {
         return;
     }
@@ -672,8 +686,11 @@ Pm4CallbackResult PpcImportRegistry::dispatch_xenos_type3(
     // Xenos applies Type-3 predicate bit 0 against the intersection of
     // the current bin-select and bin-mask registers before executing a packet.
     if (predicate &&
-        (registry->xenos_bin_select_ & registry->xenos_bin_mask_) == 0)
+        (registry->xenos_bin_select_ & registry->xenos_bin_mask_) == 0) {
+        if (registry->xenos_indirect_depth_ == 0)
+            registry->xenos_indirect_continuation_pending_ = false;
         return Pm4CallbackResult::Accepted;
+    }
 
     if (opcode == kPm4WaitRegMem) {
         if (payload.size() != 5u || registry->memory_ == nullptr) {
@@ -728,14 +745,6 @@ Pm4CallbackResult PpcImportRegistry::dispatch_xenos_type3(
         if (matched) {
             registry->xenos_waiting_for_register_ = false;
             return Pm4CallbackResult::Accepted;
-        }
-        if (!is_memory && registry->xenos_indirect_depth_ != 0) {
-            // The linear IB dispatcher currently has no persistent continuation
-            // cursor. Deferring here would replay already executed IB packets
-            // when the primary ring retries the enclosing IB command.
-            std::fprintf(stderr,
-                "[TooHuman][Xenos] register WAIT_REG_MEM inside an indirect buffer is unsupported\n");
-            return Pm4CallbackResult::Rejected;
         }
         registry->xenos_waiting_for_register_ = !is_memory;
         if (!is_memory)
@@ -987,12 +996,22 @@ Pm4CallbackResult PpcImportRegistry::dispatch_xenos_type3(
 
     if (opcode == kPm4IndirectBuffer || opcode == kPm4IndirectBufferPfd) {
         // The packet-level predicate has already been evaluated above.
-        if (payload.size() != 2u ||
-            (payload[1] & ~kIndirectLengthMask) != 0 ||
-            payload[1] == 0 || payload[1] > kMaxIndirectBufferDwords ||
-            registry->xenos_indirect_depth_ != 0 ||
-            registry->xenos_indirect_buffers_this_batch_ >=
-                kMaxIndirectBuffersPerBatch) {
+        const bool valid_payload = payload.size() == 2u &&
+            (payload[1] & ~kIndirectLengthMask) == 0 &&
+            payload[1] != 0 && payload[1] <= kMaxIndirectBufferDwords;
+        const bool resume_indirect = valid_payload &&
+            registry->xenos_indirect_continuation_pending_ &&
+            registry->xenos_indirect_continuation_physical_ == payload[0] &&
+            registry->xenos_indirect_continuation_length_ == payload[1];
+
+        if (!resume_indirect && registry->xenos_indirect_depth_ == 0) {
+            registry->xenos_indirect_continuation_pending_ = false;
+            registry->xenos_indirect_continuation_read_index_ = 0;
+        }
+        if (!valid_payload || registry->xenos_indirect_depth_ != 0 ||
+            (!resume_indirect &&
+             registry->xenos_indirect_buffers_this_batch_ >=
+                 kMaxIndirectBuffersPerBatch)) {
             std::fprintf(stderr,
                 "[TooHuman][Xenos] rejected indirect buffer opcode=0x%02X operands=%zu address=0x%08X length=0x%08X depth=%u buffers=%zu\n",
                 opcode, payload.size(),
@@ -1003,8 +1022,12 @@ Pm4CallbackResult PpcImportRegistry::dispatch_xenos_type3(
             return Pm4CallbackResult::Rejected;
         }
 
+        const auto start_dword = resume_indirect
+            ? registry->xenos_indirect_continuation_read_index_ : 0u;
+        if (!resume_indirect)
+            ++registry->xenos_indirect_buffers_this_batch_;
+
         ++registry->xenos_indirect_depth_;
-        ++registry->xenos_indirect_buffers_this_batch_;
         const Pm4DispatchCallbacks indirect_callbacks{
             registry,
             &PpcImportRegistry::dispatch_xenos_register_write,
@@ -1013,18 +1036,33 @@ Pm4CallbackResult PpcImportRegistry::dispatch_xenos_type3(
         };
         const auto indirect = dispatch_pm4_guest_indirect_buffer(
             *registry->memory_, payload[0], payload[1],
-            indirect_callbacks, kMaxIndirectPackets);
+            indirect_callbacks, kMaxIndirectPackets, start_dword);
         --registry->xenos_indirect_depth_;
 
         if (!indirect) {
+            // Preserve the first unconsumed inner dword. The primary-ring
+            // packet itself remains at RPTR, so a retry must resume this IB
+            // suffix rather than replay already-executed inner packets.
+            registry->xenos_indirect_continuation_pending_ = true;
+            registry->xenos_indirect_continuation_physical_ = payload[0];
+            registry->xenos_indirect_continuation_length_ = payload[1];
+            registry->xenos_indirect_continuation_read_index_ =
+                indirect.dispatch.read_index;
             std::fprintf(stderr,
-                "[TooHuman][Xenos] indirect buffer stopped (error=%u packets=%zu dwords=%zu address=0x%08X length=%u)\n",
+                "[TooHuman][Xenos] indirect buffer paused (error=%u packets=%zu dwords=%zu next=%u address=0x%08X length=%u)\n",
                 static_cast<unsigned>(indirect.error),
                 indirect.dispatch.packets,
                 indirect.dispatch.dwords_consumed,
+                indirect.dispatch.read_index,
                 payload[0], payload[1]);
-            return Pm4CallbackResult::Rejected;
+            return indirect.error == Pm4GuestRingError::CallbackDeferred
+                ? Pm4CallbackResult::Deferred : Pm4CallbackResult::Rejected;
         }
+
+        registry->xenos_indirect_continuation_pending_ = false;
+        registry->xenos_indirect_continuation_physical_ = 0;
+        registry->xenos_indirect_continuation_length_ = 0;
+        registry->xenos_indirect_continuation_read_index_ = 0;
         return Pm4CallbackResult::Accepted;
     }
 

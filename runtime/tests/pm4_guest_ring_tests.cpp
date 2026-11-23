@@ -16,6 +16,7 @@ struct Capture {
     std::vector<std::pair<std::uint32_t, std::uint32_t>> registers;
     std::uint32_t opcode{};
     std::vector<std::uint32_t> payload;
+    bool defer_wait{true};
 };
 
 bool write_register(void* opaque, std::uint32_t index, std::uint32_t value) {
@@ -26,7 +27,9 @@ bool write_register(void* opaque, std::uint32_t index, std::uint32_t value) {
 Pm4CallbackResult type3(void* opaque, std::uint32_t opcode, bool,
            std::span<const std::uint32_t> payload) {
     auto& capture = *static_cast<Capture*>(opaque);
-    if (opcode == 0x3Cu) return Pm4CallbackResult::Deferred;
+    if (opcode == 0x3Cu)
+        return capture.defer_wait ? Pm4CallbackResult::Deferred
+                                  : Pm4CallbackResult::Accepted;
     capture.opcode = opcode;
     capture.payload.assign(payload.begin(), payload.end());
     return Pm4CallbackResult::Accepted;
@@ -165,6 +168,38 @@ int main() {
     assert(indirect_result.dispatch.read_index == 2u);
     assert((capture.registers.back() ==
             std::pair<std::uint32_t, std::uint32_t>{0x20u, 0x1234ABCDu}));
+
+    // A deferred inner packet returns a continuation cursor. Resuming
+    // from that cursor must not replay the earlier register write.
+    store_be32(indirect, 0x20u);
+    store_be32(indirect + 4u, 0xABCDEF01u);
+    store_be32(indirect + 8u, 0xC0000000u | (4u << 16) | (0x3Cu << 8));
+    store_be32(indirect + 12u, 3u);
+    store_be32(indirect + 16u, 0x12345678u);
+    store_be32(indirect + 20u, 0xFFFFFFFFu);
+    store_be32(indirect + 24u, 0u);
+    store_be32(indirect + 28u, 0u);
+    capture.defer_wait = true;
+    const auto deferred_indirect = dispatch_pm4_guest_indirect_buffer(
+        memory, kIndirectPhysical, 8u, callbacks, 4u);
+    assert(deferred_indirect.error == Pm4GuestRingError::CallbackDeferred);
+    assert(deferred_indirect.dispatch.packets == 1u);
+    assert(deferred_indirect.dispatch.dwords_consumed == 2u);
+    assert(deferred_indirect.dispatch.read_index == 2u);
+    assert((capture.registers.back() ==
+            std::pair<std::uint32_t, std::uint32_t>{0x20u, 0xABCDEF01u}));
+
+    capture.defer_wait = false;
+    const auto resumed_indirect = dispatch_pm4_guest_indirect_buffer(
+        memory, kIndirectPhysical, 8u, callbacks, 4u,
+        deferred_indirect.dispatch.read_index);
+    assert(resumed_indirect);
+    assert(resumed_indirect.dispatch.packets == 1u);
+    assert(resumed_indirect.dispatch.dwords_consumed == 6u);
+    assert(resumed_indirect.dispatch.read_index == 8u);
+    assert(capture.registers.size() == 2u);
+    assert((capture.registers.back() ==
+            std::pair<std::uint32_t, std::uint32_t>{0x20u, 0xABCDEF01u}));
 
     store_be32(indirect, (2u << 16) | 0x20u); // Needs three payload dwords.
     store_be32(indirect + 4u, 0x55u);

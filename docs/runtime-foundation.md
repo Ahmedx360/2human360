@@ -158,7 +158,9 @@ blocking the guest thread. Register-polled waits are retried when the guest
 writes the exact Xenos register being polled. Memory-polled waits are retried
 on a later CP write-pointer notification because ordinary guest RAM stores
 are not observed. The wait interval is not slept and there is no independent
-asynchronous polling worker. The hardware's
+asynchronous polling worker. Linear indirect buffers preserve their inner
+read cursor when a nested command defers or fails, so a primary-ring retry
+resumes after completed inner packets instead of replaying them. The hardware's
 read-pointer writeback block cadence is not modeled; the synchronous pump
 writes the read pointer after each call that consumes dwords. Interrupts,
 fences, DMA, register side effects and GPU opcode semantics remain
@@ -194,7 +196,8 @@ title ring-configuration imports and Xenos `CP_RB_WPTR` register index
 read-pointer writeback block cadence; it writes once per pump call that
 consumes dwords. Its Type-3 callback accepts NOP, checked physical MEM_WRITE,
 `WAIT_REG_MEM`, non-timestamp event writes, side-effect-free PM4 markers,
-and a limited one-level indirect-buffer path. Timestamp events,
+and a limited one-level indirect-buffer path with resumable inner
+packet cursors. Timestamp events,
 occlusion-query events, drawing, interrupts and full GPU synchronization
 remain unimplemented. For an
 unmet `WAIT_REG_MEM` predicate, the dispatcher reports a deferred packet,

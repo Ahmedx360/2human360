@@ -172,8 +172,10 @@ Pm4GuestRingResult dispatch_pm4_guest_indirect_buffer(
     std::uint32_t physical_address,
     std::uint32_t dword_count,
     const Pm4DispatchCallbacks& callbacks,
-    std::size_t max_packets) {
+    std::size_t max_packets,
+    std::uint32_t start_dword) {
     Pm4GuestRingResult result{};
+    result.dispatch.read_index = start_dword;
     if (!memory.valid()) {
         result.error = Pm4GuestRingError::InvalidAddressSpace;
         return result;
@@ -181,6 +183,10 @@ Pm4GuestRingResult dispatch_pm4_guest_indirect_buffer(
     constexpr std::uint32_t kMaxIndirectBufferDwords = 0x00100000u;
     if (dword_count == 0 || dword_count > kMaxIndirectBufferDwords) {
         result.error = Pm4GuestRingError::InvalidIndirectBufferLength;
+        return result;
+    }
+    if (start_dword >= dword_count) {
+        result.error = Pm4GuestRingError::InvalidReadPointer;
         return result;
     }
     if ((physical_address & 3u) != 0) {
@@ -205,7 +211,7 @@ Pm4GuestRingResult dispatch_pm4_guest_indirect_buffer(
     }
 
     std::array<std::uint32_t, kMaxPacketDwords> packet_words{};
-    std::size_t offset = 0;
+    std::size_t offset = start_dword;
     while (offset < dword_count) {
         if (result.dispatch.packets >= max_packets) {
             result.error = Pm4GuestRingError::PacketLimitReached;

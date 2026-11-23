@@ -399,6 +399,38 @@ int main() {
         assert(imports.xenos_command_processor().read_index() == marker_write_pointer);
     }
 
+    // An indirect buffer may defer on WAIT_REG_MEM. The saved inner cursor
+    // prevents the initial register write from being replayed on MMIO wake-up.
+    put_guest_be32(0xA0030000u, 0x34u); // Type-0 write before the wait.
+    put_guest_be32(0xA0030004u, 0xAAAAAAAAu);
+    put_guest_be32(0xA0030008u,
+        0xC0000000u | (4u << 16) | (0x3Cu << 8));
+    put_guest_be32(0xA003000Cu, 3u); // Equal, register source.
+    put_guest_be32(0xA0030010u, 0xCAFEBABEu);
+    put_guest_be32(0xA0030014u, 0xFFFFFFFFu);
+    put_guest_be32(0xA0030018u, 0u);
+    put_guest_be32(0xA003001Cu, 0u);
+    put_guest_be32(0xA0030020u, 0x35u); // Type-0 write after the wait.
+    put_guest_be32(0xA0030024u, 0xBBBBBBBBu);
+
+    put_guest_be32(0xA0010130u,
+        0xC0000000u | (1u << 16) | (0x3Fu << 8));
+    put_guest_be32(0xA0010134u, 0x00030000u);
+    put_guest_be32(0xA0010138u, 10u);
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 79u);
+    assert(imports.xenos_command_processor().read_index() == 76u);
+    assert(GuestMmioBus::global().read(kXenosMmioBase + 0x34u * 4u, 4) ==
+           0xAAAAAAAAu);
+    assert(GuestMmioBus::global().read(kXenosMmioBase + 0x35u * 4u, 4) == 0u);
+
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 3u * 4u, 0xCAFEBABEu);
+    assert(imports.xenos_command_processor().read_index() == 79u);
+    assert(read_guest_be32(0xA0020000u) == 79u);
+    assert(GuestMmioBus::global().read(kXenosMmioBase + 0x34u * 4u, 4) ==
+           0xAAAAAAAAu);
+    assert(GuestMmioBus::global().read(kXenosMmioBase + 0x35u * 4u, 4) ==
+           0xBBBBBBBBu);
+
     // A multi-register Type-0 packet crosses the ring end and MMIO aperture
     // boundary; packet-wide preflight rejects it before the first write.
     put_guest_be32(0xA00101FCu, (1u << 16) | 0x3FFFu); // Ring dword 127.
