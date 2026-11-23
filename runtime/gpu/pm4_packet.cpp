@@ -101,14 +101,28 @@ Pm4DispatchResult dispatch_pm4_stream(
                 result.error = Pm4DispatchError::MissingRegisterHandler;
                 return result;
             }
-            for (std::size_t i = 0; i < payload.size(); ++i) {
-                const auto index = packet.write_one_register
-                    ? packet.register_index
-                    : packet.register_index + static_cast<std::uint32_t>(i);
-                if (!callbacks.write_register(callbacks.context, index,
-                                              payload[i])) {
-                    accepted = false;
-                    break;
+            if (callbacks.validate_register) {
+                for (std::size_t i = 0; i < payload.size(); ++i) {
+                    const auto index = packet.write_one_register
+                        ? packet.register_index
+                        : packet.register_index + static_cast<std::uint32_t>(i);
+                    if (!callbacks.validate_register(
+                            callbacks.context, index, payload[i])) {
+                        accepted = false;
+                        break;
+                    }
+                }
+            }
+            if (accepted) {
+                for (std::size_t i = 0; i < payload.size(); ++i) {
+                    const auto index = packet.write_one_register
+                        ? packet.register_index
+                        : packet.register_index + static_cast<std::uint32_t>(i);
+                    if (!callbacks.write_register(callbacks.context, index,
+                                                  payload[i])) {
+                        accepted = false;
+                        break;
+                    }
                 }
             }
             break;
@@ -118,11 +132,19 @@ Pm4DispatchResult dispatch_pm4_stream(
                 result.error = Pm4DispatchError::MissingRegisterHandler;
                 return result;
             }
-            accepted = callbacks.write_register(
-                callbacks.context, packet.register_index, payload[0]);
+            if (callbacks.validate_register) {
+                accepted = callbacks.validate_register(
+                    callbacks.context, packet.register_index, payload[0]) &&
+                    callbacks.validate_register(
+                    callbacks.context, packet.second_register_index, payload[1]);
+            }
             if (accepted) {
                 accepted = callbacks.write_register(
-                    callbacks.context, packet.second_register_index, payload[1]);
+                    callbacks.context, packet.register_index, payload[0]);
+                if (accepted) {
+                    accepted = callbacks.write_register(
+                        callbacks.context, packet.second_register_index, payload[1]);
+                }
             }
             break;
 
