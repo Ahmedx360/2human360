@@ -126,6 +126,33 @@ int main() {
         memory, 0x00030000u, 2u, 0u, 1u, callbacks, 1u);
     assert(not_mapped.error == Pm4GuestRingError::RingNotReadable);
 
+    // Linear indirect buffers are bounded by their explicit dword count
+    // and do not wrap at the end of a ring.
+    constexpr std::uint32_t kIndirectPhysical = 0x00040000u;
+    constexpr std::uint32_t kIndirectGuest = 0xA0040000u;
+    assert(memory.commit_region(kIndirectGuest, 0x1000u, &error));
+    auto* const indirect = memory.base() + kIndirectGuest;
+    store_be32(indirect, 0x20u); // Type-0, one value.
+    store_be32(indirect + 4u, 0x1234ABCDu);
+    const auto indirect_result = dispatch_pm4_guest_indirect_buffer(
+        memory, kIndirectPhysical, 2u, callbacks, 4u);
+    assert(indirect_result);
+    assert(indirect_result.dispatch.packets == 1u);
+    assert(indirect_result.dispatch.dwords_consumed == 2u);
+    assert(indirect_result.dispatch.read_index == 2u);
+    assert((capture.registers.back() ==
+            std::pair<std::uint32_t, std::uint32_t>{0x20u, 0x1234ABCDu}));
+
+    const auto empty_indirect = dispatch_pm4_guest_indirect_buffer(
+        memory, kIndirectPhysical, 0u, callbacks, 4u);
+    assert(empty_indirect.error == Pm4GuestRingError::InvalidIndirectBufferLength);
+    const auto overlong_indirect = dispatch_pm4_guest_indirect_buffer(
+        memory, kIndirectPhysical, 0x00100001u, callbacks, 4u);
+    assert(overlong_indirect.error == Pm4GuestRingError::InvalidIndirectBufferLength);
+    const auto unmapped_indirect = dispatch_pm4_guest_indirect_buffer(
+        memory, 0x00050000u, 2u, callbacks, 4u);
+    assert(unmapped_indirect.error == Pm4GuestRingError::RingNotReadable);
+
     // The writeback target must be committed and writable.
     assert(!write_pm4_guest_read_pointer(memory, 0x00030000u, 7u));
     return 0;
