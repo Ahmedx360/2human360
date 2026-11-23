@@ -189,6 +189,7 @@ int main() {
     assert((capture.registers.back() ==
             std::pair<std::uint32_t, std::uint32_t>{0x20u, 0xABCDEF01u}));
 
+    const auto registers_before_resume = capture.registers.size();
     capture.defer_wait = false;
     const auto resumed_indirect = dispatch_pm4_guest_indirect_buffer(
         memory, kIndirectPhysical, 8u, callbacks, 4u,
@@ -197,7 +198,7 @@ int main() {
     assert(resumed_indirect.dispatch.packets == 1u);
     assert(resumed_indirect.dispatch.dwords_consumed == 6u);
     assert(resumed_indirect.dispatch.read_index == 8u);
-    assert(capture.registers.size() == 2u);
+    assert(capture.registers.size() == registers_before_resume);
     assert((capture.registers.back() ==
             std::pair<std::uint32_t, std::uint32_t>{0x20u, 0xABCDEF01u}));
 
