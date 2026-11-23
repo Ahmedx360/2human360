@@ -200,6 +200,23 @@ int main() {
            0xAABBCCDDu);
     assert(read_guest_be32(0xA0020000u) == 5u);
 
+    // A Type-3 NOP is accepted; an unsupported predicated indirect buffer is
+    // rejected without advancing the primary read pointer.
+    put_guest_be32(0xA0010014u, 0xC0001000u); // PM4_NOP, one operand.
+    put_guest_be32(0xA0010018u, 0u);
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 7u);
+    assert(imports.xenos_command_processor().read_index() == 7u);
+    assert(read_guest_be32(0xA0020000u) == 7u);
+
+    put_guest_be32(0xA001001Cu,
+        0xC0000000u | (1u << 16) | (0x3Fu << 8) | 1u);
+    put_guest_be32(0xA0010000u, 0x00030000u);
+    put_guest_be32(0xA0010004u, 2u);
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 2u);
+    assert(imports.xenos_command_processor().read_index() == 7u);
+    assert(read_guest_be32(0xA0020000u) == 7u);
+    assert(GuestMmioBus::global().read(kXenosMmioBase + 0x31u * 4u, 4) == 0u);
+
     PPCContext context{};
     context.ctr.u32 = 0x82001100u;
     const auto import_thunk = memory.get_function<PPCFunc*>(0x82001100u);
