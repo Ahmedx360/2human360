@@ -725,8 +725,22 @@ Pm4CallbackResult PpcImportRegistry::dispatch_xenos_type3(
         case 6: matched = (observed & mask) > reference; break;
         case 7: matched = true; break; // Always.
         }
-        return matched ? Pm4CallbackResult::Accepted
-                       : Pm4CallbackResult::Deferred;
+        if (matched) {
+            registry->xenos_waiting_for_register_ = false;
+            return Pm4CallbackResult::Accepted;
+        }
+        if (!is_memory && registry->xenos_indirect_depth_ != 0) {
+            // The linear IB dispatcher currently has no persistent continuation
+            // cursor. Deferring here would replay already executed IB packets
+            // when the primary ring retries the enclosing IB command.
+            std::fprintf(stderr,
+                "[TooHuman][Xenos] register WAIT_REG_MEM inside an indirect buffer is unsupported\n");
+            return Pm4CallbackResult::Rejected;
+        }
+        registry->xenos_waiting_for_register_ = !is_memory;
+        if (!is_memory)
+            registry->xenos_wait_register_index_ = poll_address;
+        return Pm4CallbackResult::Deferred;
     }
 
     // These command markers have no work until a real GPU backend exists.
