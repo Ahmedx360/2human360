@@ -126,12 +126,15 @@ Observer teardown waits for in-flight callbacks.
 
 This is not an asynchronous GPU worker or complete Xenos device. Type-0 and
 type-1 packets currently update the Xenos register-file mirror only. Type-3
-NOP (opcode `0x10`) is consumed, and indirect-buffer opcodes `0x3F` and
-`0x37` are supported for one non-nested level: each batch accepts at most 64
-indirect buffers, each buffer is limited to 64K dwords and 256 packets, and
-its complete physical-memory range must be committed and readable. Nested
+NOP (opcode `0x10`) is consumed; `MEM_WRITE` (opcode `0x3D`) writes its
+dword payload to a prevalidated guest physical range using the address's
+Xenos endian mode; and indirect-buffer opcodes `0x3F` and `0x37` are
+supported for one non-nested level. Each batch accepts at most 64 indirect
+buffers, each buffer is limited to 64K dwords and 256 packets, and its complete
+physical-memory range must be committed and readable. Predicated or nested
 indirect buffers and all other Type-3 opcodes are logged and rejected. This is
-bounded command-stream traversal, not draw/shader execution. The hardware's
+bounded command-stream traversal and memory-write support, not draw/shader
+execution. The hardware's
 read-pointer writeback block cadence is not modeled; the synchronous pump
 writes the read pointer after each call that consumes dwords. Interrupts,
 fences, DMA, register side effects and GPU opcode semantics remain
@@ -165,12 +168,13 @@ The pump is synchronous and currently game-free. It is wired to the two
 title ring-configuration imports and Xenos `CP_RB_WPTR` register index
 `0x01C5`. It does not schedule a device worker or model the hardware's
 read-pointer writeback block cadence; it writes once per pump call that
-consumes dwords. Its Type-3 callback accepts NOP and a limited one-level
-indirect-buffer path; other GPU commands, interrupts and GPU synchronization
-remain unimplemented. `TooHumanXenosCommandProcessorTests` covers ring
+consumes dwords. Its Type-3 callback accepts NOP, checked physical MEM_WRITE, and a limited
+one-level indirect-buffer path; other GPU commands, interrupts and GPU
+synchronization remain unimplemented. `TooHumanXenosCommandProcessorTests` covers ring
 configuration, write-pointer validation, packet progress, callback rejection
 and read-pointer writeback failure. `TooHumanPpcImportRegistryTests` also
-covers the kernel-import-to-MMIO path and a bounded indirect-buffer packet.
+covers the kernel-import-to-MMIO path, a bounded indirect-buffer packet, and a
+checked physical MEM_WRITE command.
 
 ## Startup import priorities and boot HLE
 
