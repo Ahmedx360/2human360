@@ -88,7 +88,7 @@ int main() {
                                     &test_import_handler, &error));
     std::size_t startup_hle_count = 0;
     assert(toohuman::runtime::register_boot_imports(imports, &error, &startup_hle_count));
-    assert(startup_hle_count == 76u);
+    assert(startup_hle_count == 81u);
     const std::vector<toohuman::runtime::XexImport> metadata{
         {"xboxkrnl.exe", 0x0777u, 0, 1, 0x82001100u},
         {"xboxkrnl.exe", 0x011Bu, 0, 1, 0x82001104u},
@@ -141,12 +141,17 @@ int main() {
         {"xam.xex",      0x0191u, 0, 1, 0x820011C8u},
         {"xam.xex",      0x0192u, 0, 1, 0x820011CCu},
         {"xam.xex",      0x0198u, 0, 1, 0x820011D0u},
+        {"xboxkrnl.exe", 0x0074u, 0, 1, 0x820011D4u},
+        {"xboxkrnl.exe", 0x00D5u, 0, 1, 0x820011D8u},
+        {"xboxkrnl.exe", 0x00F3u, 0, 1, 0x820011DCu},
+        {"xboxkrnl.exe", 0x0088u, 0, 1, 0x820011E0u},
+        {"xboxkrnl.exe", 0x00B0u, 0, 1, 0x820011E4u},
         {"xboxkrnl.exe", 0x01B6u, 0, 1, 0x820011BCu},
         {"xboxkrnl.exe", 0x01C3u, 0, 1, 0x820011C0u}
     };
     std::size_t registered = 0;
     assert(imports.install(memory, metadata, &registered, &error));
-    assert(registered == 53u);
+    assert(registered == 58u);
     assert(memory.get_function<PPCFunc*>(0x82001100u) != &test_default_handler);
 
     // The real kernel imports configure the per-title primary Xenos ring.
@@ -712,6 +717,100 @@ int main() {
     input_keystroke.r5.u32 = 0x82013050u;
     call_test_import(0x820011D0u, input_keystroke);
     assert(input_keystroke.r3.u32 == 0x48Fu);
+
+    // NtCreateSemaphore exposes a handle; each successful wait consumes one
+    // count, and releases return the previous count before waking waiters.
+    constexpr std::uint32_t semaphore_handle_output = 0x82013060u;
+    constexpr std::uint32_t semaphore_previous_count = 0x82013064u;
+    PPCContext create_semaphore{};
+    create_semaphore.r3.u32 = semaphore_handle_output;
+    create_semaphore.r5.u32 = 1u; // Initial count.
+    create_semaphore.r6.u32 = 2u; // Maximum count.
+    call_test_import(0x820011D8u, create_semaphore);
+    assert(create_semaphore.r3.u32 == 0u);
+    const auto semaphore_handle = read_guest_be32(semaphore_handle_output);
+    assert(semaphore_handle != 0u);
+
+    PPCContext semaphore_wait{};
+    semaphore_wait.r3.u32 = semaphore_handle;
+    semaphore_wait.r6.u32 = 0x82013004u; // Zero LARGE_INTEGER: poll.
+    call_test_import(0x82001140u, semaphore_wait);
+    assert(semaphore_wait.r3.u32 == 0u);
+    semaphore_wait = {};
+    semaphore_wait.r3.u32 = semaphore_handle;
+    semaphore_wait.r6.u32 = 0x82013004u;
+    call_test_import(0x82001140u, semaphore_wait);
+    assert(semaphore_wait.r3.u32 == 0x102u); // The initial count was consumed.
+
+    PPCContext release_semaphore{};
+    release_semaphore.r3.u32 = semaphore_handle;
+    release_semaphore.r4.u32 = 1u;
+    release_semaphore.r5.u32 = semaphore_previous_count;
+    call_test_import(0x820011DCu, release_semaphore);
+    assert(release_semaphore.r3.u32 == 0u);
+    assert(read_guest_be32(semaphore_previous_count) == 0u);
+    semaphore_wait = {};
+    semaphore_wait.r3.u32 = semaphore_handle;
+    semaphore_wait.r6.u32 = 0x82013004u;
+    call_test_import(0x82001140u, semaphore_wait);
+    assert(semaphore_wait.r3.u32 == 0u);
+
+    // Fill to the configured limit; an extra release must fail.
+    release_semaphore = {};
+    release_semaphore.r3.u32 = semaphore_handle;
+    release_semaphore.r4.u32 = 2u;
+    release_semaphore.r5.u32 = semaphore_previous_count;
+    call_test_import(0x820011DCu, release_semaphore);
+    assert(release_semaphore.r3.u32 == 0u);
+    assert(read_guest_be32(semaphore_previous_count) == 0u);
+    release_semaphore = {};
+    release_semaphore.r3.u32 = semaphore_handle;
+    release_semaphore.r4.u32 = 1u;
+    call_test_import(0x820011DCu, release_semaphore);
+    assert(release_semaphore.r3.u32 == 0xC0000047u);
+    PPCContext close_semaphore{};
+    close_semaphore.r3.u32 = semaphore_handle;
+    call_test_import(0x82001144u, close_semaphore);
+    assert(close_semaphore.r3.u32 == 0u);
+
+    // KeInitializeSemaphore backs a native 0x14-byte big-endian guest
+    // dispatcher object. KeWait/KeRelease use that same guest address.
+    constexpr std::uint32_t native_semaphore = 0x82015180u;
+    PPCContext initialize_native_semaphore{};
+    initialize_native_semaphore.r3.u32 = native_semaphore;
+    initialize_native_semaphore.r4.u32 = 1u;
+    initialize_native_semaphore.r5.u32 = 2u;
+    call_test_import(0x820011D4u, initialize_native_semaphore);
+    assert(initialize_native_semaphore.r3.u32 == 0u);
+    assert(memory.base()[native_semaphore] == 5u); // SemaphoreObject.
+    assert(read_guest_be32(native_semaphore + 4u) == 1u);
+    assert(read_guest_be32(native_semaphore + 0x10u) == 2u);
+
+    PPCContext native_wait{};
+    native_wait.r3.u32 = native_semaphore;
+    native_wait.r7.u32 = 0x82013004u;
+    call_test_import(0x820011E4u, native_wait);
+    assert(native_wait.r3.u32 == 0u);
+    assert(read_guest_be32(native_semaphore + 4u) == 0u);
+    native_wait = {};
+    native_wait.r3.u32 = native_semaphore;
+    native_wait.r7.u32 = 0x82013004u;
+    call_test_import(0x820011E4u, native_wait);
+    assert(native_wait.r3.u32 == 0x102u);
+
+    PPCContext native_release{};
+    native_release.r3.u32 = native_semaphore;
+    native_release.r5.u32 = 1u; // Adjustment.
+    call_test_import(0x820011E0u, native_release);
+    assert(native_release.r3.u32 == 0u); // Previous count.
+    assert(read_guest_be32(native_semaphore + 4u) == 1u);
+    native_wait = {};
+    native_wait.r3.u32 = native_semaphore;
+    native_wait.r7.u32 = 0x82013004u;
+    call_test_import(0x820011E4u, native_wait);
+    assert(native_wait.r3.u32 == 0u);
+    assert(read_guest_be32(native_semaphore + 4u) == 0u);
+    assert(toohuman::runtime::process_kernel_objects().close(native_semaphore));
 
     PPCContext boot_context{};
     call_test_import(0x8200110Cu, boot_context); // KeGetCurrentProcessType
