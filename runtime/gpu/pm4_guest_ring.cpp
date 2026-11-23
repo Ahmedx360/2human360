@@ -263,6 +263,46 @@ bool write_pm4_guest_read_pointer(
     return true;
 }
 
+bool read_xenos_guest_physical_dword(
+    const GuestAddressSpace& memory,
+    std::uint32_t physical_address_with_endian,
+    std::uint32_t& value) noexcept {
+    if (!memory.valid()) return false;
+
+    const auto physical_address = physical_address_with_endian & ~std::uint32_t{3};
+    const auto endian_mode = physical_address_with_endian & 3u;
+    std::uint32_t guest_address = 0;
+    if (!xenos_physical_to_guest_address(
+            physical_address, sizeof(std::uint32_t), guest_address))
+        return false;
+
+    const auto* const guest_base = memory.base();
+    if (!GuestAddressSpace::is_accessible_range(
+            guest_base, guest_address, sizeof(std::uint32_t),
+            GuestMemoryAccess::Read))
+        return false;
+
+    value = load_be32(guest_base + guest_address);
+    switch (endian_mode) {
+    case 1:
+        value = ((value & 0xFF00FF00u) >> 8) |
+                ((value & 0x00FF00FFu) << 8);
+        break;
+    case 2:
+        value = ((value & 0x000000FFu) << 24) |
+                ((value & 0x0000FF00u) << 8) |
+                ((value & 0x00FF0000u) >> 8) |
+                ((value & 0xFF000000u) >> 24);
+        break;
+    case 3:
+        value = (value >> 16) | (value << 16);
+        break;
+    default:
+        break;
+    }
+    return true;
+}
+
 bool write_xenos_guest_physical_dwords(
     GuestAddressSpace& memory, std::uint32_t physical_address_with_endian,
     std::span<const std::uint32_t> values) noexcept {
