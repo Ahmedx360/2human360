@@ -631,15 +631,58 @@ bool PpcImportRegistry::dispatch_xenos_type3(
     constexpr std::uint32_t kPm4MemWrite = 0x3Du;
     constexpr std::uint32_t kPm4IndirectBuffer = 0x3Fu;
     constexpr std::uint32_t kPm4IndirectBufferPfd = 0x37u;
+    constexpr std::uint32_t kPm4SetBinMask = 0x50u;
+    constexpr std::uint32_t kPm4SetBinSelect = 0x51u;
+    constexpr std::uint32_t kPm4SetBinMaskLo = 0x60u;
+    constexpr std::uint32_t kPm4SetBinMaskHi = 0x61u;
+    constexpr std::uint32_t kPm4SetBinSelectLo = 0x62u;
+    constexpr std::uint32_t kPm4SetBinSelectHi = 0x63u;
     constexpr std::uint32_t kIndirectLengthMask = 0x000FFFFFu;
     constexpr std::uint32_t kMaxIndirectBufferDwords = 0x00010000u;
     constexpr std::size_t kMaxIndirectBuffersPerBatch = 64u;
     constexpr std::size_t kMaxIndirectPackets = 256u;
+    // Xenos applies Type-3 predicate bit 0 against the intersection of
+    // the current bin-select and bin-mask registers before executing a packet.
+    if (predicate &&
+        (registry->xenos_bin_select_ & registry->xenos_bin_mask_) == 0)
+        return true;
+
     if (opcode == kPm4Nop)
         return true;
 
+    if (opcode == kPm4SetBinMaskLo || opcode == kPm4SetBinMaskHi ||
+        opcode == kPm4SetBinSelectLo || opcode == kPm4SetBinSelectHi) {
+        if (payload.size() != 1u) return false;
+        const auto word = static_cast<std::uint64_t>(payload[0]);
+        constexpr std::uint64_t kLowMask = 0xFFFFFFFFull;
+        if (opcode == kPm4SetBinMaskLo)
+            registry->xenos_bin_mask_ =
+                (registry->xenos_bin_mask_ & (kLowMask << 32)) | word;
+        else if (opcode == kPm4SetBinMaskHi)
+            registry->xenos_bin_mask_ =
+                (registry->xenos_bin_mask_ & kLowMask) | (word << 32);
+        else if (opcode == kPm4SetBinSelectLo)
+            registry->xenos_bin_select_ =
+                (registry->xenos_bin_select_ & (kLowMask << 32)) | word;
+        else
+            registry->xenos_bin_select_ =
+                (registry->xenos_bin_select_ & kLowMask) | (word << 32);
+        return true;
+    }
+
+    if (opcode == kPm4SetBinMask || opcode == kPm4SetBinSelect) {
+        if (payload.size() != 2u) return false;
+        const auto value = (static_cast<std::uint64_t>(payload[0]) << 32) |
+                           payload[1];
+        if (opcode == kPm4SetBinMask)
+            registry->xenos_bin_mask_ = value;
+        else
+            registry->xenos_bin_select_ = value;
+        return true;
+    }
+
     if (opcode == kPm4CondWrite) {
-        if (predicate || payload.size() != 6u) {
+        if (payload.size() != 6u) {
             std::fprintf(stderr,
                 "[TooHuman][Xenos] rejected PM4 COND_WRITE predicate=%u payload_dwords=%zu\n",
                 predicate ? 1u : 0u, payload.size());
@@ -704,7 +747,7 @@ bool PpcImportRegistry::dispatch_xenos_type3(
     }
 
     if (opcode == kPm4RegRmw) {
-        if (predicate || payload.size() != 3u) {
+        if (payload.size() != 3u) {
             std::fprintf(stderr,
                 "[TooHuman][Xenos] rejected PM4 REG_RMW predicate=%u payload_dwords=%zu\n",
                 predicate ? 1u : 0u, payload.size());
@@ -740,7 +783,7 @@ bool PpcImportRegistry::dispatch_xenos_type3(
     }
 
     if (opcode == kPm4RegToMem) {
-        if (predicate || payload.size() != 2u ||
+        if (payload.size() != 2u ||
             payload[0] >= kGuestMmioWindowSize / sizeof(std::uint32_t)) {
             std::fprintf(stderr,
                 "[TooHuman][Xenos] rejected PM4 REG_TO_MEM predicate=%u register=0x%08X payload_dwords=%zu\n",
@@ -765,7 +808,7 @@ bool PpcImportRegistry::dispatch_xenos_type3(
     if (opcode == kPm4MemWrite) {
         // Predicated commands depend on bin-select state, which is not
         // implemented; reject rather than execute an unconditional write.
-        if (predicate || payload.size() < 2u ||
+        if (payload.size() < 2u ||
             !write_xenos_guest_physical_dwords(
                 *registry->memory_, payload[0], payload.subspan(1))) {
             std::fprintf(stderr,
