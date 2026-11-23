@@ -619,7 +619,7 @@ GuestKernelObjectWaitResult GuestKernelObjectTable::wait_multiple_objects(
             }
         } else {
             for (std::size_t i = 0; i < objects.size(); ++i) {
-                if (is_ready(objects[i], i)) {
+                if (is_ready(objects[i])) {
                     if (invalid_object)
                         return GuestKernelObjectWaitResult::InvalidHandle;
                     consume(objects[i]);
