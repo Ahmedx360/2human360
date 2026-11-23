@@ -539,6 +539,45 @@ void test_wait_for_multiple_objects_hle() {
     assert(process_kernel_objects().close(*semaphore_handle));
     assert(process_kernel_objects().close(*mutant_handle));
     assert(process_kernel_objects().close(*timer_handle));
+
+    // Multi-waits sleep on the shared notification epoch rather than polling.
+    auto wake_event = std::make_shared<GuestEventObject>(false, false);
+    const auto wake_handle = process_kernel_objects().insert(wake_event);
+    assert(wake_handle);
+    put_be32_test(handles_array, *wake_handle);
+    std::thread signaler([wake_event] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        (void)wake_event->set();
+    });
+    context = {};
+    context.r3.u32 = 1u;
+    context.r4.u32 = handles_array;
+    context.r5.u32 = 1u; // WaitAny.
+    context.r6.u32 = 0u;
+    context.r7.u32 = 0u;
+    context.r8.u32 = 0u; // Infinite timeout.
+    boot_hle::NtWaitForMultipleObjectsEx(context, base());
+    signaler.join();
+    assert(context.r3.u32 == 0u);
+    assert(!wake_event->is_signaled());
+    assert(process_kernel_objects().close(*wake_handle));
+
+    // A wait-set also wakes at the earliest armed timer deadline.
+    auto delayed_timer = std::make_shared<GuestTimerObject>(false);
+    delayed_timer->set_timer(std::chrono::milliseconds(5), 0u);
+    const auto delayed_timer_handle = process_kernel_objects().insert(delayed_timer);
+    assert(delayed_timer_handle);
+    put_be32_test(handles_array, *delayed_timer_handle);
+    context = {};
+    context.r3.u32 = 1u;
+    context.r4.u32 = handles_array;
+    context.r5.u32 = 1u;
+    context.r6.u32 = 0u;
+    context.r7.u32 = 0u;
+    context.r8.u32 = 0u;
+    boot_hle::NtWaitForMultipleObjectsEx(context, base());
+    assert(context.r3.u32 == 0u);
+    assert(process_kernel_objects().close(*delayed_timer_handle));
 }
 
 void test_waitable_timer_hle() {
