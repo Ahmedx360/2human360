@@ -79,4 +79,11 @@ struct Pm4GuestRingResult {
     GuestAddressSpace& memory, std::uint32_t physical_address_with_endian,
     std::span<const std::uint32_t> values) noexcept;
 
+// Read one checked Xenos physical dword and convert it from the address's
+// endian mode into the logical command-processor value.
+[[nodiscard]] bool read_xenos_guest_physical_dword(
+    const GuestAddressSpace& memory,
+    std::uint32_t physical_address_with_endian,
+    std::uint32_t& value) noexcept;
+
 } // namespace toohuman::runtime
