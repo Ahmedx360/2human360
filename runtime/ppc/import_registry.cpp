@@ -584,7 +584,8 @@ void PpcImportRegistry::handle_xenos_mmio_write(
     const Pm4DispatchCallbacks callbacks{
         this,
         &PpcImportRegistry::dispatch_xenos_register_write,
-        &PpcImportRegistry::dispatch_xenos_type3
+        &PpcImportRegistry::dispatch_xenos_type3,
+        &PpcImportRegistry::validate_xenos_register_write
     };
     const auto result = xenos_command_processor_.process_available(
         *memory_, callbacks, 4096u);
@@ -608,6 +609,13 @@ bool PpcImportRegistry::dispatch_xenos_register_write(
     const auto address = kXenosMmioBase + index * sizeof(std::uint32_t);
     return GuestMmioBus::global().write_unobserved(
         address, sizeof(std::uint32_t), value);
+}
+
+bool PpcImportRegistry::validate_xenos_register_write(
+    void* context, std::uint32_t index, std::uint32_t value) {
+    (void)context;
+    (void)value;
+    return index < kGuestMmioWindowSize / sizeof(std::uint32_t);
 }
 
 bool PpcImportRegistry::dispatch_xenos_type3(
@@ -727,7 +735,8 @@ bool PpcImportRegistry::dispatch_xenos_type3(
         const Pm4DispatchCallbacks indirect_callbacks{
             registry,
             &PpcImportRegistry::dispatch_xenos_register_write,
-            &PpcImportRegistry::dispatch_xenos_type3
+            &PpcImportRegistry::dispatch_xenos_type3,
+            &PpcImportRegistry::validate_xenos_register_write
         };
         const auto indirect = dispatch_pm4_guest_indirect_buffer(
             *registry->memory_, payload[0], payload[1],
