@@ -258,4 +258,51 @@ bool write_pm4_guest_read_pointer(
     return true;
 }
 
+bool write_xenos_guest_physical_dwords(
+    GuestAddressSpace& memory, std::uint32_t physical_address_with_endian,
+    std::span<const std::uint32_t> values) noexcept {
+    if (!memory.valid() || values.empty() ||
+        values.size() > std::numeric_limits<std::size_t>::max() /
+                            sizeof(std::uint32_t))
+        return false;
+
+    const auto physical_address = physical_address_with_endian & ~std::uint32_t{3};
+    const auto endian_mode = physical_address_with_endian & 3u;
+    const auto byte_count = values.size() * sizeof(std::uint32_t);
+    std::uint32_t guest_address = 0;
+    if (!xenos_physical_to_guest_address(
+            physical_address, byte_count, guest_address))
+        return false;
+
+    auto* const guest_base = memory.base();
+    // Validate the complete DMA destination before making the first write.
+    if (!GuestAddressSpace::is_accessible_range(
+            guest_base, guest_address, byte_count, GuestMemoryAccess::Write))
+        return false;
+
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        auto value = values[i];
+        switch (endian_mode) {
+        case 1: // 8-in-16: swap bytes within each halfword.
+            value = ((value & 0xFF00FF00u) >> 8) |
+                    ((value & 0x00FF00FFu) << 8);
+            break;
+        case 2: // 8-in-32: reverse all four bytes.
+            value = ((value & 0x000000FFu) << 24) |
+                    ((value & 0x0000FF00u) << 8) |
+                    ((value & 0x00FF0000u) >> 8) |
+                    ((value & 0xFF000000u) >> 24);
+            break;
+        case 3: // 16-in-32: swap the two halfwords.
+            value = (value >> 16) | (value << 16);
+            break;
+        default:
+            break;
+        }
+        store_be32(guest_base + guest_address + i * sizeof(std::uint32_t),
+                   value);
+    }
+    return true;
+}
+
 } // namespace toohuman::runtime
