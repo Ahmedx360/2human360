@@ -1174,6 +1174,10 @@ PPC_FUNC(NtReleaseSemaphore) {
         ctx.r3.u32 = kStatusInvalidHandle;
         return;
     }
+    if (adjustment == 0) {
+        ctx.r3.u32 = kStatusInvalidParameter;
+        return;
+    }
     std::uint32_t previous_count = 0;
     if (!semaphore->release(adjustment, previous_count)) {
         ctx.r3.u32 = kStatusSemaphoreLimitExceeded;
@@ -1308,6 +1312,11 @@ PPC_FUNC(NtWaitForSingleObjectEx) {
     auto object = process_kernel_objects().lookup(ctx.r3.u32);
     if (!object) {
         ctx.r3.u32 = kStatusInvalidHandle;
+        return;
+    }
+    if (ctx.r6.u32 != 0 &&
+        !guest_range_valid(base, ctx.r6.u32, 8u, GuestMemoryAccess::Read)) {
+        ctx.r3.u32 = kStatusAccessViolation;
         return;
     }
     const auto timeout = decode_guest_timeout(base, ctx.r6.u32);

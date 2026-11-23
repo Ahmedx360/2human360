@@ -731,6 +731,21 @@ int main() {
     const auto semaphore_handle = read_guest_be32(semaphore_handle_output);
     assert(semaphore_handle != 0u);
 
+    // Invalid timeout storage must be rejected before the semaphore count changes.
+    PPCContext invalid_semaphore_timeout{};
+    invalid_semaphore_timeout.r3.u32 = semaphore_handle;
+    invalid_semaphore_timeout.r6.u32 = 0x60000000u;
+    call_test_import(0x82001140u, invalid_semaphore_timeout);
+    assert(invalid_semaphore_timeout.r3.u32 == 0xC0000005u);
+
+    // A zero release is an invalid parameter and does not change the count.
+    PPCContext zero_semaphore_release{};
+    zero_semaphore_release.r3.u32 = semaphore_handle;
+    zero_semaphore_release.r4.u32 = 0u;
+    zero_semaphore_release.r5.u32 = semaphore_previous_count;
+    call_test_import(0x820011DCu, zero_semaphore_release);
+    assert(zero_semaphore_release.r3.u32 == 0xC000000Du);
+
     PPCContext semaphore_wait{};
     semaphore_wait.r3.u32 = semaphore_handle;
     semaphore_wait.r6.u32 = 0x82013004u; // Zero LARGE_INTEGER: poll.

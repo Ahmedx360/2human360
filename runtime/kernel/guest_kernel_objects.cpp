@@ -76,7 +76,8 @@ bool GuestSemaphoreObject::release(
     {
         std::lock_guard lock(mutex_);
         previous_count = count_;
-        if (adjustment == 0 || adjustment > maximum_count_ - count_)
+        if (adjustment == 0 || count_ > maximum_count_ ||
+            adjustment > maximum_count_ - count_)
             return false;
         count_ += adjustment;
     }
