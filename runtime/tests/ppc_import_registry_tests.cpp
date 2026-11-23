@@ -147,13 +147,13 @@ int main() {
     // The real kernel imports configure the per-title primary Xenos ring.
     PPCContext ring_init{};
     ring_init.r3.u32 = 0x00010000u;
-    ring_init.r4.u32 = 4u; // 1 << (4 + 3) = 128-byte primary ring.
+    ring_init.r4.u32 = 5u; // 1 << (5 + 3) = 256-byte primary ring.
     const auto ring_init_fn = memory.get_function<PPCFunc*>(0x820011C0u);
     assert(ring_init_fn != nullptr);
     ring_init_fn(ring_init, memory.base());
     assert(imports.xenos_command_processor().ring_initialized());
     assert(imports.xenos_command_processor().ring_physical_base() == 0x00010000u);
-    assert(imports.xenos_command_processor().ring_size_log2() == 4u);
+    assert(imports.xenos_command_processor().ring_size_log2() == 5u);
 
     PPCContext ring_writeback{};
     ring_writeback.r3.u32 = 0x00020000u;
@@ -250,14 +250,43 @@ int main() {
     assert(GuestMmioBus::global().read(kXenosMmioBase + 0x30u * 4u, 4) ==
            0x55BB00FFu);
 
-    // A multi-register Type-0 packet crossing the MMIO aperture boundary is
-    // rejected before the first in-range register is modified.
-    put_guest_be32(0xA0010044u, (1u << 16) | 0x3FFFu);
-    put_guest_be32(0xA0010048u, 0x11111111u);
-    put_guest_be32(0xA001004Cu, 0x22222222u);
-    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 20u);
-    assert(imports.xenos_command_processor().read_index() == 17u);
-    assert(read_guest_be32(0xA0020000u) == 17u);
+    // COND_WRITE compares an Xenos register and conditionally updates a
+    // second register when the masked value matches.
+    put_guest_be32(0xA0010044u,
+        0xC0000000u | (5u << 16) | (0x45u << 8));
+    put_guest_be32(0xA0010048u, 3u); // Equal, register source, register target.
+    put_guest_be32(0xA001004Cu, 0x30u);
+    put_guest_be32(0xA0010050u, 0x55BB00FFu);
+    put_guest_be32(0xA0010054u, 0xFFFFFFFFu);
+    put_guest_be32(0xA0010058u, 0x31u);
+    put_guest_be32(0xA001005Cu, 0x0BADF00Du);
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 24u);
+    assert(imports.xenos_command_processor().read_index() == 24u);
+    assert(GuestMmioBus::global().read(kXenosMmioBase + 0x31u * 4u, 4) ==
+           0x0BADF00Du);
+
+    // A memory-target COND_WRITE uses the checked physical write path.
+    put_guest_be32(0xA0010060u,
+        0xC0000000u | (5u << 16) | (0x45u << 8));
+    put_guest_be32(0xA0010064u, 0x103u); // Equal, register poll, memory target.
+    put_guest_be32(0xA0010068u, 0x30u);
+    put_guest_be32(0xA001006Cu, 0x55BB00FFu);
+    put_guest_be32(0xA0010070u, 0xFFFFFFFFu);
+    put_guest_be32(0xA0010074u, 0x00060004u);
+    put_guest_be32(0xA0010078u, 0x11223344u);
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 31u);
+    assert(imports.xenos_command_processor().read_index() == 31u);
+    assert(read_guest_be32(0xA0060004u) == 0x11223344u);
+    assert(read_guest_be32(0xA0020000u) == 31u);
+
+    // A multi-register Type-0 packet crosses the ring end and the MMIO
+    // aperture boundary; preflight rejects it before the first write.
+    put_guest_be32(0xA001007Cu, (1u << 16) | 0x3FFFu); // Ring dword 31.
+    put_guest_be32(0xA0010000u, 0x11111111u);          // Ring dword 0.
+    put_guest_be32(0xA0010004u, 0x22222222u);          // Ring dword 1.
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 2u);
+    assert(imports.xenos_command_processor().read_index() == 31u);
+    assert(read_guest_be32(0xA0020000u) == 31u);
     assert(GuestMmioBus::global().read(
         kXenosMmioBase + 0x3FFFu * 4u, 4) == 0u);
 
