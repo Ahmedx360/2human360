@@ -13,6 +13,8 @@ namespace toohuman::runtime {
 using GuestKernelHandle = std::uint32_t;
 enum class GuestKernelObjectType { Event, Semaphore, Mutant, Timer, Thread, File };
 enum class GuestKernelObjectWaitResult { Signaled, Timeout, InvalidHandle };
+// Wake threads blocked in multi-object dispatcher waits after an object changes state.
+void notify_guest_kernel_object_waiters() noexcept;
 class GuestKernelObject {
 public:
     virtual ~GuestKernelObject() = default;
