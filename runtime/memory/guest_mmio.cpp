@@ -178,7 +178,7 @@ void GuestMmioBus::set_guest_memory_write_notifications_enabled(
 }
 
 void GuestMmioBus::notify_guest_memory_write(
-    const void* host_address, std::uint8_t width) noexcept {
+    const void* host_address, std::size_t width) noexcept {
     if (!host_address || width == 0 ||
         !guest_memory_write_notifications_enabled_.load(
             std::memory_order_acquire))
@@ -244,7 +244,7 @@ void guest_mmio_write(std::uint32_t address, std::uint8_t width,
 }
 
 void guest_memory_write_observed(const void* host_address,
-                                 std::uint8_t width) noexcept {
+                                 std::size_t width) noexcept {
     GuestMmioBus::global().notify_guest_memory_write(host_address, width);
 }
 

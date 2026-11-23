@@ -104,11 +104,11 @@ private:
         void* context, std::uint32_t address, std::uint8_t width,
         std::uint64_t value) noexcept;
     static void guest_memory_write_observer(
-        void* context, const void* host_address, std::uint8_t width) noexcept;
+        void* context, const void* host_address, std::size_t width) noexcept;
     void handle_xenos_mmio_write(std::uint32_t address, std::uint8_t width,
                                  std::uint64_t value) noexcept;
     void handle_guest_memory_write(const void* host_address,
-                                   std::uint8_t width) noexcept;
+                                   std::size_t width) noexcept;
     void pump_xenos_commands(const char* trigger) noexcept;
     [[nodiscard]] bool resolve_xenos_scratch_write(
         std::uint32_t index, std::uint32_t& physical_address,

@@ -576,13 +576,13 @@ void PpcImportRegistry::xenos_mmio_write_observer(
 }
 
 void PpcImportRegistry::guest_memory_write_observer(
-    void* context, const void* host_address, std::uint8_t width) noexcept {
+    void* context, const void* host_address, std::size_t width) noexcept {
     auto* registry = static_cast<PpcImportRegistry*>(context);
     if (registry) registry->handle_guest_memory_write(host_address, width);
 }
 
 void PpcImportRegistry::handle_guest_memory_write(
-    const void* host_address, std::uint8_t width) noexcept {
+    const void* host_address, std::size_t width) noexcept {
     if (!host_address || width == 0) return;
     std::lock_guard lock(xenos_command_processor_mutex_);
     if (!xenos_waiting_for_memory_ ||

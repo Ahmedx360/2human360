@@ -36,7 +36,7 @@ public:
     using XenosWriteObserver = void (*)(void* context, std::uint32_t address,
                                         std::uint8_t width, std::uint64_t value) noexcept;
     using GuestMemoryWriteObserver = void (*)(void* context, const void* host_address,
-                                              std::uint8_t width) noexcept;
+                                              std::size_t width) noexcept;
     static constexpr std::size_t kTraceCapacity = 4096;
 
     GuestMmioBus() = default;
@@ -79,7 +79,7 @@ public:
     void clear_guest_memory_write_observer(void* context) noexcept;
     void set_guest_memory_write_notifications_enabled(bool enabled) noexcept;
     void notify_guest_memory_write(const void* host_address,
-                                   std::uint8_t width) noexcept;
+                                   std::size_t width) noexcept;
 
     [[nodiscard]] std::vector<GuestMmioAccess> trace() const;
     [[nodiscard]] std::uint64_t dropped_trace_entries() const noexcept;
@@ -118,6 +118,6 @@ private:
 void guest_mmio_write(std::uint32_t address, std::uint8_t width,
                       std::uint64_t value) noexcept;
 void guest_memory_write_observed(const void* host_address,
-                                 std::uint8_t width) noexcept;
+                                 std::size_t width) noexcept;
 
 } // namespace toohuman::runtime

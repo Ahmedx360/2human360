@@ -171,11 +171,13 @@ seven comparison operations. When its condition is not satisfied, the callback
 returns a distinct deferred result: the command remains at RPTR without
 blocking the guest thread. Register-polled waits are retried when the guest
 writes the exact Xenos register being polled. Memory-polled waits arm a
-low-overhead observer for translated PPC scalar stores and the boot HLE
-big-endian scalar-store helpers; a write overlapping the polled guest physical
-dword retries the packet immediately without another CP write-pointer update.
-Bulk HLE `memset`/`memcpy` operations and internal PM4 DMA writes are not yet
-connected to this observer and still require a later CP notification. The wait interval is not slept and there is no independent
+low-overhead observer for translated PPC scalar stores and guest-memory output
+from the boot/file HLE layers. It covers big-endian scalar stores, instrumented
+structure clears/copies, and direct guest-buffer fills performed by `NtReadFile`;
+a write overlapping the polled physical dword retries the packet immediately
+without another CP write-pointer update. Internal PM4 DMA writes remain
+unobserved because the command pump holds its serialization lock; they require
+a later CP notification if they change a polled location. The wait interval is not slept and there is no independent
 asynchronous polling worker. Linear indirect buffers preserve their inner
 read cursor when a nested command defers or fails, so a primary-ring retry
 resumes after completed inner packets instead of replaying them. The hardware's

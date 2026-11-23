@@ -42,14 +42,14 @@ inline bool guest_range_valid(
 inline void put_be16(std::uint8_t* p, std::uint16_t v) {
     p[0] = static_cast<std::uint8_t>(v >> 8);
     p[1] = static_cast<std::uint8_t>(v);
-    guest_memory_write_observed(p, 2);
+    guest_memory_write_observed(p, 2u);
 }
 inline void put_be32(std::uint8_t* p, std::uint32_t v) {
     p[0] = static_cast<std::uint8_t>(v >> 24);
     p[1] = static_cast<std::uint8_t>(v >> 16);
     p[2] = static_cast<std::uint8_t>(v >> 8);
     p[3] = static_cast<std::uint8_t>(v);
-    guest_memory_write_observed(p, 4);
+    guest_memory_write_observed(p, 4u);
 }
 inline void put_be64(std::uint8_t* p, std::uint64_t v) {
     put_be32(p, static_cast<std::uint32_t>(v >> 32));
@@ -195,6 +195,7 @@ void initialize_critical_section(std::uint8_t* base, std::uint32_t address,
     if (address == 0) return;
     auto* cs = at(base, address);
     std::memset(cs, 0, 0x1C);
+    guest_memory_write_observed(cs, 0x1Cu);
     cs[0] = 1;  // EventSynchronizationObject.
     const auto spin_units = std::min<std::uint64_t>(
         255, (static_cast<std::uint64_t>(spin_count) + 255) >> 8);
@@ -226,6 +227,7 @@ bool write_video_mode(std::uint8_t* base, std::uint32_t output) {
     constexpr std::uint32_t kSize = 0x30u;
     if (!guest_range_valid(base, output, kSize, GuestMemoryAccess::Write)) return false;
     std::memset(at(base, output), 0, kSize);
+    guest_memory_write_observed(at(base, output), kSize);
     put_be32(at(base, output + 0x00u), 1280u);
     put_be32(at(base, output + 0x04u), 720u);
     put_be32(at(base, output + 0x08u), 0u);
@@ -242,6 +244,7 @@ bool write_display_information(std::uint8_t* base, std::uint32_t output) {
     constexpr std::uint32_t kSize = 0x58u;
     if (!guest_range_valid(base, output, kSize, GuestMemoryAccess::Write)) return false;
     std::memset(at(base, output), 0, kSize);
+    guest_memory_write_observed(at(base, output), kSize);
     put_be16(at(base, output + 0x00u), 1280u);
     put_be16(at(base, output + 0x02u), 720u);
     put_be32(at(base, output + 0x10u), 1280u);
@@ -339,6 +342,7 @@ PPC_FUNC(RtlTimeToTimeFields) {
     const std::chrono::year_month_day date{day_point};
     if (!date.ok()) {
         std::memset(at(base, fields_pointer), 0, 16);
+        guest_memory_write_observed(at(base, fields_pointer), 16u);
         return;
     }
     const std::chrono::hh_mm_ss time_of_day{instant - day_point};
@@ -551,6 +555,7 @@ PPC_FUNC(ExGetXConfigSetting) {
             return;
         }
         std::memcpy(at(base, buffer), value, value_size);
+        guest_memory_write_observed(at(base, buffer), value_size);
     } else if (buffer_size != 0) {
         ctx.r3.u32 = 0xC00000F1u; // STATUS_INVALID_PARAMETER_3
         if (required_size != 0) put_be16(at(base, required_size), 0);

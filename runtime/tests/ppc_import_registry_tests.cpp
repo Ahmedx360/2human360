@@ -591,6 +591,57 @@ int main() {
     assert(GuestMmioBus::global().read(
         kXenosMmioBase + 0x35u * 4u, 4) == 0xC0DEC0DEu);
 
+    // NtReadFile's direct guest-buffer fill also wakes memory-polled waits.
+    assert(imports.initialize_xenos_ring(0x00010000u, 6u, &error));
+    put_guest_be32(0xA0010000u,
+        0xC0000000u | (4u << 16) | (0x3Cu << 8));
+    put_guest_be32(0xA0010004u, 0x13u);           // Equal, memory source.
+    put_guest_be32(0xA0010008u, 0x00060100u);     // Physical address -> A0060100.
+    put_guest_be32(0xA001000Cu, 0x11223344u);
+    put_guest_be32(0xA0010010u, 0xFFFFFFFFu);
+    put_guest_be32(0xA0010014u, 0u);
+    put_guest_be32(0xA0010018u, 0x36u);
+    put_guest_be32(0xA001001Cu, 0xFACE0FF0u);
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 8u);
+    assert(imports.xenos_command_processor().read_index() == 0u);
+
+    const auto file_path = std::filesystem::temp_directory_path() /
+        ("toohuman-wait-" + std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count()) + ".bin");
+    {
+        std::ofstream stream(file_path, std::ios::binary);
+        std::vector<std::uint8_t> file_bytes(0x104u, 0u);
+        file_bytes[0x100u] = 0x11u;
+        file_bytes[0x101u] = 0x22u;
+        file_bytes[0x102u] = 0x33u;
+        file_bytes[0x103u] = 0x44u;
+        stream.write(reinterpret_cast<const char*>(file_bytes.data()),
+                     static_cast<std::streamsize>(file_bytes.size()));
+        assert(stream.good());
+    }
+    auto guest_file = std::make_shared<GuestFile>(
+        file_path, false, true, false, false);
+    const auto file_handle = process_kernel_objects().insert(guest_file);
+    assert(file_handle.has_value());
+
+    PPCContext read_file_context{};
+    read_file_context.r3.u32 = *file_handle;
+    read_file_context.r7.u32 = 0xA0060300u;
+    read_file_context.r8.u32 = 0xA0060000u;
+    read_file_context.r9.u32 = 0x104u;
+    boot_hle::NtReadFile(read_file_context, memory.base());
+    assert(read_file_context.r3.u32 == 0u);
+    assert(read_guest_be32(0xA0060100u) == 0x11223344u);
+    assert(read_guest_be32(0xA0060300u) == 0u);
+    assert(read_guest_be32(0xA0060304u) == 0x104u);
+    assert(imports.xenos_command_processor().read_index() == 8u);
+    assert(GuestMmioBus::global().read(
+        kXenosMmioBase + 0x36u * 4u, 4) == 0xFACE0FF0u);
+
+    assert(process_kernel_objects().close(*file_handle));
+    guest_file.reset();
+    std::filesystem::remove(file_path);
+
     const auto call_test_import = [&](std::uint32_t thunk, PPCContext& ctx) {
         ctx.ctr.u32 = thunk;
         const auto function = memory.get_function<PPCFunc*>(thunk);

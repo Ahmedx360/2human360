@@ -3,6 +3,7 @@
 #include "fs/guest_vfs.hpp"
 #include "kernel/guest_kernel_objects.hpp"
 #include "memory/guest_address_space.hpp"
+#include "memory/guest_mmio.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -53,12 +54,14 @@ void wr32(std::uint8_t* base, std::uint32_t address, std::uint32_t value) noexce
     p[1] = static_cast<std::uint8_t>(value >> 16);
     p[2] = static_cast<std::uint8_t>(value >> 8);
     p[3] = static_cast<std::uint8_t>(value);
+    guest_memory_write_observed(p, 4u);
 }
 
 void wr64(std::uint8_t* base, std::uint32_t address, std::uint64_t value) noexcept {
     auto* p = at(base, address);
     for (unsigned i = 0; i < 8; ++i)
         p[i] = static_cast<std::uint8_t>(value >> ((7u - i) * 8u));
+    guest_memory_write_observed(p, 8u);
 }
 
 std::uint64_t rd64(std::uint8_t* base, std::uint32_t address) noexcept {
@@ -304,6 +307,7 @@ PPC_FUNC(NtReadFile) {
     }
 
     const auto got = file->read(length ? at(base, buffer) : nullptr, length, offset);
+    if (got != 0) guest_memory_write_observed(at(base, buffer), got);
     if (got == 0 && length != 0) {
         set_iosb(base, iosb, kEndOfFile, 0);
         ctx.r3.u32 = kEndOfFile;
@@ -386,6 +390,7 @@ PPC_FUNC(NtQueryInformationFile) {
         // FILE_BASIC_INFORMATION timestamps until the other times are tracked.
         const auto filetime = host_filetime(file->path());
         std::memset(at(base, info), 0, 40u);
+        guest_memory_write_observed(at(base, info), 40u);
         wr64(base, info + 0x00u, filetime);
         wr64(base, info + 0x08u, filetime);
         wr64(base, info + 0x10u, filetime);
@@ -400,6 +405,7 @@ PPC_FUNC(NtQueryInformationFile) {
     }
     case 5:
         std::memset(at(base, info), 0, 24u);
+        guest_memory_write_observed(at(base, info), 24u);
         wr64(base, info, allocation);
         wr64(base, info + 8u, size);
         wr32(base, info + 16u, 1u);
@@ -412,6 +418,7 @@ PPC_FUNC(NtQueryInformationFile) {
     case 34: {
         const auto filetime = host_filetime(file->path());
         std::memset(at(base, info), 0, 56u);
+        guest_memory_write_observed(at(base, info), 56u);
         wr64(base, info + 0x00u, filetime);
         wr64(base, info + 0x08u, filetime);
         wr64(base, info + 0x10u, filetime);
@@ -500,6 +507,7 @@ PPC_FUNC(NtQueryFullAttributesFile) {
     if (ec) { ctx.r3.u32 = kAccessDenied; return; }
 
     std::memset(at(base, out), 0, 56u);
+    guest_memory_write_observed(at(base, out), 56u);
     wr64(base, out + 32u, (size + 0xFFFu) & ~0xFFFull);
     wr64(base, out + 40u, size);
     wr32(base, out + 48u, is_directory ? 0x10u : 0x80u);
@@ -551,6 +559,7 @@ PPC_FUNC(NtQueryVolumeInformationFile) {
     }
 
     std::memset(at(base, information), 0, kRequiredLength);
+    guest_memory_write_observed(at(base, information), kRequiredLength);
     if (info_class == kVolumeInformationClass) {
         // The Xbox kernel returns an empty volume label and zero serial/time
         // for this generic VFS-backed mount.
@@ -676,6 +685,9 @@ PPC_FUNC(NtQueryDirectoryFile) {
     wr32(base, output + 0x3Cu, static_cast<std::uint32_t>(entry->name.size()));
     std::memcpy(at(base, output + kFileDirectoryInformationHeaderSize),
                 entry->name.data(), entry->name.size());
+    guest_memory_write_observed(
+        at(base, output + kFileDirectoryInformationHeaderSize),
+        entry->name.size());
 
     // The Xbox 360 NtQueryDirectoryFile wrapper reports the supplied
     // Length in IO_STATUS_BLOCK.Information when the query succeeds.

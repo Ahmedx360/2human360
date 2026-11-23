@@ -8,6 +8,7 @@
 #error "ppc_config.h must be included before ppc_context.h"
 #endif
 
+#include <cstddef>
 #include <climits>
 #include <cmath>
 #include <csetjmp>
@@ -55,7 +56,7 @@ inline bool is_guest_mmio_address(uint32_t address, uint8_t width) noexcept {
 }
 uint64_t guest_mmio_read(uint32_t address, uint8_t width) noexcept;
 void guest_mmio_write(uint32_t address, uint8_t width, uint64_t value) noexcept;
-void guest_memory_write_observed(const void* host_address, uint8_t width) noexcept;
+void guest_memory_write_observed(const void* host_address, std::size_t width) noexcept;
 } // namespace toohuman::runtime
 
 static inline uint8_t ppc_guest_load_u8(uint8_t* base, uint32_t address) noexcept {
