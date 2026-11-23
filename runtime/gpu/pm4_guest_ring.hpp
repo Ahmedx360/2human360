@@ -71,4 +71,11 @@ struct Pm4GuestRingResult {
     GuestAddressSpace& memory, std::uint32_t physical_address,
     std::uint32_t read_index) noexcept;
 
+// Apply a PM4 MEM_WRITE payload to checked guest physical memory. The address's
+// low two bits select Xenos endian conversion; the rest is dword-aligned.
+// The entire destination range is validated before any bytes are changed.
+[[nodiscard]] bool write_xenos_guest_physical_dwords(
+    GuestAddressSpace& memory, std::uint32_t physical_address_with_endian,
+    std::span<const std::uint32_t> values) noexcept;
+
 } // namespace toohuman::runtime
