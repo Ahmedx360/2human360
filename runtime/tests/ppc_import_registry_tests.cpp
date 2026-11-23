@@ -61,6 +61,7 @@ int main() {
     assert(memory.commit_region(0xA0020000u, 0x1000u, &error));
     assert(memory.commit_region(0xA0030000u, 0x1000u, &error));
     assert(memory.commit_region(0xA0060000u, 0x1000u, &error));
+    assert(memory.commit_region(0xA0070000u, 0x1000u, &error));
 
     // Scalar generated PPC memory accessors must bypass the PROT_NONE guest
     // aperture and use the runtime bus for Xenos/XMA, while preserving direct
@@ -146,13 +147,13 @@ int main() {
     // The real kernel imports configure the per-title primary Xenos ring.
     PPCContext ring_init{};
     ring_init.r3.u32 = 0x00010000u;
-    ring_init.r4.u32 = 3u; // 1 << (3 + 3) = 64-byte primary ring.
+    ring_init.r4.u32 = 4u; // 1 << (4 + 3) = 128-byte primary ring.
     const auto ring_init_fn = memory.get_function<PPCFunc*>(0x820011C0u);
     assert(ring_init_fn != nullptr);
     ring_init_fn(ring_init, memory.base());
     assert(imports.xenos_command_processor().ring_initialized());
     assert(imports.xenos_command_processor().ring_physical_base() == 0x00010000u);
-    assert(imports.xenos_command_processor().ring_size_log2() == 3u);
+    assert(imports.xenos_command_processor().ring_size_log2() == 4u);
 
     PPCContext ring_writeback{};
     ring_writeback.r3.u32 = 0x00020000u;
@@ -228,6 +229,26 @@ int main() {
     assert(imports.xenos_command_processor().read_index() == 10u);
     assert(read_guest_be32(0xA0020000u) == 10u);
     assert(read_guest_be32(0xA0060000u) == 0xCAFEBABEu);
+
+    // REG_TO_MEM copies the register mirror to validated guest physical memory.
+    put_guest_be32(0xA0010028u,
+        0xC0000000u | (1u << 16) | (0x3Eu << 8));
+    put_guest_be32(0xA001002Cu, 0x30u);
+    put_guest_be32(0xA0010030u, 0x00070000u);
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 13u);
+    assert(imports.xenos_command_processor().read_index() == 13u);
+    assert(read_guest_be32(0xA0070000u) == 0xCAFEBABEu);
+
+    // REG_RMW applies immediate AND/OR masks to a selected Xenos register.
+    put_guest_be32(0xA0010034u,
+        0xC0000000u | (2u << 16) | (0x21u << 8));
+    put_guest_be32(0xA0010038u, 0x30u);
+    put_guest_be32(0xA001003Cu, 0x00FF00FFu);
+    put_guest_be32(0xA0010040u, 0x550000AAu);
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 17u);
+    assert(imports.xenos_command_processor().read_index() == 17u);
+    assert(GuestMmioBus::global().read(kXenosMmioBase + 0x30u * 4u, 4) ==
+           0x55BB00FFu);
 
     PPCContext context{};
     context.ctr.u32 = 0x82001100u;
