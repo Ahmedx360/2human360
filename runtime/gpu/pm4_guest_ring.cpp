@@ -53,11 +53,12 @@ bool xenos_physical_to_guest_address(
     std::uint32_t physical_address, std::size_t size,
     std::uint32_t& guest_address) noexcept {
     const auto physical = static_cast<std::uint64_t>(physical_address & 0x1FFFFFFFu);
-    if (size == 0 || physical + size > kPhysicalWindowSize)
+    if (size == 0 || size > kPhysicalWindowSize - physical)
         return false;
 
     const auto guest = static_cast<std::uint64_t>(kPhysicalAliasBase) + physical;
-    if (guest + size > (std::uint64_t{1} << 32) ||
+    constexpr auto kGuestAddressLimit = std::uint64_t{1} << 32;
+    if (guest >= kGuestAddressLimit || size > kGuestAddressLimit - guest ||
         guest > std::numeric_limits<std::uint32_t>::max())
         return false;
 
@@ -87,6 +88,10 @@ Pm4GuestRingResult dispatch_pm4_guest_ring(
 
     const auto ring_bytes_64 = std::uint64_t{1} << (size_log2 + 3u);
     const auto ring_dwords_64 = ring_bytes_64 / sizeof(std::uint32_t);
+    if ((physical_base & 3u) != 0) {
+        result.error = Pm4GuestRingError::InvalidPhysicalRange;
+        return result;
+    }
     std::uint32_t ring_guest_address = 0;
     if (!xenos_physical_to_guest_address(
             physical_base, static_cast<std::size_t>(ring_bytes_64),
