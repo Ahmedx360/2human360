@@ -24,6 +24,7 @@ bool write_register(void* opaque, std::uint32_t index, std::uint32_t value) {
 Pm4CallbackResult type3(void* opaque, std::uint32_t opcode, bool,
            std::span<const std::uint32_t> payload) {
     auto& capture = *static_cast<Capture*>(opaque);
+    if (opcode == 0x3Cu) return Pm4CallbackResult::Deferred;
     capture.opcode = opcode;
     capture.payload.assign(payload.begin(), payload.end());
     return Pm4CallbackResult::Accepted;
@@ -100,6 +101,20 @@ int main() {
     assert(type3_result.dispatch.read_index == 1u);
     assert(capture.opcode == 0x37u);
     assert((capture.payload == std::vector<std::uint32_t>{0xABu, 0xCDu}));
+
+    // A deferred Type-3 wait leaves the guest ring read pointer untouched.
+    store_be32(ring + 4u * 4u, 0xC0000000u | (4u << 16) | (0x3Cu << 8));
+    store_be32(ring + 5u * 4u, 3u);
+    store_be32(ring + 6u * 4u, 0x12345678u);
+    store_be32(ring + 7u * 4u, 0xFFFFFFFFu);
+    store_be32(ring + 8u * 4u, 0u);
+    store_be32(ring + 9u * 4u, 0u);
+    const auto pending = dispatch_pm4_guest_ring(
+        memory, kRingPhysical, 2u, 4u, 10u, callbacks, 4u);
+    assert(pending.error == Pm4GuestRingError::CallbackDeferred);
+    assert(pending.dispatch.packets == 0u);
+    assert(pending.dispatch.dwords_consumed == 0u);
+    assert(pending.dispatch.read_index == 4u);
 
     // Read-pointer writeback must use guest big-endian byte order.
     assert(write_pm4_guest_read_pointer(memory, kWritebackPhysical, 0x12345678u));
