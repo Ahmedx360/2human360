@@ -85,4 +85,6 @@ jobs:
           retention-days: 7
 
       - name: Test XEX import dispatch
+        env:
+          TH_TRACE_IMPORTS: "1"
         run: ctest --test-dir build/clang -R "TooHuman(BootHle|PpcImportRegistry|GuestThreadStartup|GuestThreadManager|GuestThreadRuntime|GuestVfs|GuestKernelObject|GuestMemory|GuestHeap|Xbox360Pe|XexImage|Pm4GuestRing|XenosCommandProcessor)Tests" --output-on-failure
