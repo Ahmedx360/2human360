@@ -41,6 +41,8 @@ Pm4GuestRingError map_dispatch_error(Pm4DispatchError error) noexcept {
         return Pm4GuestRingError::MissingType3Handler;
     case Pm4DispatchError::CallbackRejected:
         return Pm4GuestRingError::CallbackRejected;
+    case Pm4DispatchError::CallbackDeferred:
+        return Pm4GuestRingError::CallbackDeferred;
     case Pm4DispatchError::PacketLimitReached:
         return Pm4GuestRingError::PacketLimitReached;
     }
