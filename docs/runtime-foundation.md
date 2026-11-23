@@ -263,7 +263,7 @@ registers the 0x10-byte guest dispatcher record by address, `KeSetEvent` and
 events signaled. `KePulseEvent` and `NtPulseEvent` release only threads already queued at the
 pulse instant (one for synchronization events, all for notification events)
 and leave the event unsignaled. Priority increment and wait-switch hints are
-ignored; multiple-object waits remain unimplemented.
+ignored. `NtWaitForMultipleObjectsEx` now implements handle-based WaitAll and WaitAny; the kernel-mode pointer-based `KeWaitForMultipleObjects` entry point remains unimplemented.
 
 Waitable timer handles now support `NtCreateTimer`, `NtSetTimerEx` and
 `NtCancelTimer`. Notification timers remain signaled after expiry, while
