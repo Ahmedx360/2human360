@@ -585,7 +585,7 @@ int main() {
 
     PPCContext hle_video_mode{};
     hle_video_mode.r3.u32 = 0xA0060000u;
-    boot_hle::VdQueryVideoMode(hle_video_mode, memory.base());
+    toohuman::runtime::boot_hle::VdQueryVideoMode(hle_video_mode, memory.base());
     assert(hle_video_mode.r3.u32 == 0xA0060000u);
     assert(imports.xenos_command_processor().read_index() == 8u);
     assert(GuestMmioBus::global().read(
@@ -619,9 +619,9 @@ int main() {
                      static_cast<std::streamsize>(file_bytes.size()));
         assert(stream.good());
     }
-    auto guest_file = std::make_shared<GuestFile>(
+    auto guest_file = std::make_shared<toohuman::runtime::GuestFile>(
         file_path, false, true, false, false);
-    const auto file_handle = process_kernel_objects().insert(guest_file);
+    const auto file_handle = toohuman::runtime::process_kernel_objects().insert(guest_file);
     assert(file_handle.has_value());
 
     PPCContext read_file_context{};
@@ -629,7 +629,7 @@ int main() {
     read_file_context.r7.u32 = 0xA0060300u;
     read_file_context.r8.u32 = 0xA0060000u;
     read_file_context.r9.u32 = 0x104u;
-    boot_hle::NtReadFile(read_file_context, memory.base());
+    toohuman::runtime::boot_hle::NtReadFile(read_file_context, memory.base());
     assert(read_file_context.r3.u32 == 0u);
     assert(read_guest_be32(0xA0060100u) == 0x11223344u);
     assert(read_guest_be32(0xA0060300u) == 0u);
@@ -638,7 +638,7 @@ int main() {
     assert(GuestMmioBus::global().read(
         kXenosMmioBase + 0x36u * 4u, 4) == 0xFACE0FF0u);
 
-    assert(process_kernel_objects().close(*file_handle));
+    assert(toohuman::runtime::process_kernel_objects().close(*file_handle));
     guest_file.reset();
     std::filesystem::remove(file_path);
 
@@ -1018,7 +1018,7 @@ int main() {
     auto directory_object = std::make_shared<toohuman::runtime::GuestFile>(
         directory_test_root, true, true, false, true);
     const auto directory_handle =
-        toohuman::runtime::process_kernel_objects().insert(directory_object);
+        toohuman::runtime::toohuman::runtime::process_kernel_objects().insert(directory_object);
     assert(directory_handle);
 
     constexpr std::uint32_t directory_name_descriptor = 0x82016200u;
@@ -1091,7 +1091,7 @@ int main() {
     call_test_import(0x820011A0u, boot_context);
     assert(boot_context.r3.u32 == 0xC0000005u);
 
-    assert(toohuman::runtime::process_kernel_objects().close(*directory_handle));
+    assert(toohuman::runtime::toohuman::runtime::process_kernel_objects().close(*directory_handle));
     std::filesystem::remove_all(directory_test_root);
 
 
@@ -1184,7 +1184,7 @@ int main() {
     boot_context.r4.u32 = 0x60000000u; // Invalid output pointer must not duplicate.
     call_test_import(0x8200119Cu, boot_context);
     assert(boot_context.r3.u32 == 0xC0000005u);
-    assert(toohuman::runtime::process_kernel_objects().lookup(manual_event));
+    assert(toohuman::runtime::toohuman::runtime::process_kernel_objects().lookup(manual_event));
 
     boot_context = {};
     boot_context.r3.u32 = manual_event;
@@ -1193,8 +1193,8 @@ int main() {
     assert(boot_context.r3.u32 == 0u);
     const auto duplicated_event1 = guest_be32(duplicate_out1);
     assert(duplicated_event1 != 0u && duplicated_event1 != manual_event);
-    assert(toohuman::runtime::process_kernel_objects().lookup(duplicated_event1) ==
-           toohuman::runtime::process_kernel_objects().lookup(manual_event));
+    assert(toohuman::runtime::toohuman::runtime::process_kernel_objects().lookup(duplicated_event1) ==
+           toohuman::runtime::toohuman::runtime::process_kernel_objects().lookup(manual_event));
 
     boot_context = {};
     boot_context.r3.u32 = duplicated_event1;
@@ -1204,8 +1204,8 @@ int main() {
     assert(boot_context.r3.u32 == 0u);
     const auto duplicated_event2 = guest_be32(duplicate_out2);
     assert(duplicated_event2 != 0u);
-    assert(!toohuman::runtime::process_kernel_objects().lookup(duplicated_event1));
-    assert(toohuman::runtime::process_kernel_objects().lookup(duplicated_event2));
+    assert(!toohuman::runtime::toohuman::runtime::process_kernel_objects().lookup(duplicated_event1));
+    assert(toohuman::runtime::toohuman::runtime::process_kernel_objects().lookup(duplicated_event2));
     boot_context = {};
     boot_context.r3.u32 = duplicated_event2;
     call_test_import(0x82001144u, boot_context); // NtClose.
@@ -1293,7 +1293,7 @@ int main() {
 
     // Thread completion handles share the event dispatcher table.
     toohuman::runtime::GuestThreadManager guest_threads(
-        toohuman::runtime::process_kernel_objects());
+        toohuman::runtime::toohuman::runtime::process_kernel_objects());
     const auto completed_thread = guest_threads.create(
         toohuman::runtime::GuestThreadStartup{},
         [](toohuman::runtime::GuestThreadStartup&, std::stop_token) { return 0x12345678u; },
