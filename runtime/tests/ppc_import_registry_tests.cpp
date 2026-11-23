@@ -334,7 +334,7 @@ int main() {
     assert(GuestMmioBus::global().read(kXenosMmioBase + 0x32u * 4u, 4) == 0u);
 
     // WAIT_REG_MEM defers without consuming the packet or publishing RPTR.
-    // A later CP_RB_WPTR write retries it after the polled register becomes equal.
+    // A guest write to the polled register wakes the pump and retries the wait.
     put_guest_be32(0xA00100D4u,
         0xC0000000u | (4u << 16) | (0x3Cu << 8));
     put_guest_be32(0xA00100D8u, 3u); // Equal, register source.
@@ -346,8 +346,7 @@ int main() {
     assert(imports.xenos_command_processor().read_index() == 53u);
     assert(read_guest_be32(0xA0020000u) == 53u);
 
-    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x33u * 4u, 0x12345678u);
-    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 59u);
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 3u * 4u, 0x12345678u);
     assert(imports.xenos_command_processor().read_index() == 59u);
     assert(read_guest_be32(0xA0020000u) == 59u);
 
