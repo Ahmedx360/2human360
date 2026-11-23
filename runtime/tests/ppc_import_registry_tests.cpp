@@ -6,6 +6,7 @@
 #include "ppc/guest_thread_manager.hpp"
 #include <ppc_config.h>
 
+#include <array>
 #include <atomic>
 #include <cassert>
 #include <chrono>
