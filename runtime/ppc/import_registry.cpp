@@ -8,6 +8,7 @@
 #include <ppc_config.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstring>
@@ -616,6 +617,8 @@ bool PpcImportRegistry::dispatch_xenos_type3(
     if (!registry) return false;
 
     constexpr std::uint32_t kPm4Nop = 0x10u;
+    constexpr std::uint32_t kPm4RegRmw = 0x21u;
+    constexpr std::uint32_t kPm4RegToMem = 0x3Eu;
     constexpr std::uint32_t kPm4MemWrite = 0x3Du;
     constexpr std::uint32_t kPm4IndirectBuffer = 0x3Fu;
     constexpr std::uint32_t kPm4IndirectBufferPfd = 0x37u;
@@ -625,6 +628,65 @@ bool PpcImportRegistry::dispatch_xenos_type3(
     constexpr std::size_t kMaxIndirectPackets = 256u;
     if (opcode == kPm4Nop)
         return true;
+
+    if (opcode == kPm4RegRmw) {
+        if (predicate || payload.size() != 3u) {
+            std::fprintf(stderr,
+                "[TooHuman][Xenos] rejected PM4 REG_RMW predicate=%u payload_dwords=%zu\n",
+                predicate ? 1u : 0u, payload.size());
+            return false;
+        }
+
+        constexpr std::uint32_t kRegisterMask = 0x1FFFu;
+        constexpr std::uint32_t kMmioRegisterCount =
+            kGuestMmioWindowSize / sizeof(std::uint32_t);
+        const auto info = payload[0];
+        const auto target = info & kRegisterMask;
+        const auto and_operand = payload[1];
+        const auto or_operand = payload[2];
+        if (target >= kMmioRegisterCount ||
+            (((info >> 31) & 1u) != 0 &&
+             (and_operand & kRegisterMask) >= kMmioRegisterCount) ||
+            (((info >> 30) & 1u) != 0 &&
+             (or_operand & kRegisterMask) >= kMmioRegisterCount)) {
+            return false;
+        }
+
+        const auto read_register = [](std::uint32_t index) {
+            return static_cast<std::uint32_t>(GuestMmioBus::global().read(
+                kXenosMmioBase + index * sizeof(std::uint32_t), 4));
+        };
+        auto value = read_register(target);
+        value &= ((info >> 31) & 1u) != 0
+            ? read_register(and_operand & kRegisterMask) : and_operand;
+        value |= ((info >> 30) & 1u) != 0
+            ? read_register(or_operand & kRegisterMask) : or_operand;
+        return GuestMmioBus::global().write_unobserved(
+            kXenosMmioBase + target * sizeof(std::uint32_t), 4, value);
+    }
+
+    if (opcode == kPm4RegToMem) {
+        if (predicate || payload.size() != 2u ||
+            payload[0] >= kGuestMmioWindowSize / sizeof(std::uint32_t)) {
+            std::fprintf(stderr,
+                "[TooHuman][Xenos] rejected PM4 REG_TO_MEM predicate=%u register=0x%08X payload_dwords=%zu\n",
+                predicate ? 1u : 0u,
+                payload.empty() ? 0u : payload[0], payload.size());
+            return false;
+        }
+        const auto value = static_cast<std::uint32_t>(
+            GuestMmioBus::global().read(
+                kXenosMmioBase + payload[0] * sizeof(std::uint32_t), 4));
+        const std::array<std::uint32_t, 1> data{value};
+        if (!write_xenos_guest_physical_dwords(
+                *registry->memory_, payload[1], data)) {
+            std::fprintf(stderr,
+                "[TooHuman][Xenos] rejected PM4 REG_TO_MEM destination=0x%08X\n",
+                payload[1]);
+            return false;
+        }
+        return true;
+    }
 
     if (opcode == kPm4MemWrite) {
         // Predicated commands depend on bin-select state, which is not
