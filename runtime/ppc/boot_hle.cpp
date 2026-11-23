@@ -103,6 +103,8 @@ constexpr std::uint32_t kStatusInvalidHandle = 0xC0000008u;
 constexpr std::uint32_t kStatusInvalidParameter = 0xC000000Du;
 constexpr std::uint32_t kStatusAccessViolation = 0xC0000005u;
 constexpr std::uint32_t kStatusTimeout = 0x00000102u;
+constexpr std::uint32_t kStatusSemaphoreLimitExceeded = 0xC0000047u;
+constexpr std::uint32_t kStatusAbandonedWait0 = 0x00000080u;
 constexpr std::uint32_t kXamErrorBadArguments = 0x000000A0u;
 constexpr std::uint32_t kXamErrorDeviceNotConnected = 0x0000048Fu;
 
@@ -1113,6 +1115,171 @@ PPC_FUNC(NtCreateEvent) {
     put_be32(at(base, ctx.r3.u32), *handle);
     ctx.r3.u32 = kStatusSuccess;
 }
+// xboxkrnl #0xD5. Named object attributes are not modelled by this handle table.
+PPC_FUNC(NtCreateSemaphore) {
+    const auto handle_output = ctx.r3.u32;
+    if (handle_output == 0) {
+        ctx.r3.u32 = kStatusInvalidParameter;
+        return;
+    }
+    if (!guest_range_valid(base, handle_output, 4u, GuestMemoryAccess::Write)) {
+        ctx.r3.u32 = kStatusAccessViolation;
+        return;
+    }
+    if (ctx.r4.u32 != 0) {
+        ctx.r3.u32 = 0xC00000BBu; // STATUS_NOT_SUPPORTED: named objects.
+        return;
+    }
+    const auto initial_count = ctx.r5.u32;
+    const auto maximum_count = ctx.r6.u32;
+    if (maximum_count == 0 || maximum_count > 0x7FFFFFFFu ||
+        initial_count > maximum_count) {
+        put_be32(at(base, handle_output), 0u);
+        ctx.r3.u32 = kStatusInvalidParameter;
+        return;
+    }
+
+    std::shared_ptr<GuestSemaphoreObject> semaphore;
+    try {
+        semaphore = std::make_shared<GuestSemaphoreObject>(
+            initial_count, maximum_count);
+    } catch (...) {
+        ctx.r3.u32 = 0xC0000017u; // STATUS_NO_MEMORY.
+        return;
+    }
+    const auto handle = process_kernel_objects().insert(semaphore);
+    if (!handle) {
+        ctx.r3.u32 = 0xC0000017u; // STATUS_NO_MEMORY.
+        return;
+    }
+    put_be32(at(base, handle_output), *handle);
+    ctx.r3.u32 = kStatusSuccess;
+}
+
+// xboxkrnl #0xF3. Release a counted semaphore through its NT handle.
+PPC_FUNC(NtReleaseSemaphore) {
+    const auto handle = ctx.r3.u32;
+    const auto adjustment = ctx.r4.u32;
+    const auto previous_output = ctx.r5.u32;
+    if (previous_output != 0 &&
+        !guest_range_valid(base, previous_output, 4u, GuestMemoryAccess::Write)) {
+        ctx.r3.u32 = kStatusAccessViolation;
+        return;
+    }
+
+    auto object = process_kernel_objects().lookup(handle);
+    auto semaphore = std::dynamic_pointer_cast<GuestSemaphoreObject>(
+        std::move(object));
+    if (!semaphore) {
+        ctx.r3.u32 = kStatusInvalidHandle;
+        return;
+    }
+    std::uint32_t previous_count = 0;
+    if (!semaphore->release(adjustment, previous_count)) {
+        ctx.r3.u32 = kStatusSemaphoreLimitExceeded;
+        return;
+    }
+    if (previous_output != 0)
+        put_be32(at(base, previous_output), previous_count);
+    ctx.r3.u32 = kStatusSuccess;
+}
+
+// xboxkrnl #0x74. Native semaphore records are 0x14-byte big-endian KSEMAPHOREs.
+PPC_FUNC(KeInitializeSemaphore) {
+    const auto address = ctx.r3.u32;
+    const auto initial_count = ctx.r4.u32;
+    const auto maximum_count = ctx.r5.u32;
+    if ((address & 3u) != 0 ||
+        !guest_range_valid(base, address, 0x14u, GuestMemoryAccess::Write)) {
+        ctx.r3.u32 = kStatusAccessViolation;
+        return;
+    }
+    if (maximum_count == 0 || maximum_count > 0x7FFFFFFFu ||
+        initial_count > maximum_count) {
+        ctx.r3.u32 = kStatusInvalidParameter;
+        return;
+    }
+
+    std::shared_ptr<GuestSemaphoreObject> semaphore;
+    try {
+        semaphore = std::make_shared<GuestSemaphoreObject>(
+            initial_count, maximum_count, address);
+    } catch (...) {
+        ctx.r3.u32 = 0xC0000017u;
+        return;
+    }
+    if (!process_kernel_objects().insert_at(address, semaphore)) {
+        ctx.r3.u32 = kStatusInvalidParameter;
+        return;
+    }
+
+    auto* const bytes = at(base, address);
+    std::memset(bytes, 0, 0x14u);
+    bytes[0] = 5u; // SemaphoreObject.
+    const auto write_be32_raw = [](std::uint8_t* out, std::uint32_t value) {
+        out[0] = static_cast<std::uint8_t>(value >> 24);
+        out[1] = static_cast<std::uint8_t>(value >> 16);
+        out[2] = static_cast<std::uint8_t>(value >> 8);
+        out[3] = static_cast<std::uint8_t>(value);
+    };
+    write_be32_raw(bytes + 4u, initial_count); // DISPATCH_HEADER.signal_state.
+    write_be32_raw(bytes + 0x10u, maximum_count);
+    guest_memory_write_observed(bytes, 0x14u);
+    ctx.r3.u32 = kStatusSuccess;
+}
+
+// xboxkrnl #0x88. KeReleaseSemaphore returns the previous count.
+PPC_FUNC(KeReleaseSemaphore) {
+    auto object = process_kernel_objects().lookup(ctx.r3.u32);
+    auto semaphore = std::dynamic_pointer_cast<GuestSemaphoreObject>(
+        std::move(object));
+    if (!semaphore) {
+        ctx.r3.u32 = 0;
+        return;
+    }
+    std::uint32_t previous_count = 0;
+    if (!semaphore->release(ctx.r5.u32, previous_count)) {
+        ctx.r3.u32 = previous_count;
+        return;
+    }
+    if (semaphore->guest_object_address() != 0) {
+        put_be32(at(base, semaphore->guest_object_address() + 4u),
+                 semaphore->count());
+    }
+    ctx.r3.u32 = previous_count;
+}
+
+// xboxkrnl #0xB0. Wait on a guest-addressed dispatcher object.
+PPC_FUNC(KeWaitForSingleObject) {
+    const auto object_address = ctx.r3.u32;
+    auto object = process_kernel_objects().lookup(object_address);
+    if (!object) {
+        ctx.r3.u32 = kStatusAbandonedWait0;
+        return;
+    }
+    const auto timeout_address = ctx.r7.u32;
+    if (timeout_address != 0 &&
+        !guest_range_valid(base, timeout_address, 8u, GuestMemoryAccess::Read)) {
+        ctx.r3.u32 = kStatusAccessViolation;
+        return;
+    }
+    const auto timeout = decode_guest_timeout(base, timeout_address);
+    const auto result = object->wait(timeout);
+    if (result == GuestKernelObjectWaitResult::Signaled) {
+        if (auto semaphore =
+                std::dynamic_pointer_cast<GuestSemaphoreObject>(object);
+            semaphore && semaphore->guest_object_address() != 0) {
+            put_be32(at(base, semaphore->guest_object_address() + 4u),
+                     semaphore->count());
+        }
+        ctx.r3.u32 = kStatusSuccess;
+    } else if (result == GuestKernelObjectWaitResult::Timeout) {
+        ctx.r3.u32 = kStatusTimeout;
+    } else {
+        ctx.r3.u32 = kStatusAbandonedWait0;
+    }
+}
+
 PPC_FUNC(NtSetEvent) {
     const auto handle = ctx.r3.u32;
     auto object = process_kernel_objects().lookup(handle);

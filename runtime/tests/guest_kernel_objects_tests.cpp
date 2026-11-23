@@ -1,4 +1,5 @@
 #include "kernel/guest_kernel_objects.hpp"
+#include <atomic>
 #include <cassert>
 #include <chrono>
 #include <memory>
@@ -51,6 +52,63 @@ int main() {
     assert(objects.wait(*synchronization_handle, 0ms) == GuestKernelObjectWaitResult::Timeout);
     assert(!synchronization->set());
     assert(objects.wait(*synchronization_handle, 0ms) == GuestKernelObjectWaitResult::Signaled);
+    // Semaphores count available signals; each wait consumes one.
+    auto semaphore = std::make_shared<GuestSemaphoreObject>(1u, 3u);
+    const auto semaphore_handle = objects.insert(semaphore);
+    assert(semaphore_handle);
+    assert(semaphore->type() == GuestKernelObjectType::Semaphore);
+    assert(objects.wait(*semaphore_handle, 0ms) ==
+           GuestKernelObjectWaitResult::Signaled);
+    assert(semaphore->count() == 0u);
+    assert(objects.wait(*semaphore_handle, 0ms) ==
+           GuestKernelObjectWaitResult::Timeout);
+
+    std::uint32_t previous_count = 0xFFFFFFFFu;
+    assert(semaphore->release(2u, previous_count));
+    assert(previous_count == 0u && semaphore->count() == 2u);
+    assert(objects.wait(*semaphore_handle, 0ms) ==
+           GuestKernelObjectWaitResult::Signaled);
+    assert(objects.wait(*semaphore_handle, 0ms) ==
+           GuestKernelObjectWaitResult::Signaled);
+    assert(objects.wait(*semaphore_handle, 0ms) ==
+           GuestKernelObjectWaitResult::Timeout);
+    assert(semaphore->release(3u, previous_count));
+    assert(previous_count == 0u && semaphore->count() == 3u);
+    assert(!semaphore->release(1u, previous_count));
+    assert(previous_count == 3u && semaphore->count() == 3u);
+    assert(!semaphore->release(0u, previous_count));
+
+    for (unsigned i = 0; i < 3u; ++i)
+        assert(objects.wait(*semaphore_handle, 0ms) ==
+               GuestKernelObjectWaitResult::Signaled);
+    assert(semaphore->count() == 0u);
+
+    std::atomic<bool> semaphore_waiter_started{false};
+    GuestKernelObjectWaitResult semaphore_wait_result =
+        GuestKernelObjectWaitResult::InvalidHandle;
+    std::thread semaphore_waiter([&] {
+        semaphore_waiter_started.store(true, std::memory_order_release);
+        semaphore_wait_result = objects.wait(*semaphore_handle, 2s);
+    });
+    while (!semaphore_waiter_started.load(std::memory_order_acquire))
+        std::this_thread::yield();
+    assert(semaphore->release(1u, previous_count));
+    semaphore_waiter.join();
+    assert(semaphore_wait_result == GuestKernelObjectWaitResult::Signaled);
+    assert(semaphore->count() == 0u);
+    assert(objects.close(*semaphore_handle));
+
+    // Native semaphore objects can be found by their guest KSEMAPHORE address.
+    constexpr GuestKernelHandle native_semaphore_address = 0xA0123400u;
+    auto native_semaphore = std::make_shared<GuestSemaphoreObject>(
+        1u, 2u, native_semaphore_address);
+    assert(objects.insert_at(native_semaphore_address, native_semaphore));
+    assert(objects.lookup(native_semaphore_address) == native_semaphore);
+    assert(native_semaphore->guest_object_address() == native_semaphore_address);
+    assert(objects.wait(native_semaphore_address, 0ms) ==
+           GuestKernelObjectWaitResult::Signaled);
+    assert(objects.close(native_semaphore_address));
+
     auto retained = objects.lookup(*notification_handle);
     assert(retained == notification);
     assert(objects.close(*notification_handle));

@@ -9,7 +9,7 @@
 #include <unordered_map>
 namespace toohuman::runtime {
 using GuestKernelHandle = std::uint32_t;
-enum class GuestKernelObjectType { Event, Thread, File };
+enum class GuestKernelObjectType { Event, Semaphore, Thread, File };
 enum class GuestKernelObjectWaitResult { Signaled, Timeout, InvalidHandle };
 class GuestKernelObject {
 public:
@@ -36,6 +36,32 @@ private:
     std::mutex mutex_;
     std::condition_variable condition_;
 };
+class GuestSemaphoreObject final : public GuestKernelObject {
+public:
+    GuestSemaphoreObject(std::uint32_t initial_count, std::uint32_t maximum_count,
+                         std::uint32_t guest_object_address = 0);
+    [[nodiscard]] GuestKernelObjectType type() const noexcept override;
+    [[nodiscard]] GuestKernelObjectWaitResult wait(
+        std::optional<std::chrono::milliseconds> timeout) override;
+    // Returns false for zero adjustment or an attempt to exceed the limit.
+    // previous_count is populated on success and failure.
+    [[nodiscard]] bool release(std::uint32_t adjustment,
+                               std::uint32_t& previous_count) noexcept;
+    [[nodiscard]] std::uint32_t count() const noexcept;
+    [[nodiscard]] std::uint32_t maximum_count() const noexcept {
+        return maximum_count_;
+    }
+    [[nodiscard]] std::uint32_t guest_object_address() const noexcept override {
+        return guest_object_address_;
+    }
+private:
+    std::uint32_t count_{};
+    const std::uint32_t maximum_count_{};
+    const std::uint32_t guest_object_address_{};
+    mutable std::mutex mutex_;
+    std::condition_variable condition_;
+};
+
 // Closing a handle removes future lookup access; existing references remain alive.
 class GuestKernelObjectTable final {
 public:

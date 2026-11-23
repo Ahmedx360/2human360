@@ -45,6 +45,51 @@ void GuestEventObject::clear() {
     signaled_ = false;
 }
 
+GuestSemaphoreObject::GuestSemaphoreObject(
+    std::uint32_t initial_count, std::uint32_t maximum_count,
+    std::uint32_t guest_object_address)
+    : count_(initial_count), maximum_count_(maximum_count),
+      guest_object_address_(guest_object_address) {}
+
+GuestKernelObjectType GuestSemaphoreObject::type() const noexcept {
+    return GuestKernelObjectType::Semaphore;
+}
+
+GuestKernelObjectWaitResult GuestSemaphoreObject::wait(
+    std::optional<std::chrono::milliseconds> timeout) {
+    std::unique_lock lock(mutex_);
+    const auto ready = [&] { return count_ != 0; };
+    if (!ready()) {
+        if (timeout) {
+            if (!condition_.wait_for(lock, *timeout, ready))
+                return GuestKernelObjectWaitResult::Timeout;
+        } else {
+            condition_.wait(lock, ready);
+        }
+    }
+    --count_;
+    return GuestKernelObjectWaitResult::Signaled;
+}
+
+bool GuestSemaphoreObject::release(
+    std::uint32_t adjustment, std::uint32_t& previous_count) noexcept {
+    {
+        std::lock_guard lock(mutex_);
+        previous_count = count_;
+        if (adjustment == 0 || adjustment > maximum_count_ - count_)
+            return false;
+        count_ += adjustment;
+    }
+    if (adjustment == 1u) condition_.notify_one();
+    else condition_.notify_all();
+    return true;
+}
+
+std::uint32_t GuestSemaphoreObject::count() const noexcept {
+    std::lock_guard lock(mutex_);
+    return count_;
+}
+
 GuestKernelObjectTable::~GuestKernelObjectTable() {
     clear();
 }

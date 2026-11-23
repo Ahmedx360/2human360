@@ -84,13 +84,13 @@ int main() {
     assert(memory.base()[0x82012083u] == 0xEFu);
 
     toohuman::runtime::PpcImportRegistry imports;
-    assert(imports.register_handler("xboxkrnl.exe", 0x74u,
+    assert(imports.register_handler("xboxkrnl.exe", 0x0777u,
                                     &test_import_handler, &error));
     std::size_t startup_hle_count = 0;
     assert(toohuman::runtime::register_boot_imports(imports, &error, &startup_hle_count));
     assert(startup_hle_count == 76u);
     const std::vector<toohuman::runtime::XexImport> metadata{
-        {"xboxkrnl.exe", 0x74u, 0, 1, 0x82001100u},
+        {"xboxkrnl.exe", 0x0777u, 0, 1, 0x82001100u},
         {"xboxkrnl.exe", 0x011Bu, 0, 1, 0x82001104u},
         {"xboxkrnl.exe", 0x0126u, 0, 1, 0x82001108u},
         {"xboxkrnl.exe", 0x0066u, 0, 1, 0x8200110Cu},

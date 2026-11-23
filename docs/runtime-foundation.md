@@ -256,6 +256,15 @@ provider yet. `XamInputGetState` preserves the documented null-state connection
 query. No controller state is synthesized, and polling, keystrokes, and
 vibration remain unimplemented until a host input backend is added.
 
+Semaphore support now includes `NtCreateSemaphore`/`NtReleaseSemaphore` handles and
+native `KeInitializeSemaphore`/`KeReleaseSemaphore` objects. The counting
+object consumes one count per successful wait, rejects releases that exceed its
+configured limit, and wakes blocked waiters on release. Native guest
+`KSEMAPHORE` records use the 0x14-byte big-endian layout (dispatcher header
+plus limit), and `KeWaitForSingleObject` can wait on the address registered by
+`KeInitializeSemaphore`. Named semaphore attributes and multiple-object waits
+remain unsupported.
+
 The synchronization subset is deliberately bounded. Critical sections use recursive host mutexes and mirror the
 28-byte guest structure's lock count, recursion count, and owner. Events support notification/manual-reset and
 synchronization/auto-reset behavior, initial state, set/clear, finite or infinite waits, and close. The Xbox ABI is
