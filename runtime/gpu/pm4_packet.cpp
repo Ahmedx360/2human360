@@ -153,10 +153,22 @@ Pm4DispatchResult dispatch_pm4_stream(
                 result.error = Pm4DispatchError::MissingType3Handler;
                 return result;
             }
-            accepted = callbacks.type3(callbacks.context, packet.opcode,
-                                       packet.predicate, payload);
+            switch (callbacks.type3(callbacks.context, packet.opcode,
+                                     packet.predicate, payload)) {
+            case Pm4CallbackResult::Accepted:
+                break;
+            case Pm4CallbackResult::Deferred:
+                result.error = Pm4DispatchError::CallbackDeferred;
+                break;
+            case Pm4CallbackResult::Rejected:
+                accepted = false;
+                break;
+            }
             break;
         }
+
+        if (result.error == Pm4DispatchError::CallbackDeferred)
+            break;
 
         if (!accepted) {
             result.error = Pm4DispatchError::CallbackRejected;
@@ -235,6 +247,9 @@ Pm4RingDispatchResult dispatch_pm4_ring(
                 break;
             case Pm4DispatchError::CallbackRejected:
                 result.error = Pm4RingDispatchError::CallbackRejected;
+                break;
+            case Pm4DispatchError::CallbackDeferred:
+                result.error = Pm4RingDispatchError::CallbackDeferred;
                 break;
             case Pm4DispatchError::PacketDecodeFailed:
                 result.error = Pm4RingDispatchError::PacketDecodeFailed;
