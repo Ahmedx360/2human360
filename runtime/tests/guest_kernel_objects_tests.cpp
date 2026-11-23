@@ -85,6 +85,40 @@ int main() {
     assert(mutant->release());
     assert(objects.close(*mutant_handle));
 
+    // One-shot notification timers retain the signal; synchronization timers
+    // consume it. Periodic timers re-arm until cancelled.
+    auto notification_timer = std::make_shared<GuestTimerObject>(true);
+    const auto notification_timer_handle = objects.insert(notification_timer);
+    assert(notification_timer_handle);
+    notification_timer->set_timer(10ms, 0u);
+    assert(objects.wait(*notification_timer_handle, 0ms) ==
+           GuestKernelObjectWaitResult::Timeout);
+    assert(objects.wait(*notification_timer_handle, 2s) ==
+           GuestKernelObjectWaitResult::Signaled);
+    assert(objects.wait(*notification_timer_handle, 0ms) ==
+           GuestKernelObjectWaitResult::Signaled);
+    assert(!notification_timer->is_armed());
+    assert(!notification_timer->cancel());
+    assert(objects.close(*notification_timer_handle));
+
+    auto synchronization_timer = std::make_shared<GuestTimerObject>(false);
+    const auto synchronization_timer_handle = objects.insert(synchronization_timer);
+    assert(synchronization_timer_handle);
+    synchronization_timer->set_timer(10ms, 0u);
+    assert(objects.wait(*synchronization_timer_handle, 2s) ==
+           GuestKernelObjectWaitResult::Signaled);
+    assert(objects.wait(*synchronization_timer_handle, 0ms) ==
+           GuestKernelObjectWaitResult::Timeout);
+    synchronization_timer->set_timer(5ms, 10u);
+    assert(objects.wait(*synchronization_timer_handle, 2s) ==
+           GuestKernelObjectWaitResult::Signaled);
+    assert(objects.wait(*synchronization_timer_handle, 2s) ==
+           GuestKernelObjectWaitResult::Signaled);
+    assert(synchronization_timer->cancel());
+    assert(objects.wait(*synchronization_timer_handle, 30ms) ==
+           GuestKernelObjectWaitResult::Timeout);
+    assert(objects.close(*synchronization_timer_handle));
+
     // Semaphores count available signals; each wait consumes one.
     auto semaphore = std::make_shared<GuestSemaphoreObject>(1u, 3u);
     const auto semaphore_handle = objects.insert(semaphore);

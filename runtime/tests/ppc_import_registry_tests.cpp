@@ -88,7 +88,7 @@ int main() {
                                     &test_import_handler, &error));
     std::size_t startup_hle_count = 0;
     assert(toohuman::runtime::register_boot_imports(imports, &error, &startup_hle_count));
-    assert(startup_hle_count == 88u);
+    assert(startup_hle_count == 91u);
     const std::vector<toohuman::runtime::XexImport> metadata{
         {"xboxkrnl.exe", 0x0777u, 0, 1, 0x82001100u},
         {"xboxkrnl.exe", 0x011Bu, 0, 1, 0x82001104u},
@@ -144,6 +144,9 @@ int main() {
         {"xboxkrnl.exe", 0x0074u, 0, 1, 0x820011D4u},
         {"xboxkrnl.exe", 0x00D4u, 0, 1, 0x820011FCu},
         {"xboxkrnl.exe", 0x00F2u, 0, 1, 0x82001200u},
+        {"xboxkrnl.exe", 0x00CDu, 0, 1, 0x82001204u},
+        {"xboxkrnl.exe", 0x00D7u, 0, 1, 0x82001208u},
+        {"xboxkrnl.exe", 0x00FAu, 0, 1, 0x8200120Cu},
         {"xboxkrnl.exe", 0x00D5u, 0, 1, 0x820011D8u},
         {"xboxkrnl.exe", 0x00F3u, 0, 1, 0x820011DCu},
         {"xboxkrnl.exe", 0x0088u, 0, 1, 0x820011E0u},
@@ -158,7 +161,7 @@ int main() {
     };
     std::size_t registered = 0;
     assert(imports.install(memory, metadata, &registered, &error));
-    assert(registered == 65u);
+    assert(registered == 68u);
     assert(memory.get_function<PPCFunc*>(0x82001100u) != &test_default_handler);
 
     // The real kernel imports configure the per-title primary Xenos ring.
@@ -964,6 +967,51 @@ int main() {
     assert(read_guest_be32(native_synchronization_event + 4u) == 0u);
     assert(toohuman::runtime::process_kernel_objects().close(
         native_synchronization_event));
+
+    // Waitable timer imports share the NT waitable-object handle table.
+    constexpr std::uint32_t timer_handle_out = 0x820130A0u;
+    constexpr std::uint32_t due_time_pointer = 0x820130A8u;
+    constexpr std::uint32_t timer_current_state = 0x820130B0u;
+    PPCContext create_timer{};
+    create_timer.r3.u32 = timer_handle_out;
+    create_timer.r5.u32 = 1u; // Synchronization timer.
+    call_test_import(0x82001208u, create_timer);
+    assert(create_timer.r3.u32 == 0u);
+    const auto timer_handle = read_guest_be32(timer_handle_out);
+
+    put_guest_be32(due_time_pointer, 0u);
+    put_guest_be32(due_time_pointer + 4u, 0u);
+    PPCContext set_timer{};
+    set_timer.r3.u32 = timer_handle;
+    set_timer.r4.u32 = due_time_pointer;
+    set_timer.r6.u32 = 1u;
+    set_timer.r8.u32 = 1u;
+    set_timer.r9.u32 = 20u;
+    call_test_import(0x8200120Cu, set_timer);
+    assert(set_timer.r3.u32 == 0x40000025u);
+
+    PPCContext timer_wait{};
+    timer_wait.r3.u32 = timer_handle;
+    timer_wait.r6.u32 = 0x82013004u;
+    call_test_import(0x82001140u, timer_wait);
+    assert(timer_wait.r3.u32 == 0u);
+
+    PPCContext cancel_timer{};
+    cancel_timer.r3.u32 = timer_handle;
+    cancel_timer.r4.u32 = timer_current_state;
+    call_test_import(0x82001204u, cancel_timer);
+    assert(cancel_timer.r3.u32 == 0u);
+    assert(read_guest_be32(timer_current_state) == 0u);
+
+    timer_wait = {};
+    timer_wait.r3.u32 = timer_handle;
+    timer_wait.r6.u32 = 0x82013004u;
+    call_test_import(0x82001140u, timer_wait);
+    assert(timer_wait.r3.u32 == 0x102u);
+    PPCContext close_timer{};
+    close_timer.r3.u32 = timer_handle;
+    call_test_import(0x82001144u, close_timer);
+    assert(close_timer.r3.u32 == 0u);
 
     PPCContext boot_context{};
     call_test_import(0x8200110Cu, boot_context); // KeGetCurrentProcessType

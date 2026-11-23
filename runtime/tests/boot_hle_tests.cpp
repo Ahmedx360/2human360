@@ -305,6 +305,80 @@ void test_xam_controller_disconnected_profile() {
     assert(context.r3.u32 == kBadArguments);
 }
 
+void test_waitable_timer_hle() {
+    constexpr std::uint32_t handle_output = 0x7700u;
+    constexpr std::uint32_t due_pointer = 0x7720u;
+    constexpr std::uint32_t current_state = 0x7730u;
+    constexpr std::uint32_t timeout = 0x7740u;
+    auto put_be64_test = [](std::uint32_t address, std::uint64_t value) {
+        for (unsigned i = 0; i < 8u; ++i)
+            g_mem[address + i] = static_cast<std::uint8_t>(
+                value >> ((7u - i) * 8u));
+    };
+    std::memset(base() + timeout, 0, 8u);
+
+    PPCContext context{};
+    context.r3.u32 = handle_output;
+    context.r5.u32 = 1u; // Synchronization timer.
+    boot_hle::NtCreateTimer(context, base());
+    assert(context.r3.u32 == 0u);
+    const auto handle = be32(handle_output);
+
+    // Immediate first expiry, then one periodic expiry. Resume is ignored
+    // informationally while the timer still becomes armed.
+    put_be64_test(due_pointer, 0u);
+    context = {};
+    context.r3.u32 = handle;
+    context.r4.u32 = due_pointer;
+    context.r6.u32 = 1u;
+    context.r8.u32 = 1u;
+    context.r9.u32 = 15u;
+    boot_hle::NtSetTimerEx(context, base());
+    assert(context.r3.u32 == 0x40000025u);
+
+    context = {};
+    context.r3.u32 = handle;
+    context.r6.u32 = timeout;
+    boot_hle::NtWaitForSingleObjectEx(context, base());
+    assert(context.r3.u32 == 0u);
+
+    put_be64_test(timeout, static_cast<std::uint64_t>(-10000000ll)); // one second
+    context = {};
+    context.r3.u32 = handle;
+    context.r6.u32 = timeout;
+    boot_hle::NtWaitForSingleObjectEx(context, base());
+    assert(context.r3.u32 == 0u);
+
+    context = {};
+    context.r3.u32 = handle;
+    context.r4.u32 = current_state;
+    boot_hle::NtCancelTimer(context, base());
+    assert(context.r3.u32 == 0u);
+    assert(be32(current_state) == 0u);
+
+    std::memset(base() + timeout, 0, 8u);
+    context = {};
+    context.r3.u32 = handle;
+    context.r6.u32 = timeout;
+    boot_hle::NtWaitForSingleObjectEx(context, base());
+    assert(context.r3.u32 == 0x102u);
+
+    // Kernel APC routines are not silently accepted without APC delivery.
+    put_be64_test(due_pointer, 0u);
+    context = {};
+    context.r3.u32 = handle;
+    context.r4.u32 = due_pointer;
+    context.r5.u32 = 0x82001000u;
+    context.r6.u32 = 1u;
+    context.r9.u32 = 0u;
+    boot_hle::NtSetTimerEx(context, base());
+    assert(context.r3.u32 == 0xC00000BBu);
+    context = {};
+    context.r3.u32 = handle;
+    boot_hle::NtClose(context, base());
+    assert(context.r3.u32 == 0u);
+}
+
 void test_native_event_dispatcher_object() {
     constexpr std::uint32_t notification_event = 0x7600u;
     constexpr std::uint32_t synchronization_event = 0x7620u;
@@ -897,6 +971,7 @@ int main() {
     test_video_display_queries();
     test_xam_controller_disconnected_profile();
     test_native_event_dispatcher_object();
+    test_waitable_timer_hle();
     test_critical_sections();
     test_tls();
     test_events();

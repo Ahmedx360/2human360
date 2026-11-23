@@ -10,7 +10,7 @@
 #include <unordered_map>
 namespace toohuman::runtime {
 using GuestKernelHandle = std::uint32_t;
-enum class GuestKernelObjectType { Event, Semaphore, Mutant, Thread, File };
+enum class GuestKernelObjectType { Event, Semaphore, Mutant, Timer, Thread, File };
 enum class GuestKernelObjectWaitResult { Signaled, Timeout, InvalidHandle };
 class GuestKernelObject {
 public:
@@ -89,6 +89,28 @@ private:
     std::thread::id owner_{};
     std::uint32_t recursion_count_{};
     std::mutex mutex_;
+    std::condition_variable condition_;
+};
+
+class GuestTimerObject final : public GuestKernelObject {
+public:
+    explicit GuestTimerObject(bool manual_reset);
+    [[nodiscard]] GuestKernelObjectType type() const noexcept override;
+    [[nodiscard]] GuestKernelObjectWaitResult wait(
+        std::optional<std::chrono::milliseconds> timeout) override;
+    void set_timer(std::chrono::milliseconds due_delay, std::uint32_t period_ms);
+    [[nodiscard]] bool cancel() noexcept;
+    [[nodiscard]] bool is_armed() noexcept;
+private:
+    [[nodiscard]] static std::chrono::steady_clock::time_point add_saturated(
+        std::chrono::steady_clock::time_point now,
+        std::chrono::milliseconds delay) noexcept;
+    const bool manual_reset_;
+    bool signaled_{};
+    bool armed_{};
+    std::uint32_t period_ms_{};
+    std::chrono::steady_clock::time_point due_time_{};
+    mutable std::mutex mutex_;
     std::condition_variable condition_;
 };
 

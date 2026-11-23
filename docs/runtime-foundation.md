@@ -265,6 +265,14 @@ pulse instant (one for synchronization events, all for notification events)
 and leave the event unsignaled. Priority increment and wait-switch hints are
 ignored; multiple-object waits remain unimplemented.
 
+Waitable timer handles now support `NtCreateTimer`, `NtSetTimerEx` and
+`NtCancelTimer`. Notification timers remain signaled after expiry, while
+synchronization timers consume the signal on one successful wait. One-shot and
+periodic timers use steady-clock deadlines serviced by waiting threads; there
+is no detached timer worker. Resume requests return the informational
+`STATUS_TIMER_RESUME_IGNORED`. APC callback routines and named timer objects
+are unsupported.
+
 The NT mutant handle subset registers `NtCreateMutant`/`NtReleaseMutant`.
 Mutants are recursive, host-thread-owned mutex objects; initial ownership,
 same-thread recursive waits, owner-only release, invalid-handle and

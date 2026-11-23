@@ -1160,6 +1160,103 @@ PPC_FUNC(NtCreateEvent) {
     put_be32(at(base, ctx.r3.u32), *handle);
     ctx.r3.u32 = kStatusSuccess;
 }
+// xboxkrnl #0xD7. Timer types 0/1 are notification/synchronization timers.
+PPC_FUNC(NtCreateTimer) {
+    const auto handle_output = ctx.r3.u32;
+    if (handle_output == 0) {
+        ctx.r3.u32 = kStatusInvalidParameter;
+        return;
+    }
+    if (!guest_range_valid(base, handle_output, 4u, GuestMemoryAccess::Write)) {
+        ctx.r3.u32 = kStatusAccessViolation;
+        return;
+    }
+    if (ctx.r4.u32 != 0) {
+        ctx.r3.u32 = 0xC00000BBu; // STATUS_NOT_SUPPORTED: named objects.
+        return;
+    }
+    if (ctx.r5.u32 > 1u) {
+        put_be32(at(base, handle_output), 0u);
+        ctx.r3.u32 = kStatusInvalidParameter;
+        return;
+    }
+
+    std::shared_ptr<GuestTimerObject> timer;
+    try {
+        timer = std::make_shared<GuestTimerObject>(ctx.r5.u32 == 0u);
+    } catch (...) {
+        ctx.r3.u32 = 0xC0000017u; // STATUS_NO_MEMORY.
+        return;
+    }
+    const auto handle = process_kernel_objects().insert(timer);
+    if (!handle) {
+        ctx.r3.u32 = 0xC0000017u;
+        return;
+    }
+    put_be32(at(base, handle_output), *handle);
+    ctx.r3.u32 = kStatusSuccess;
+}
+
+// xboxkrnl #0xFA. APC callbacks are rejected until guest APC delivery exists.
+PPC_FUNC(NtSetTimerEx) {
+    const auto handle = ctx.r3.u32;
+    const auto due_time_pointer = ctx.r4.u32;
+    const auto routine = ctx.r5.u32;
+    const auto unknown_one = ctx.r6.u32;
+    const auto resume = ctx.r8.u32;
+    const auto period_ms = ctx.r9.u32;
+    const auto unknown_zero = ctx.r10.u32;
+
+    if (due_time_pointer == 0 ||
+        !guest_range_valid(base, due_time_pointer, 8u, GuestMemoryAccess::Read) ||
+        unknown_one != 1u || resume > 1u || period_ms > 0x7FFFFFFFu ||
+        unknown_zero != 0u) {
+        ctx.r3.u32 = kStatusInvalidParameter;
+        return;
+    }
+    if (routine != 0) {
+        ctx.r3.u32 = 0xC00000BBu; // STATUS_NOT_SUPPORTED: APC callback delivery.
+        return;
+    }
+
+    auto object = process_kernel_objects().lookup(handle);
+    auto timer = std::dynamic_pointer_cast<GuestTimerObject>(std::move(object));
+    if (!timer) {
+        ctx.r3.u32 = kStatusInvalidHandle;
+        return;
+    }
+
+    const auto due_delay = decode_guest_timeout(base, due_time_pointer);
+    if (!due_delay) {
+        ctx.r3.u32 = kStatusInvalidParameter;
+        return;
+    }
+    timer->set_timer(*due_delay, period_ms);
+    ctx.r3.u32 = resume != 0u ? 0x40000025u : kStatusSuccess; // TIMER_RESUME_IGNORED.
+}
+
+// xboxkrnl #0xCD. The ABI's optional current-state output is currently zero.
+PPC_FUNC(NtCancelTimer) {
+    const auto handle = ctx.r3.u32;
+    const auto current_state_output = ctx.r4.u32;
+    if (current_state_output != 0 &&
+        !guest_range_valid(base, current_state_output, 4u, GuestMemoryAccess::Write)) {
+        ctx.r3.u32 = kStatusAccessViolation;
+        return;
+    }
+
+    auto object = process_kernel_objects().lookup(handle);
+    auto timer = std::dynamic_pointer_cast<GuestTimerObject>(std::move(object));
+    if (!timer) {
+        ctx.r3.u32 = kStatusInvalidHandle;
+        return;
+    }
+    const bool cancelled = timer->cancel();
+    if (current_state_output != 0)
+        put_be32(at(base, current_state_output), 0u);
+    ctx.r3.u32 = cancelled ? kStatusSuccess : kStatusUnsuccessful;
+}
+
 // xboxkrnl #0xD4. Only unnamed NT mutant objects are modelled.
 PPC_FUNC(NtCreateMutant) {
     const auto handle_output = ctx.r3.u32;

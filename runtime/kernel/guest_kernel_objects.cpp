@@ -155,6 +155,94 @@ std::uint32_t GuestMutantObject::recursion_count() noexcept {
     return recursion_count_;
 }
 
+GuestTimerObject::GuestTimerObject(bool manual_reset)
+    : manual_reset_(manual_reset) {}
+
+GuestKernelObjectType GuestTimerObject::type() const noexcept {
+    return GuestKernelObjectType::Timer;
+}
+
+std::chrono::steady_clock::time_point GuestTimerObject::add_saturated(
+    std::chrono::steady_clock::time_point now,
+    std::chrono::milliseconds delay) noexcept {
+    if (delay.count() < 0)
+        delay = std::chrono::milliseconds::zero();
+    const auto max_delay = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::time_point::max() - now);
+    if (delay >= max_delay)
+        return std::chrono::steady_clock::time_point::max();
+    return now + std::chrono::duration_cast<
+        std::chrono::steady_clock::duration>(delay);
+}
+
+void GuestTimerObject::set_timer(std::chrono::milliseconds due_delay,
+                                 std::uint32_t period_ms) {
+    {
+        std::lock_guard lock(mutex_);
+        signaled_ = false;
+        armed_ = true;
+        period_ms_ = period_ms;
+        due_time_ = add_saturated(std::chrono::steady_clock::now(), due_delay);
+    }
+    condition_.notify_all();
+}
+
+bool GuestTimerObject::cancel() noexcept {
+    bool was_armed = false;
+    {
+        std::lock_guard lock(mutex_);
+        was_armed = armed_;
+        armed_ = false;
+        period_ms_ = 0;
+    }
+    condition_.notify_all();
+    return was_armed;
+}
+
+bool GuestTimerObject::is_armed() noexcept {
+    std::lock_guard lock(mutex_);
+    return armed_;
+}
+
+GuestKernelObjectWaitResult GuestTimerObject::wait(
+    std::optional<std::chrono::milliseconds> timeout) {
+    std::unique_lock lock(mutex_);
+    const auto start = std::chrono::steady_clock::now();
+    const auto timeout_deadline = timeout
+        ? add_saturated(start, *timeout)
+        : std::chrono::steady_clock::time_point::max();
+
+    for (;;) {
+        const auto now = std::chrono::steady_clock::now();
+        if (armed_ && now >= due_time_) {
+            signaled_ = true;
+            if (period_ms_ == 0u) {
+                armed_ = false;
+            } else {
+                due_time_ = add_saturated(
+                    now, std::chrono::milliseconds(period_ms_));
+            }
+            condition_.notify_all();
+        }
+
+        if (signaled_) {
+            if (!manual_reset_)
+                signaled_ = false;
+            return GuestKernelObjectWaitResult::Signaled;
+        }
+        if (timeout && now >= timeout_deadline)
+            return GuestKernelObjectWaitResult::Timeout;
+
+        auto wake_deadline = timeout_deadline;
+        if (armed_ && due_time_ < wake_deadline)
+            wake_deadline = due_time_;
+        if (wake_deadline == std::chrono::steady_clock::time_point::max())
+            condition_.wait(lock);
+        else
+            condition_.wait_until(lock, wake_deadline);
+    }
+}
+
 GuestSemaphoreObject::GuestSemaphoreObject(
     std::uint32_t initial_count, std::uint32_t maximum_count,
     std::uint32_t guest_object_address)
