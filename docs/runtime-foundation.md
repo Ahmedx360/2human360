@@ -263,7 +263,7 @@ registers the 0x10-byte guest dispatcher record by address, `KeSetEvent` and
 events signaled. `KePulseEvent` and `NtPulseEvent` release only threads already queued at the
 pulse instant (one for synchronization events, all for notification events)
 and leave the event unsignaled. Priority increment and wait-switch hints are
-ignored. `NtWaitForMultipleObjectsEx` now implements handle-based WaitAll and WaitAny; the kernel-mode pointer-based `KeWaitForMultipleObjects` entry point remains unimplemented.
+ignored. Both `NtWaitForMultipleObjectsEx` (handle array) and `KeWaitForMultipleObjects` (native dispatcher-object pointer array) now implement WaitAll and WaitAny. The `Ke` form currently accepts validated native event and semaphore records; its WaitBlockArray and scheduling hints are ignored.
 
 Waitable timer handles now support `NtCreateTimer`, `NtSetTimerEx` and
 `NtCancelTimer`. Notification timers remain signaled after expiry, while
@@ -288,15 +288,14 @@ plus limit), and `KeWaitForSingleObject` can wait on the address registered by
 `KeInitializeSemaphore`. When an XDK-inlined initializer bypasses the import,
 first-touch wait/set/reset/release lazily recognizes only validated native
 header types 0/1 (event) and 5 (semaphore). Other dispatcher object types are
-still rejected. Named semaphore attributes and the kernel-mode pointer-based KeWaitForMultipleObjects entry point remain
-unsupported.
+still rejected. Named semaphore attributes remain unsupported. Native multi-waits currently synthesize only event and semaphore dispatcher records; native mutant/timer layouts are not yet supported.
 
 The synchronization subset is deliberately bounded. Critical sections use recursive host mutexes and mirror the
 28-byte guest structure's lock count, recursion count, and owner. Events support notification/manual-reset and
 synchronization/auto-reset behavior, initial state, set/clear, finite or infinite waits, and close. The Xbox ABI is
 preserved: `NtCreateEvent` receives its output handle in r3, object attributes in r4, event type in r5 and initial
 state in r6; `NtWaitForSingleObjectEx` receives handle, wait mode, alertable flag and timeout pointer in r3-r6.
-`NtWaitForSingleObjectEx`, `NtWaitForMultipleObjectsEx`, and `NtClose` use the shared object table. The multiple-wait handler accepts up to 64 handles and implements both WaitAll and WaitAny with finite or infinite timeouts. Events, semaphores, mutants, and timers are checked and acquired while their object locks are held in a stable order, so WaitAll does not consume a partial set; completed thread objects are probed as level-triggered objects. The implementation uses a 1 ms host polling interval rather than a native wait-set primitive. Event set/clear remains event-only. Named-object lookup, APC delivery/alertable completion, pulse-event participation in multi-waits, the kernel-mode pointer-based `KeWaitForMultipleObjects` entry point, and other dispatcher-object types remain incomplete. Kernel TLS values are per host thread, matching the intended one-host-thread-per-guest-thread
+`NtWaitForSingleObjectEx`, `NtWaitForMultipleObjectsEx`, and `NtClose` use the shared object table. The multiple-wait handler accepts up to 64 handles and implements both WaitAll and WaitAny with finite or infinite timeouts. Events, semaphores, mutants, and timers are checked and acquired while their object locks are held in a stable order, so WaitAll does not consume a partial set; completed thread objects are probed as level-triggered objects. The implementation uses a 1 ms host polling interval rather than a native wait-set primitive. Event set/clear remains event-only. Named-object lookup, APC delivery/alertable completion, pulse-event participation in multi-waits, APC delivery/alertable completion, and other dispatcher-object types remain incomplete. Kernel TLS values are per host thread, matching the intended one-host-thread-per-guest-thread
 execution model.
 
 Thread stacks and both guard regions use the host's native page size, with a 16 KiB minimum guest stack. This avoids assuming every host has 4 KiB pages. Partial context-allocation failures roll back already allocated runtime blocks and the stack reservation.
