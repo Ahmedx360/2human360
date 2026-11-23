@@ -133,6 +133,23 @@ int main() {
         assert(preflight.registers.empty());
         assert(stopped.packets == 0u);
         assert(stopped.dwords_consumed == 0u);
+
+        // Type-1's two destination registers are likewise checked before
+        // either write callback runs.
+        constexpr std::array<std::uint32_t, 3> rejected_type1{
+            0x40000000u | (0x31u << 11) | 0x30u, 0x11111111u, 0x22222222u
+        };
+        Capture type1_preflight;
+        type1_preflight.reject_validation_index = 0x31u;
+        const Pm4DispatchCallbacks type1_callbacks{
+            &type1_preflight, write_register, type3, validate_register
+        };
+        const auto type1_stopped = dispatch_pm4_stream(
+            rejected_type1, type1_callbacks, 1u);
+        assert(!type1_stopped);
+        assert(type1_stopped.error == Pm4DispatchError::CallbackRejected);
+        assert(type1_preflight.validation_calls == 2u);
+        assert(type1_preflight.registers.empty());
     }
 
     {
