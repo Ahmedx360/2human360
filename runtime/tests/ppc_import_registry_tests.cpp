@@ -244,6 +244,20 @@ int main() {
     ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 19u);
     assert(imports.xenos_command_processor().read_index() == 19u);
 
+    // A predicated indirect buffer with a nonzero bin-select/mask intersection
+    // must execute; only a failed predicate is consumed without dispatch.
+    put_guest_be32(0xA0030008u, 0x32u); // type-0 register write inside the IB.
+    put_guest_be32(0xA003000Cu, 0xFEEDBEEFu);
+    put_guest_be32(0xA00100C8u,
+        0xC0000000u | (1u << 16) | (0x3Fu << 8) | 1u);
+    put_guest_be32(0xA00100CCu, 0x00030008u);
+    put_guest_be32(0xA00100D0u, 2u);
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 53u);
+    assert(imports.xenos_command_processor().read_index() == 53u);
+    assert(GuestMmioBus::global().read(kXenosMmioBase + 0x32u * 4u, 4) ==
+           0xFEEDBEEFu);
+    assert(read_guest_be32(0xA0020000u) == 53u);
+
     // PM4 MEM_WRITE stores guest big-endian dwords at a validated physical
     // target; invalid ranges reject before any data is written.
     put_guest_be32(0xA001004Cu,
