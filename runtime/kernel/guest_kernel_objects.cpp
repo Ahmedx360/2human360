@@ -486,6 +486,23 @@ GuestKernelObjectWaitResult GuestKernelObjectTable::wait_multiple(
             objects.push_back(it->second);
         }
     }
+    return wait_multiple_objects(objects, wait_all, timeout, signaled_index);
+}
+
+GuestKernelObjectWaitResult GuestKernelObjectTable::wait_multiple_objects(
+    std::span<const std::shared_ptr<GuestKernelObject>> objects, bool wait_all,
+    std::optional<std::chrono::milliseconds> timeout,
+    std::size_t* signaled_index) const {
+    if (objects.empty() || objects.size() > 64u)
+        return GuestKernelObjectWaitResult::InvalidHandle;
+    if (wait_all) {
+        for (std::size_t i = 0; i < objects.size(); ++i) {
+            for (std::size_t j = i + 1; j < objects.size(); ++j) {
+                if (objects[i].get() == objects[j].get())
+                    return GuestKernelObjectWaitResult::InvalidHandle;
+            }
+        }
+    }
 
     // Lock every native dispatcher object in a stable order. This lets WaitAll
     // inspect and consume events, semaphores, mutants and timers as one
