@@ -15,6 +15,7 @@ struct Capture {
     std::vector<std::uint32_t> type3_payload;
     bool reject_register{};
     bool reject_type3{};
+    bool defer_type3{};
     std::uint32_t reject_validation_index{0xFFFFFFFFu};
     std::size_t validation_calls{};
 };
@@ -37,6 +38,7 @@ Pm4CallbackResult type3(void* opaque, std::uint32_t opcode, bool predicate,
            std::span<const std::uint32_t> payload) {
     auto& capture = *static_cast<Capture*>(opaque);
     if (capture.reject_type3) return Pm4CallbackResult::Rejected;
+    if (capture.defer_type3) return Pm4CallbackResult::Deferred;
     capture.opcode = opcode;
     capture.predicate = predicate;
     capture.type3_payload.assign(payload.begin(), payload.end());
@@ -118,6 +120,21 @@ int main() {
     {
         // A packet's full register run must pass preflight before the first
         // write is applied. The second index is outside the Xenos aperture.
+    {
+        constexpr std::array<std::uint32_t, 6> wait_reg_mem{
+            0xC0000000u | (4u << 16) | (0x3Cu << 8),
+            3u, 0x12345678u, 0xFFFFFFFFu, 0u, 0u
+        };
+        Capture deferred;
+        deferred.defer_type3 = true;
+        const Pm4DispatchCallbacks cb{&deferred, write_register, type3};
+        const auto pending = dispatch_pm4_stream(wait_reg_mem, cb, 1u);
+        assert(!pending);
+        assert(pending.error == Pm4DispatchError::CallbackDeferred);
+        assert(pending.packets == 0u);
+        assert(pending.dwords_consumed == 0u);
+    }
+
         constexpr std::array<std::uint32_t, 3> out_of_range_type0{
             (1u << 16) | 0x3FFFu, 0x11111111u, 0x22222222u
         };
