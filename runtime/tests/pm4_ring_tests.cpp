@@ -19,12 +19,12 @@ bool write_register(void* opaque, std::uint32_t index, std::uint32_t value) {
     return true;
 }
 
-bool type3(void* opaque, std::uint32_t opcode, bool,
+Pm4CallbackResult type3(void* opaque, std::uint32_t opcode, bool,
            std::span<const std::uint32_t> payload) {
     auto& capture = *static_cast<Capture*>(opaque);
     capture.opcode = opcode;
     capture.payload.assign(payload.begin(), payload.end());
-    return true;
+    return Pm4CallbackResult::Accepted;
 }
 
 } // namespace
