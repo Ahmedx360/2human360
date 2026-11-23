@@ -147,13 +147,13 @@ int main() {
     // The real kernel imports configure the per-title primary Xenos ring.
     PPCContext ring_init{};
     ring_init.r3.u32 = 0x00010000u;
-    ring_init.r4.u32 = 5u; // 1 << (5 + 3) = 256-byte primary ring.
+    ring_init.r4.u32 = 6u; // 1 << (6 + 3) = 512-byte primary ring.
     const auto ring_init_fn = memory.get_function<PPCFunc*>(0x820011C0u);
     assert(ring_init_fn != nullptr);
     ring_init_fn(ring_init, memory.base());
     assert(imports.xenos_command_processor().ring_initialized());
     assert(imports.xenos_command_processor().ring_physical_base() == 0x00010000u);
-    assert(imports.xenos_command_processor().ring_size_log2() == 5u);
+    assert(imports.xenos_command_processor().ring_size_log2() == 6u);
 
     PPCContext ring_writeback{};
     ring_writeback.r3.u32 = 0x00020000u;
@@ -279,14 +279,27 @@ int main() {
     assert(read_guest_be32(0xA0060004u) == 0x11223344u);
     assert(read_guest_be32(0xA0020000u) == 31u);
 
-    // A multi-register Type-0 packet crosses the ring end and the MMIO
-    // aperture boundary; preflight rejects it before the first write.
-    put_guest_be32(0xA001007Cu, (1u << 16) | 0x3FFFu); // Ring dword 31.
+    // A non-matching condition consumes the packet without writing its target.
+    put_guest_be32(0xA001007Cu,
+        0xC0000000u | (5u << 16) | (0x45u << 8));
+    put_guest_be32(0xA0010080u, 3u); // Equal, register source, register target.
+    put_guest_be32(0xA0010084u, 0x30u);
+    put_guest_be32(0xA0010088u, 0xFFFFFFFFu); // Does not equal current 0x55BB00FF.
+    put_guest_be32(0xA001008Cu, 0xFFFFFFFFu);
+    put_guest_be32(0xA0010090u, 0x32u);
+    put_guest_be32(0xA0010094u, 0x12345678u);
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 38u);
+    assert(imports.xenos_command_processor().read_index() == 38u);
+    assert(GuestMmioBus::global().read(kXenosMmioBase + 0x32u * 4u, 4) == 0u);
+
+    // A multi-register Type-0 packet crosses the ring end and MMIO aperture
+    // boundary; packet-wide preflight rejects it before the first write.
+    put_guest_be32(0xA00101FCu, (1u << 16) | 0x3FFFu); // Ring dword 127.
     put_guest_be32(0xA0010000u, 0x11111111u);          // Ring dword 0.
     put_guest_be32(0xA0010004u, 0x22222222u);          // Ring dword 1.
     ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 2u);
-    assert(imports.xenos_command_processor().read_index() == 31u);
-    assert(read_guest_be32(0xA0020000u) == 31u);
+    assert(imports.xenos_command_processor().read_index() == 127u);
+    assert(read_guest_be32(0xA0020000u) == 127u);
     assert(GuestMmioBus::global().read(
         kXenosMmioBase + 0x3FFFu * 4u, 4) == 0u);
 
