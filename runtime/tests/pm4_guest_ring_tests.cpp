@@ -155,6 +155,28 @@ int main() {
         memory, kIndirectPhysical + 2u, 2u, callbacks, 4u);
     assert(misaligned_indirect.error == Pm4GuestRingError::InvalidPhysicalRange);
 
+    // PM4 MEM_WRITE applies the four documented Xenos endian modes and
+    // validates the entire destination before storing any dword.
+    constexpr std::uint32_t kMemWriteGuest = 0xA0040100u;
+    assert(write_xenos_guest_physical_dwords(memory, 0x00040100u,
+                                               std::array<std::uint32_t, 1>{0x11223344u}));
+    assert(load_be32(memory.base() + kMemWriteGuest) == 0x11223344u);
+    assert(write_xenos_guest_physical_dwords(memory, 0x00040105u,
+                                               std::array<std::uint32_t, 1>{0x11223344u}));
+    assert(load_be32(memory.base() + kMemWriteGuest + 4u) == 0x22114433u);
+    assert(write_xenos_guest_physical_dwords(memory, 0x0004010Au,
+                                               std::array<std::uint32_t, 1>{0x11223344u}));
+    assert(load_be32(memory.base() + kMemWriteGuest + 8u) == 0x44332211u);
+    assert(write_xenos_guest_physical_dwords(memory, 0x0004010Fu,
+                                               std::array<std::uint32_t, 1>{0x11223344u}));
+    assert(load_be32(memory.base() + kMemWriteGuest + 12u) == 0x33441122u);
+
+    store_be32(indirect + 0xFFCu, 0xA5A5A5A5u);
+    const std::array<std::uint32_t, 2> crossing_write{0x11111111u, 0x22222222u};
+    assert(!write_xenos_guest_physical_dwords(
+        memory, 0x00040FFCu, crossing_write));
+    assert(load_be32(indirect + 0xFFCu) == 0xA5A5A5A5u);
+
     const auto empty_indirect = dispatch_pm4_guest_indirect_buffer(
         memory, kIndirectPhysical, 0u, callbacks, 4u);
     assert(empty_indirect.error == Pm4GuestRingError::InvalidIndirectBufferLength);
