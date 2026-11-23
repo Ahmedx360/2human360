@@ -130,13 +130,16 @@ NOP (opcode `0x10`) is consumed; `MEM_WRITE` (opcode `0x3D`) writes its
 dword payload to a prevalidated guest physical range using the address's
 Xenos endian mode; `REG_TO_MEM` (opcode `0x3E`) copies a mirrored Xenos
 register to a prevalidated guest physical dword; `REG_RMW` (opcode `0x21`)
-applies immediate/register AND/OR operands to the mirrored register file; and
-indirect-buffer opcodes `0x3F` and `0x37` are supported for one non-nested
-level. Each batch accepts at most 64 indirect
+applies immediate/register AND/OR operands to the mirrored register file;
+`COND_WRITE` (opcode `0x45`) supports masked comparisons against either a
+register or checked guest physical dword, followed by a conditional write to
+a register or checked guest physical dword; and indirect-buffer opcodes
+`0x3F` and `0x37` are supported for one non-nested level. Each batch accepts at most 64 indirect
 buffers, each buffer is limited to 64K dwords and 256 packets, and its complete
-physical-memory range must be committed and readable. Predicated or nested
-indirect buffers and all other Type-3 opcodes are logged and rejected. These are bounded command-stream and guest-memory operations, not
-draw/shader execution. The hardware's
+physical-memory range must be committed and readable. Predicated `COND_WRITE`/memory writes/indirect buffers, nested indirect
+buffers and all other Type-3 opcodes are logged and rejected. These are
+bounded command-stream and guest-memory operations, not draw/shader
+execution. The hardware's
 read-pointer writeback block cadence is not modeled; the synchronous pump
 writes the read pointer after each call that consumes dwords. Interrupts,
 fences, DMA, register side effects and GPU opcode semantics remain
