@@ -16,7 +16,7 @@ struct GuestKernelObjectWaitChanges {
     std::atomic<std::uint32_t> waiters{};
 
     void notify() noexcept {
-        if (waiters.load(std::memory_order_acquire) == 0u) return;
+        if (waiters.load() == 0u) return;
         {
             std::lock_guard lock(mutex);
             ++epoch;
@@ -577,11 +577,11 @@ GuestKernelObjectWaitResult GuestKernelObjectTable::wait_multiple_objects(
     }
 
     auto& changes = guest_kernel_object_wait_changes();
-    changes.waiters.fetch_add(1u, std::memory_order_acq_rel);
+    changes.waiters.fetch_add(1u);
     struct WaiterRegistration {
         GuestKernelObjectWaitChanges& changes;
         ~WaiterRegistration() {
-            changes.waiters.fetch_sub(1u, std::memory_order_acq_rel);
+            changes.waiters.fetch_sub(1u);
         }
     } registration{changes};
 
