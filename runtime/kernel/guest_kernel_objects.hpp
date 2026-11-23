@@ -106,6 +106,7 @@ public:
     [[nodiscard]] bool cancel() noexcept;
     [[nodiscard]] bool is_armed() noexcept;
 private:
+    friend class GuestKernelObjectTable;
     [[nodiscard]] static std::chrono::steady_clock::time_point add_saturated(
         std::chrono::steady_clock::time_point now,
         std::chrono::milliseconds delay) noexcept;
