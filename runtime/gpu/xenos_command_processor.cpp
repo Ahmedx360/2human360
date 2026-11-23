@@ -117,7 +117,9 @@ XenosCommandProcessorResult XenosCommandProcessor::process_available(
         write_index_, callbacks, max_packets);
     read_index_ = result.ring.dispatch.read_index;
 
-    if (!result.ring) {
+    if (result.ring.error == Pm4GuestRingError::CallbackDeferred) {
+        result.error = XenosCommandProcessorError::CommandDeferred;
+    } else if (!result.ring) {
         result.error = XenosCommandProcessorError::GuestRingFailure;
     }
 
