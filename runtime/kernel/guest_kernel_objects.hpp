@@ -6,6 +6,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <thread>
 #include <unordered_map>
 namespace toohuman::runtime {
@@ -40,6 +41,7 @@ public:
         return guest_object_address_;
     }
 private:
+    friend class GuestKernelObjectTable;
     const bool manual_reset_;
     const std::uint32_t guest_object_address_{};
     bool signaled_{};
@@ -68,6 +70,7 @@ public:
         return guest_object_address_;
     }
 private:
+    friend class GuestKernelObjectTable;
     std::uint32_t count_{};
     const std::uint32_t maximum_count_{};
     const std::uint32_t guest_object_address_{};
@@ -86,6 +89,7 @@ public:
     [[nodiscard]] bool release() noexcept;
     [[nodiscard]] std::uint32_t recursion_count() noexcept;
 private:
+    friend class GuestKernelObjectTable;
     std::thread::id owner_{};
     std::uint32_t recursion_count_{};
     std::mutex mutex_;
@@ -137,6 +141,13 @@ public:
     [[nodiscard]] GuestKernelObjectWaitResult wait(
         GuestKernelHandle handle,
         std::optional<std::chrono::milliseconds> timeout = std::nullopt) const;
+    // Wait on up to 64 handles. Acquisition of the supported dispatcher objects
+    // is performed while their state locks are held together, so WaitAll does not
+    // consume a partial set when another object is not ready.
+    [[nodiscard]] GuestKernelObjectWaitResult wait_multiple(
+        std::span<const GuestKernelHandle> handles, bool wait_all,
+        std::optional<std::chrono::milliseconds> timeout = std::nullopt,
+        std::size_t* signaled_index = nullptr) const;
     [[nodiscard]] std::size_t size() const;
 private:
     struct ObjectHandleState {
