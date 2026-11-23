@@ -449,7 +449,8 @@ void test_wait_for_multiple_objects_hle() {
     context.r3.u32 = 2u;
     context.r4.u32 = handles_array;
     context.r5.u32 = 1u; // WaitAny.
-    context.r7.u32 = 0u; // KernelMode, not alertable.
+    context.r6.u32 = 1u; // UserMode.
+    context.r7.u32 = 0u; // Not alertable.
     context.r8.u32 = timeout;
     boot_hle::NtWaitForMultipleObjectsEx(context, base());
     assert(context.r3.u32 == 0u); // First signaled handle wins.
