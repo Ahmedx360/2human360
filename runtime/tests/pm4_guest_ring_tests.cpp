@@ -143,6 +143,18 @@ int main() {
     assert((capture.registers.back() ==
             std::pair<std::uint32_t, std::uint32_t>{0x20u, 0x1234ABCDu}));
 
+    store_be32(indirect, (2u << 16) | 0x20u); // Needs three payload dwords.
+    store_be32(indirect + 4u, 0x55u);
+    const auto truncated_indirect = dispatch_pm4_guest_indirect_buffer(
+        memory, kIndirectPhysical, 2u, callbacks, 4u);
+    assert(truncated_indirect.error == Pm4GuestRingError::PacketDecodeFailed);
+    const auto no_packet_budget = dispatch_pm4_guest_indirect_buffer(
+        memory, kIndirectPhysical, 2u, callbacks, 0u);
+    assert(no_packet_budget.error == Pm4GuestRingError::PacketLimitReached);
+    const auto misaligned_indirect = dispatch_pm4_guest_indirect_buffer(
+        memory, kIndirectPhysical + 2u, 2u, callbacks, 4u);
+    assert(misaligned_indirect.error == Pm4GuestRingError::InvalidPhysicalRange);
+
     const auto empty_indirect = dispatch_pm4_guest_indirect_buffer(
         memory, kIndirectPhysical, 0u, callbacks, 4u);
     assert(empty_indirect.error == Pm4GuestRingError::InvalidIndirectBufferLength);
