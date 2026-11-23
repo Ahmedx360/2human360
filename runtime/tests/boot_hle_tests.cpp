@@ -421,8 +421,9 @@ void test_wait_for_multiple_objects_hle() {
     context.r3.u32 = 2u;
     context.r4.u32 = handles_array;
     context.r5.u32 = 0u; // WaitAll.
-    context.r6.u32 = 0u;
-    context.r7.u32 = timeout;
+    context.r6.u32 = 0u; // KernelMode.
+    context.r7.u32 = 0u; // Not alertable.
+    context.r8.u32 = timeout;
     boot_hle::NtWaitForMultipleObjectsEx(context, base());
     assert(context.r3.u32 == 0x00000102u); // STATUS_TIMEOUT.
     // WaitAll must not consume the first auto-reset event when the second is
@@ -435,7 +436,8 @@ void test_wait_for_multiple_objects_hle() {
     context.r3.u32 = 2u;
     context.r4.u32 = handles_array;
     context.r5.u32 = 0u;
-    context.r7.u32 = timeout;
+    context.r7.u32 = 0u; // KernelMode, not alertable.
+    context.r8.u32 = timeout;
     boot_hle::NtWaitForMultipleObjectsEx(context, base());
     assert(context.r3.u32 == 0u);
     assert(!first->is_signaled());
@@ -447,7 +449,8 @@ void test_wait_for_multiple_objects_hle() {
     context.r3.u32 = 2u;
     context.r4.u32 = handles_array;
     context.r5.u32 = 1u; // WaitAny.
-    context.r7.u32 = timeout;
+    context.r7.u32 = 0u; // KernelMode, not alertable.
+    context.r8.u32 = timeout;
     boot_hle::NtWaitForMultipleObjectsEx(context, base());
     assert(context.r3.u32 == 0u); // First signaled handle wins.
     assert(!first->is_signaled());
@@ -457,7 +460,8 @@ void test_wait_for_multiple_objects_hle() {
     context.r3.u32 = 2u;
     context.r4.u32 = handles_array;
     context.r5.u32 = 1u;
-    context.r7.u32 = timeout;
+    context.r7.u32 = 0u; // KernelMode, not alertable.
+    context.r8.u32 = timeout;
     boot_hle::NtWaitForMultipleObjectsEx(context, base());
     assert(context.r3.u32 == 1u);
     assert(!second->is_signaled());
@@ -475,7 +479,8 @@ void test_wait_for_multiple_objects_hle() {
     context.r3.u32 = 2u;
     context.r4.u32 = handles_array;
     context.r5.u32 = 0u;
-    context.r7.u32 = timeout;
+    context.r7.u32 = 0u; // KernelMode, not alertable.
+    context.r8.u32 = timeout;
     boot_hle::NtWaitForMultipleObjectsEx(context, base());
     assert(context.r3.u32 == 0xC000000Du); // STATUS_INVALID_PARAMETER.
 
@@ -484,7 +489,8 @@ void test_wait_for_multiple_objects_hle() {
     context.r3.u32 = 2u;
     context.r4.u32 = handles_array;
     context.r5.u32 = 1u;
-    context.r7.u32 = timeout;
+    context.r7.u32 = 0u; // KernelMode, not alertable.
+    context.r8.u32 = timeout;
     boot_hle::NtWaitForMultipleObjectsEx(context, base());
     assert(context.r3.u32 == 0xC0000008u); // STATUS_INVALID_HANDLE.
 
@@ -508,7 +514,8 @@ void test_wait_for_multiple_objects_hle() {
     context.r3.u32 = 3u;
     context.r4.u32 = handles_array;
     context.r5.u32 = 0u; // WaitAll.
-    context.r7.u32 = timeout;
+    context.r7.u32 = 0u; // KernelMode, not alertable.
+    context.r8.u32 = timeout;
     boot_hle::NtWaitForMultipleObjectsEx(context, base());
     assert(context.r3.u32 == 0u);
     assert(semaphore->count() == 0u);
