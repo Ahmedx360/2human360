@@ -555,32 +555,53 @@ void PpcImportRegistry::handle_xenos_mmio_write(
     std::uint32_t address, std::uint8_t width, std::uint64_t value) noexcept {
     constexpr std::uint32_t kCpRingWritePointer =
         kXenosMmioBase + 0x01C5u * sizeof(std::uint32_t);
-    if (address != kCpRingWritePointer || width != sizeof(std::uint32_t))
-        return;
 
     std::lock_guard lock(xenos_command_processor_mutex_);
+    const bool write_pointer_update =
+        address == kCpRingWritePointer && width == sizeof(std::uint32_t);
+
+    if (!write_pointer_update) {
+        // A guest CPU write to the register currently polled by WAIT_REG_MEM
+        // is an observable wake-up. The write has already reached the MMIO
+        // mirror before the observer runs, so the command is re-evaluated
+        // against the new value. Memory-polled waits still require a later
+        // ring notification because ordinary guest RAM stores are not observed.
+        if (width != sizeof(std::uint32_t) ||
+            !xenos_waiting_for_register_ ||
+            address != kXenosMmioBase +
+                xenos_wait_register_index_ * sizeof(std::uint32_t))
+            return;
+    }
 
     if (!xenos_command_processor_.ring_initialized()) {
-        std::fprintf(stderr,
-            "[TooHuman][Xenos] CP_RB_WPTR written before VdInitializeRingBuffer (wptr=0x%08X)\n",
-            static_cast<std::uint32_t>(value));
+        if (write_pointer_update) {
+            std::fprintf(stderr,
+                "[TooHuman][Xenos] CP_RB_WPTR written before VdInitializeRingBuffer (wptr=0x%08X)\n",
+                static_cast<std::uint32_t>(value));
+        }
         return;
     }
     if (!memory_) {
-        std::fprintf(stderr,
-            "[TooHuman][Xenos] CP_RB_WPTR ignored: no guest address space is attached\n");
+        if (write_pointer_update) {
+            std::fprintf(stderr,
+                "[TooHuman][Xenos] CP_RB_WPTR ignored: no guest address space is attached\n");
+        }
         return;
     }
 
-    if (!xenos_command_processor_.update_write_pointer(
-            static_cast<std::uint32_t>(value), nullptr)) {
-        std::fprintf(stderr, "[TooHuman][Xenos] invalid CP_RB_WPTR value=0x%08X\n",
-                     static_cast<std::uint32_t>(value));
+    if (write_pointer_update) {
+        if (!xenos_command_processor_.update_write_pointer(
+                static_cast<std::uint32_t>(value), nullptr)) {
+            std::fprintf(stderr, "[TooHuman][Xenos] invalid CP_RB_WPTR value=0x%08X\n",
+                         static_cast<std::uint32_t>(value));
+            return;
+        }
+        xenos_indirect_depth_ = 0;
+        xenos_indirect_buffers_this_batch_ = 0;
+    } else if (!xenos_command_processor_.write_pointer_initialized()) {
         return;
     }
 
-    xenos_indirect_depth_ = 0;
-    xenos_indirect_buffers_this_batch_ = 0;
     const Pm4DispatchCallbacks callbacks{
         this,
         &PpcImportRegistry::dispatch_xenos_register_write,
@@ -600,7 +621,6 @@ void PpcImportRegistry::handle_xenos_mmio_write(
             xenos_command_processor_.write_index());
     }
 }
-
 bool PpcImportRegistry::dispatch_xenos_register_write(
     void* context, std::uint32_t index, std::uint32_t value) {
     (void)context;
