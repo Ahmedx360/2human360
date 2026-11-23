@@ -250,6 +250,17 @@ int main() {
     assert(GuestMmioBus::global().read(kXenosMmioBase + 0x30u * 4u, 4) ==
            0x55BB00FFu);
 
+    // A multi-register Type-0 packet crossing the MMIO aperture boundary is
+    // rejected before the first in-range register is modified.
+    put_guest_be32(0xA0010044u, (1u << 16) | 0x3FFFu);
+    put_guest_be32(0xA0010048u, 0x11111111u);
+    put_guest_be32(0xA001004Cu, 0x22222222u);
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 20u);
+    assert(imports.xenos_command_processor().read_index() == 17u);
+    assert(read_guest_be32(0xA0020000u) == 17u);
+    assert(GuestMmioBus::global().read(
+        kXenosMmioBase + 0x3FFFu * 4u, 4) == 0u);
+
     PPCContext context{};
     context.ctr.u32 = 0x82001100u;
     const auto import_thunk = memory.get_function<PPCFunc*>(0x82001100u);
