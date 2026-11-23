@@ -881,9 +881,12 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
     const auto import_it = imports_by_thunk_.find(thunk_address);
     if (import_it == imports_by_thunk_.end()) {
         std::fprintf(stderr,
-                     "[TooHuman] Unknown import thunk 0x%08X (LR=0x%016llX)\n",
+                     "[TooHuman] Unknown import thunk 0x%08X (LR=0x%016llX ctx=%p base=%p r3=%08X r4=%08X)\n",
                      static_cast<unsigned>(thunk_address),
-                     static_cast<unsigned long long>(context.lr));
+                     static_cast<unsigned long long>(context.lr),
+                     static_cast<void*>(&context), static_cast<void*>(base),
+                     static_cast<unsigned>(context.r3.u32),
+                     static_cast<unsigned>(context.r4.u32));
         std::fflush(stderr);
         std::abort();
     }
