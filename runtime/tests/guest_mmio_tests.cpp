@@ -71,13 +71,23 @@ int main() {
     assert(observer_capture.address == reg);
     assert(observer_capture.width == 4u);
     assert(observer_capture.value == 0x55667788u);
+
+    // A 64-bit Xenos MMIO store is observed as two ordered dword register
+    // writes, matching the title's PPC MMIO helper convention.
+    observer_capture = {};
+    assert(bus.write(reg - 4u, 8u, 0xCAFEBABE12345678ull));
+    assert(observer_capture.calls == 2u);
+    assert(observer_capture.address == reg);
+    assert(observer_capture.width == 4u);
+    assert(observer_capture.value == 0x12345678u);
+
     assert(bus.write_unobserved(reg + 4u, 4, 0xAABBCCDDu));
-    assert(observer_capture.calls == 1u);
+    assert(observer_capture.calls == 2u);
     assert(bus.write(xma_reg, 4, 0x11223344u));
-    assert(observer_capture.calls == 1u);
+    assert(observer_capture.calls == 2u);
     bus.clear_xenos_write_observer(&observer_capture);
     assert(bus.write(reg, 4, 0x01020304u));
-    assert(observer_capture.calls == 1u);
+    assert(observer_capture.calls == 2u);
 
     const auto before_invalid = bus.trace().size();
     assert(!bus.write(kXenosMmioBase + kGuestMmioWindowSize - 1u, 2, 0xFFFFu));
