@@ -143,8 +143,12 @@ is evaluated against the current `bin_select & bin_mask` intersection, so a
 predicated command is skipped when that intersection is zero and is dispatched
 when nonzero. Each batch accepts at most 64 indirect buffers, each buffer is
 limited to 64K dwords and 256 packets, and its complete physical-memory range
-must be committed and readable. Nested indirect buffers and all other Type-3
-opcodes except `WAIT_REG_MEM` are logged and rejected. These are
+must be committed and readable. The callback also handles the event-write
+subset `EVENT_WRITE` (`0x46`), non-timestamp `EVENT_WRITE_SHD` (`0x58`),
+and `EVENT_WRITE_EXT` (`0x5A`), plus the side-effect-free markers `ME_INIT`
+(`0x48`), `WAIT_FOR_IDLE` (`0x26`), `CONTEXT_UPDATE` (`0x5E`), and
+`INVALIDATE_STATE` (`0x3B`). Timestamp-mode `EVENT_WRITE_SHD`, occlusion
+query events, and all other Type-3 opcodes are logged and rejected. These are
 bounded command-stream and guest-memory operations, not draw/shader
 execution. `WAIT_REG_MEM` (opcode `0x3C`) validates its five operands,
 supports register and checked physical-memory polling, and implements the
@@ -187,8 +191,9 @@ title ring-configuration imports and Xenos `CP_RB_WPTR` register index
 `0x01C5`. It does not schedule a device worker or model the hardware's
 read-pointer writeback block cadence; it writes once per pump call that
 consumes dwords. Its Type-3 callback accepts NOP, checked physical MEM_WRITE,
-`WAIT_REG_MEM`, and a limited one-level indirect-buffer path; other GPU
-commands, interrupts and full GPU synchronization remain unimplemented. For an
+`WAIT_REG_MEM`, and a limited one-level indirect-buffer path. Timestamp events,
+occlusion-query events, drawing, interrupts and full GPU synchronization
+remain unimplemented. For an
 unmet `WAIT_REG_MEM` predicate, the dispatcher reports a deferred packet,
 leaves the read pointer unchanged, and retries only when the caller pumps
 again. This avoids blocking the guest CPU but is not a substitute for the
