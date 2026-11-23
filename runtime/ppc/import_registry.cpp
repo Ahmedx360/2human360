@@ -616,6 +616,7 @@ bool PpcImportRegistry::dispatch_xenos_type3(
     if (!registry) return false;
 
     constexpr std::uint32_t kPm4Nop = 0x10u;
+    constexpr std::uint32_t kPm4MemWrite = 0x3Du;
     constexpr std::uint32_t kPm4IndirectBuffer = 0x3Fu;
     constexpr std::uint32_t kPm4IndirectBufferPfd = 0x37u;
     constexpr std::uint32_t kIndirectLengthMask = 0x000FFFFFu;
@@ -624,6 +625,19 @@ bool PpcImportRegistry::dispatch_xenos_type3(
     constexpr std::size_t kMaxIndirectPackets = 256u;
     if (opcode == kPm4Nop)
         return true;
+
+    if (opcode == kPm4MemWrite) {
+        if (payload.size() < 2u ||
+            !write_xenos_guest_physical_dwords(
+                *registry->memory_, payload[0], payload.subspan(1))) {
+            std::fprintf(stderr,
+                "[TooHuman][Xenos] rejected PM4 MEM_WRITE address=0x%08X data_dwords=%zu\n",
+                payload.empty() ? 0u : payload[0],
+                payload.size() > 0u ? payload.size() - 1u : 0u);
+            return false;
+        }
+        return true;
+    }
 
     if (opcode == kPm4IndirectBuffer || opcode == kPm4IndirectBufferPfd) {
         // Bin-select predication is not modelled yet. Never execute a
