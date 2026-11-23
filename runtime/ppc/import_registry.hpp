@@ -107,7 +107,7 @@ private:
                                  std::uint64_t value) noexcept;
     static bool dispatch_xenos_register_write(
         void* context, std::uint32_t index, std::uint32_t value);
-    static bool reject_xenos_type3(
+    static bool dispatch_xenos_type3(
         void* context, std::uint32_t opcode, bool predicate,
         std::span<const std::uint32_t> payload);
 
@@ -123,6 +123,8 @@ private:
     std::unique_ptr<GuestHeap> stack_heap_;
     XenosCommandProcessor xenos_command_processor_;
     mutable std::mutex xenos_command_processor_mutex_;
+    std::uint32_t xenos_indirect_depth_{};
+    std::size_t xenos_indirect_buffers_this_batch_{};
     GuestAddressSpace* memory_{};
     std::unordered_map<std::uint32_t, VirtualMemoryRegion> virtual_memory_regions_;
     mutable std::mutex virtual_memory_regions_mutex_;
