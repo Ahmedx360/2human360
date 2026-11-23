@@ -109,6 +109,7 @@ PPCFunc KeWaitForSingleObject;
 PPCFunc NtSetEvent;
 PPCFunc NtClearEvent;
 PPCFunc NtWaitForSingleObjectEx;
+PPCFunc NtWaitForMultipleObjectsEx;
 PPCFunc NtClose;
 PPCFunc RtlNtStatusToDosError;
 PPCFunc FscSetCacheElementCount;
