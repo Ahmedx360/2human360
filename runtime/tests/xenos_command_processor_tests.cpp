@@ -98,7 +98,7 @@ int main() {
     store_be32(ring + 5u * 4u, 0xFFFFFFFFu);
     store_be32(ring + 6u * 4u, 0u);
     store_be32(ring + 7u * 4u, 0u);
-    assert(cp.update_write_pointer(8u, &error));
+    assert(cp.update_write_pointer(0u, &error));
     const auto pending = cp.process_available(memory, callbacks, 4u);
     assert(pending);
     assert(pending.error == XenosCommandProcessorError::CommandDeferred);
