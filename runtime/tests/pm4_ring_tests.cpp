@@ -22,6 +22,7 @@ bool write_register(void* opaque, std::uint32_t index, std::uint32_t value) {
 Pm4CallbackResult type3(void* opaque, std::uint32_t opcode, bool,
            std::span<const std::uint32_t> payload) {
     auto& capture = *static_cast<Capture*>(opaque);
+    if (opcode == 0x3Cu) return Pm4CallbackResult::Deferred;
     capture.opcode = opcode;
     capture.payload.assign(payload.begin(), payload.end());
     return Pm4CallbackResult::Accepted;
@@ -89,6 +90,24 @@ int main() {
         assert(result.error == Pm4RingDispatchError::PacketDecodeFailed);
         assert(result.packets == 0u);
         assert(result.read_index == 2u);
+    }
+
+    {
+        std::array<std::uint32_t, 8> ring{};
+        ring[2] = 0xC0000000u | (4u << 16) | (0x3Cu << 8);
+        ring[3] = 3u;
+        ring[4] = 0x12345678u;
+        ring[5] = 0xFFFFFFFFu;
+        ring[6] = 0u;
+        ring[7] = 0u;
+        Capture capture;
+        const Pm4DispatchCallbacks cb{&capture, write_register, type3};
+        const auto pending = dispatch_pm4_ring(ring, 2u, 0u, cb, 4u);
+        assert(!pending);
+        assert(pending.error == Pm4RingDispatchError::CallbackDeferred);
+        assert(pending.packets == 0u);
+        assert(pending.dwords_consumed == 0u);
+        assert(pending.read_index == 2u);
     }
 
     {
