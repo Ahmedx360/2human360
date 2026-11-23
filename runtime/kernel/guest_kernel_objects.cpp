@@ -1,12 +1,39 @@
 #include "kernel/guest_kernel_objects.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <functional>
 #include <thread>
 #include <utility>
 #include <vector>
 
 namespace toohuman::runtime {
+namespace {
+struct GuestKernelObjectWaitChanges {
+    std::mutex mutex;
+    std::condition_variable condition;
+    std::uint64_t epoch{};
+    std::atomic<std::uint32_t> waiters{};
+
+    void notify() noexcept {
+        if (waiters.load(std::memory_order_acquire) == 0u) return;
+        {
+            std::lock_guard lock(mutex);
+            ++epoch;
+        }
+        condition.notify_all();
+    }
+};
+
+GuestKernelObjectWaitChanges& guest_kernel_object_wait_changes() {
+    static GuestKernelObjectWaitChanges changes;
+    return changes;
+}
+} // namespace
+
+void notify_guest_kernel_object_waiters() noexcept {
+    guest_kernel_object_wait_changes().notify();
+}
 
 GuestEventObject::GuestEventObject(
     bool manual_reset, bool initially_signaled,
@@ -62,6 +89,7 @@ bool GuestEventObject::set() {
     }
     if (manual_reset_) condition_.notify_all();
     else condition_.notify_one();
+    notify_guest_kernel_object_waiters();
     return previous;
 }
 
@@ -150,6 +178,7 @@ bool GuestMutantObject::release() noexcept {
         owner_ = {};
     }
     condition_.notify_one();
+    notify_guest_kernel_object_waiters();
     return true;
 }
 
@@ -188,6 +217,7 @@ void GuestTimerObject::set_timer(std::chrono::milliseconds due_delay,
         due_time_ = add_saturated(std::chrono::steady_clock::now(), due_delay);
     }
     condition_.notify_all();
+    notify_guest_kernel_object_waiters();
 }
 
 bool GuestTimerObject::cancel() noexcept {
@@ -199,6 +229,7 @@ bool GuestTimerObject::cancel() noexcept {
         period_ms_ = 0;
     }
     condition_.notify_all();
+    notify_guest_kernel_object_waiters();
     return was_armed;
 }
 
@@ -284,6 +315,7 @@ bool GuestSemaphoreObject::release(
     }
     if (adjustment == 1u) condition_.notify_one();
     else condition_.notify_all();
+    notify_guest_kernel_object_waiters();
     return true;
 }
 
@@ -505,9 +537,8 @@ GuestKernelObjectWaitResult GuestKernelObjectTable::wait_multiple_objects(
         }
     }
 
-    // Lock every native dispatcher object in a stable order. This lets WaitAll
-    // inspect and consume events, semaphores, mutants and timers as one
-    // transaction rather than consuming one object and trying to roll it back.
+    // Acquire supported dispatcher objects in a stable lock order. WaitAll
+    // observes and consumes the complete set atomically.
     std::vector<std::mutex*> object_mutexes;
     object_mutexes.reserve(objects.size());
     for (const auto& object : objects) {
@@ -543,103 +574,149 @@ GuestKernelObjectWaitResult GuestKernelObjectTable::wait_multiple_objects(
         }
     }
 
+    auto& changes = guest_kernel_object_wait_changes();
+    changes.waiters.fetch_add(1u, std::memory_order_acq_rel);
+    struct WaiterRegistration {
+        GuestKernelObjectWaitChanges& changes;
+        ~WaiterRegistration() {
+            changes.waiters.fetch_sub(1u, std::memory_order_acq_rel);
+        }
+    } registration{changes};
+
     const auto current_thread = std::this_thread::get_id();
     for (;;) {
-        std::vector<std::unique_lock<std::mutex>> locks;
-        locks.reserve(object_mutexes.size());
-        for (auto* object_mutex : object_mutexes)
-            locks.emplace_back(*object_mutex);
+        // Snapshot before checking object state. A signal between this snapshot
+        // and the wait below changes the epoch, preventing a lost wake-up.
+        std::uint64_t observed_epoch = 0;
+        {
+            std::lock_guard lock(changes.mutex);
+            observed_epoch = changes.epoch;
+        }
 
-        const auto now = Clock::now();
-        bool all_ready = true;
+        auto next_timer_due = Clock::time_point::max();
+        bool timer_state_changed = false;
         bool invalid_object = false;
-        const auto is_ready = [&](const std::shared_ptr<GuestKernelObject>& object) -> bool {
-            if (auto event = std::dynamic_pointer_cast<GuestEventObject>(object))
-                return event->signaled_;
+        bool signaled = false;
+        std::size_t ready_index = 0;
+        {
+            std::vector<std::unique_lock<std::mutex>> locks;
+            locks.reserve(object_mutexes.size());
+            for (auto* object_mutex : object_mutexes)
+                locks.emplace_back(*object_mutex);
 
-            if (auto semaphore = std::dynamic_pointer_cast<GuestSemaphoreObject>(object))
-                return semaphore->count_ != 0;
+            const auto now = Clock::now();
+            const auto is_ready = [&](const std::shared_ptr<GuestKernelObject>& object) -> bool {
+                if (auto event = std::dynamic_pointer_cast<GuestEventObject>(object))
+                    return event->signaled_;
 
-            if (auto mutant = std::dynamic_pointer_cast<GuestMutantObject>(object))
-                return mutant->recursion_count_ == 0 ||
-                       mutant->owner_ == current_thread;
+                if (auto semaphore = std::dynamic_pointer_cast<GuestSemaphoreObject>(object))
+                    return semaphore->count_ != 0;
 
-            if (auto timer = std::dynamic_pointer_cast<GuestTimerObject>(object)) {
-                if (timer->armed_ && now >= timer->due_time_) {
-                    timer->signaled_ = true;
-                    if (timer->period_ms_ == 0u) {
-                        timer->armed_ = false;
-                    } else {
-                        timer->due_time_ = GuestTimerObject::add_saturated(
-                            now, std::chrono::milliseconds(timer->period_ms_));
+                if (auto mutant = std::dynamic_pointer_cast<GuestMutantObject>(object))
+                    return mutant->recursion_count_ == 0 ||
+                           mutant->owner_ == current_thread;
+
+                if (auto timer = std::dynamic_pointer_cast<GuestTimerObject>(object)) {
+                    if (timer->armed_ && now >= timer->due_time_) {
+                        timer->signaled_ = true;
+                        if (timer->period_ms_ == 0u) {
+                            timer->armed_ = false;
+                        } else {
+                            timer->due_time_ = GuestTimerObject::add_saturated(
+                                now, std::chrono::milliseconds(timer->period_ms_));
+                        }
+                        timer->condition_.notify_all();
+                        timer_state_changed = true;
                     }
-                    timer->condition_.notify_all();
+                    if (!timer->signaled_ && timer->armed_ &&
+                        timer->due_time_ < next_timer_due) {
+                        next_timer_due = timer->due_time_;
+                    }
+                    return timer->signaled_;
                 }
-                return timer->signaled_;
-            }
 
-            // Thread objects are level-triggered and remain signaled after
-            // completion. Other object kinds must provide a nonblocking probe.
-            const auto result = object->wait(std::chrono::milliseconds::zero());
-            if (result == GuestKernelObjectWaitResult::InvalidHandle)
-                invalid_object = true;
-            return result == GuestKernelObjectWaitResult::Signaled;
-        };
+                // Thread objects are level-triggered and remain signaled after
+                // completion. Other object kinds must provide a nonblocking probe.
+                const auto result = object->wait(std::chrono::milliseconds::zero());
+                if (result == GuestKernelObjectWaitResult::InvalidHandle)
+                    invalid_object = true;
+                return result == GuestKernelObjectWaitResult::Signaled;
+            };
 
-        const auto consume = [&](const std::shared_ptr<GuestKernelObject>& object) {
-            if (auto event = std::dynamic_pointer_cast<GuestEventObject>(object)) {
-                if (!event->manual_reset_) event->signaled_ = false;
-            } else if (auto semaphore =
-                           std::dynamic_pointer_cast<GuestSemaphoreObject>(object)) {
-                --semaphore->count_;
-            } else if (auto mutant =
-                           std::dynamic_pointer_cast<GuestMutantObject>(object)) {
-                if (mutant->recursion_count_ == 0) {
-                    mutant->owner_ = current_thread;
-                    mutant->recursion_count_ = 1u;
-                } else {
-                    ++mutant->recursion_count_;
+            const auto consume = [&](const std::shared_ptr<GuestKernelObject>& object) {
+                if (auto event = std::dynamic_pointer_cast<GuestEventObject>(object)) {
+                    if (!event->manual_reset_) event->signaled_ = false;
+                } else if (auto semaphore =
+                               std::dynamic_pointer_cast<GuestSemaphoreObject>(object)) {
+                    --semaphore->count_;
+                } else if (auto mutant =
+                               std::dynamic_pointer_cast<GuestMutantObject>(object)) {
+                    if (mutant->recursion_count_ == 0) {
+                        mutant->owner_ = current_thread;
+                        mutant->recursion_count_ = 1u;
+                    } else {
+                        ++mutant->recursion_count_;
+                    }
+                } else if (auto timer = std::dynamic_pointer_cast<GuestTimerObject>(object)) {
+                    if (!timer->manual_reset_) timer->signaled_ = false;
                 }
-            } else if (auto timer = std::dynamic_pointer_cast<GuestTimerObject>(object)) {
-                if (!timer->manual_reset_) timer->signaled_ = false;
-            }
-        };
+            };
 
-        if (wait_all) {
-            for (std::size_t i = 0; i < objects.size(); ++i) {
-                // Probe every object even after finding an unsignaled one so an
-                // unsupported object type is not hidden behind an earlier timeout.
-                if (!is_ready(objects[i])) all_ready = false;
-            }
-            if (invalid_object)
-                return GuestKernelObjectWaitResult::InvalidHandle;
-            if (all_ready) {
-                for (const auto& object : objects) consume(object);
-                if (signaled_index) *signaled_index = 0;
-                return GuestKernelObjectWaitResult::Signaled;
-            }
-        } else {
-            for (std::size_t i = 0; i < objects.size(); ++i) {
-                if (is_ready(objects[i])) {
-                    if (invalid_object)
-                        return GuestKernelObjectWaitResult::InvalidHandle;
-                    consume(objects[i]);
-                    if (signaled_index) *signaled_index = i;
-                    return GuestKernelObjectWaitResult::Signaled;
+            if (wait_all) {
+                bool all_ready = true;
+                for (const auto& object : objects) {
+                    if (!is_ready(object)) all_ready = false;
                 }
                 if (invalid_object)
                     return GuestKernelObjectWaitResult::InvalidHandle;
+                if (all_ready) {
+                    for (const auto& object : objects) consume(object);
+                    signaled = true;
+                }
+            } else {
+                for (std::size_t i = 0; i < objects.size(); ++i) {
+                    if (is_ready(objects[i])) {
+                        if (invalid_object)
+                            return GuestKernelObjectWaitResult::InvalidHandle;
+                        consume(objects[i]);
+                        ready_index = i;
+                        signaled = true;
+                        break;
+                    }
+                    if (invalid_object)
+                        return GuestKernelObjectWaitResult::InvalidHandle;
+                }
             }
+        } // Release every dispatcher-object lock before notifying or sleeping.
+
+        if (timer_state_changed)
+            notify_guest_kernel_object_waiters();
+        if (signaled) {
+            if (signaled_index) *signaled_index = ready_index;
+            return GuestKernelObjectWaitResult::Signaled;
         }
 
-        locks.clear(); // Never sleep while holding dispatcher-object locks.
-        if (now >= deadline)
+        const auto now = Clock::now();
+        if (timeout && now >= deadline)
             return GuestKernelObjectWaitResult::Timeout;
-        auto wake_time = now + std::chrono::milliseconds(1);
-        if (deadline < wake_time) wake_time = deadline;
-        std::this_thread::sleep_until(wake_time);
+        auto wake_deadline = deadline;
+        if (next_timer_due < wake_deadline)
+            wake_deadline = next_timer_due;
+
+        std::unique_lock lock(changes.mutex);
+        const auto changed = [&] { return changes.epoch != observed_epoch; };
+        if (changed())
+            continue;
+        if (wake_deadline == Clock::time_point::max()) {
+            changes.condition.wait(lock, changed);
+        } else {
+            // A timer due-time or the caller timeout wakes this wait. Re-enter
+            // the loop to check readiness before deciding that the timeout won.
+            (void)changes.condition.wait_until(lock, wake_deadline, changed);
+        }
     }
 }
+
 
 std::size_t GuestKernelObjectTable::size() const {
     std::lock_guard lock(mutex_);
