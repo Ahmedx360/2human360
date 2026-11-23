@@ -20,8 +20,8 @@ bool write_register(void* opaque, std::uint32_t index, std::uint32_t value) {
     return true;
 }
 
-bool type3(void*, std::uint32_t, bool, std::span<const std::uint32_t>) {
-    return false; // No Type-3 semantics are implemented by this fixture.
+Pm4CallbackResult type3(void*, std::uint32_t, bool, std::span<const std::uint32_t>) {
+    return Pm4CallbackResult::Rejected; // No Type-3 semantics are implemented by this fixture.
 }
 
 void store_be32(std::uint8_t* bytes, std::uint32_t value) {
