@@ -1568,7 +1568,7 @@ PPC_FUNC(KeWaitForMultipleObjects) {
                 ctx.r3.u32 = kStatusAccessViolation;
                 return;
             }
-            if (wait_type == 0u) {
+            {
                 for (const auto& previous : objects) {
                     if (previous.get() == object.get()) {
                         ctx.r3.u32 = kStatusInvalidParameter;
