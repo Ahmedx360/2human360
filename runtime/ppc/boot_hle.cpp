@@ -1583,8 +1583,9 @@ PPC_FUNC(KeWaitForMultipleObjects) {
         return;
     }
 
-    // WaitReason, WaitMode and WaitBlockArray are scheduling hints/storage.
-    // The shared wait-set notification domain avoids fixed-interval polling.
+    // WaitReason and WaitBlockArray are not needed by the host wait engine.
+    // WaitMode is range-checked but guest access-mode checks and APC delivery
+    // are not implemented. The shared wait-set domain avoids fixed polling.
     const auto timeout = decode_guest_timeout(base, timeout_address);
     std::size_t signaled_index = 0;
     GuestKernelObjectWaitResult result{};
