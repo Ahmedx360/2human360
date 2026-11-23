@@ -22,6 +22,7 @@ enum class Pm4GuestRingError : std::uint8_t {
     MissingRegisterHandler,
     MissingType3Handler,
     CallbackRejected,
+    CallbackDeferred,
     PacketLimitReached,
 };
 
