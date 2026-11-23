@@ -59,6 +59,7 @@ int main() {
     // uncached 0xA0000000 physical alias.
     assert(memory.commit_region(0xA0010000u, 0x1000u, &error));
     assert(memory.commit_region(0xA0020000u, 0x1000u, &error));
+    assert(memory.commit_region(0xA0030000u, 0x1000u, &error));
 
     // Scalar generated PPC memory accessors must bypass the PROT_NONE guest
     // aperture and use the runtime bus for Xenos/XMA, while preserving direct
@@ -184,6 +185,20 @@ int main() {
     assert(imports.xenos_command_processor().read_index() == 2u);
     assert(GuestMmioBus::global().read(kXenosMmioBase + 0x20u * 4u, 4) == 0xDEADBEEFu);
     assert(read_guest_be32(0xA0020000u) == 2u);
+
+    // The primary ring can dispatch one bounded linear indirect buffer.
+    // Nested indirect buffers and unrelated Type-3 opcodes remain rejected.
+    put_guest_be32(0xA0030000u, 0x30u);
+    put_guest_be32(0xA0030004u, 0xAABBCCDDu);
+    put_guest_be32(0xA0010008u,
+        0xC0000000u | (1u << 16) | (0x3Fu << 8)); // INDIRECT_BUFFER, 2 operands.
+    put_guest_be32(0xA001000Cu, 0x00030000u);
+    put_guest_be32(0xA0010010u, 2u);
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 5u);
+    assert(imports.xenos_command_processor().read_index() == 5u);
+    assert(GuestMmioBus::global().read(kXenosMmioBase + 0x30u * 4u, 4) ==
+           0xAABBCCDDu);
+    assert(read_guest_be32(0xA0020000u) == 5u);
 
     PPCContext context{};
     context.ctr.u32 = 0x82001100u;
