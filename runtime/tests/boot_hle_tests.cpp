@@ -474,7 +474,8 @@ void test_wait_for_multiple_objects_hle() {
     boot_hle::NtWaitForMultipleObjectsEx(context, base());
     assert(context.r3.u32 == 0xC000000Du); // STATUS_INVALID_PARAMETER.
 
-    // Duplicate dispatcher objects are invalid for either wait mode.
+    // WaitAll rejects duplicate objects. WaitAny permits them and returns
+    // the first ready array slot, matching the Lost Odyssey wait-set behavior.
     put_be32_test(handles_array + 4u, *first_handle);
     context = {};
     context.r3.u32 = 2u;
@@ -485,6 +486,7 @@ void test_wait_for_multiple_objects_hle() {
     boot_hle::NtWaitForMultipleObjectsEx(context, base());
     assert(context.r3.u32 == 0xC000000Du); // STATUS_INVALID_PARAMETER.
 
+    (void)first->set();
     context = {};
     context.r3.u32 = 2u;
     context.r4.u32 = handles_array;
@@ -492,7 +494,8 @@ void test_wait_for_multiple_objects_hle() {
     context.r7.u32 = 0u;
     context.r8.u32 = timeout;
     boot_hle::NtWaitForMultipleObjectsEx(context, base());
-    assert(context.r3.u32 == 0xC000000Du); // STATUS_INVALID_PARAMETER.
+    assert(context.r3.u32 == 0u);
+    assert(!first->is_signaled());
 
     put_be32_test(handles_array + 4u, 0xDEADBEEFu);
     context = {};
