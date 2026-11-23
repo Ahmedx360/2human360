@@ -32,7 +32,7 @@ public:
     [[nodiscard]] bool set();
     [[nodiscard]] bool reset();
     void clear();
-    [[nodiscard]] bool is_signaled() const noexcept;
+    [[nodiscard]] bool is_signaled() noexcept;
     [[nodiscard]] std::uint32_t guest_object_address() const noexcept override {
         return guest_object_address_;
     }

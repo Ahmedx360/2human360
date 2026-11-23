@@ -55,7 +55,7 @@ void GuestEventObject::clear() {
     (void)reset();
 }
 
-bool GuestEventObject::is_signaled() const noexcept {
+bool GuestEventObject::is_signaled() noexcept {
     std::lock_guard lock(mutex_);
     return signaled_;
 }
