@@ -105,6 +105,9 @@ private:
         std::uint64_t value) noexcept;
     void handle_xenos_mmio_write(std::uint32_t address, std::uint8_t width,
                                  std::uint64_t value) noexcept;
+    [[nodiscard]] bool resolve_xenos_scratch_write(
+        std::uint32_t index, std::uint32_t& physical_address,
+        bool& writeback_enabled) const noexcept;
     static bool dispatch_xenos_register_write(
         void* context, std::uint32_t index, std::uint32_t value);
     static bool validate_xenos_register_write(

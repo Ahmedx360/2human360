@@ -569,6 +569,39 @@ void PpcImportRegistry::handle_xenos_mmio_write(
     const bool write_pointer_update =
         address == kCpRingWritePointer && width == sizeof(std::uint32_t);
 
+    // The Xenos scratch register window (0x578..0x57F) mirrors enabled writes
+    // into guest physical memory. CPU MMIO stores reach this observer, while
+    // PM4 writes use the register callback below.
+    constexpr std::uint32_t kScratchRegisterFirst = 0x0578u;
+    constexpr std::uint32_t kScratchRegisterLast = 0x057Fu;
+    const auto scratch_register_address =
+        kXenosMmioBase + kScratchRegisterFirst * sizeof(std::uint32_t);
+    if (width == sizeof(std::uint32_t) &&
+        address >= scratch_register_address &&
+        address <= kXenosMmioBase +
+            kScratchRegisterLast * sizeof(std::uint32_t)) {
+        const auto index = (address - kXenosMmioBase) /
+                           sizeof(std::uint32_t);
+        std::uint32_t physical_address = 0;
+        bool writeback_enabled = false;
+        if (!resolve_xenos_scratch_write(
+                index, physical_address, writeback_enabled)) {
+            std::fprintf(stderr,
+                "[TooHuman][Xenos] scratch register writeback rejected (register=0x%04X value=0x%08X)\\n",
+                index, static_cast<std::uint32_t>(value));
+        } else if (writeback_enabled) {
+            const std::array<std::uint32_t, 1> data{
+                static_cast<std::uint32_t>(value)
+            };
+            if (!write_xenos_guest_physical_dwords(
+                    *memory_, physical_address, data)) {
+                std::fprintf(stderr,
+                    "[TooHuman][Xenos] scratch register writeback failed (register=0x%04X address=0x%08X)\\n",
+                    index, physical_address);
+            }
+        }
+    }
+
     if (!write_pointer_update) {
         // A guest CPU write to the register currently polled by WAIT_REG_MEM
         // is an observable wake-up. The write has already reached the MMIO
@@ -635,11 +668,66 @@ void PpcImportRegistry::handle_xenos_mmio_write(
             xenos_command_processor_.write_index());
     }
 }
+bool PpcImportRegistry::resolve_xenos_scratch_write(
+    std::uint32_t index, std::uint32_t& physical_address,
+    bool& writeback_enabled) const noexcept {
+    constexpr std::uint32_t kScratchMaskRegister = 0x01DCu;
+    constexpr std::uint32_t kScratchAddressRegister = 0x01DDu;
+    constexpr std::uint32_t kScratchRegisterFirst = 0x0578u;
+    constexpr std::uint32_t kScratchRegisterLast = 0x057Fu;
+    physical_address = 0;
+    writeback_enabled = false;
+
+    if (index < kScratchRegisterFirst || index > kScratchRegisterLast)
+        return true;
+
+    const auto scratch_index = index - kScratchRegisterFirst;
+    const auto mask = static_cast<std::uint32_t>(GuestMmioBus::global().read(
+        kXenosMmioBase + kScratchMaskRegister * sizeof(std::uint32_t), 4));
+    if ((mask & (1u << scratch_index)) == 0)
+        return true;
+
+    writeback_enabled = true;
+    if (!memory_ || !memory_->valid())
+        return false;
+
+    const auto scratch_base = static_cast<std::uint32_t>(
+        GuestMmioBus::global().read(
+            kXenosMmioBase + kScratchAddressRegister * sizeof(std::uint32_t), 4));
+    const auto target64 = static_cast<std::uint64_t>(scratch_base) +
+                          scratch_index * sizeof(std::uint32_t);
+    if (target64 > std::numeric_limits<std::uint32_t>::max() ||
+        (target64 & 3u) != 0)
+        return false;
+
+    physical_address = static_cast<std::uint32_t>(target64);
+    std::uint32_t guest_address = 0;
+    if (!xenos_physical_to_guest_address(
+            physical_address, sizeof(std::uint32_t), guest_address))
+        return false;
+    return GuestAddressSpace::is_accessible_range(
+        memory_->base(), guest_address, sizeof(std::uint32_t),
+        GuestMemoryAccess::Write);
+}
+
 bool PpcImportRegistry::dispatch_xenos_register_write(
     void* context, std::uint32_t index, std::uint32_t value) {
-    (void)context;
-    if (index >= kGuestMmioWindowSize / sizeof(std::uint32_t))
+    auto* const registry = static_cast<PpcImportRegistry*>(context);
+    if (!registry || index >= kGuestMmioWindowSize / sizeof(std::uint32_t))
         return false;
+
+    std::uint32_t physical_address = 0;
+    bool writeback_enabled = false;
+    if (!registry->resolve_xenos_scratch_write(
+            index, physical_address, writeback_enabled))
+        return false;
+    if (writeback_enabled) {
+        const std::array<std::uint32_t, 1> data{value};
+        if (!write_xenos_guest_physical_dwords(
+                *registry->memory_, physical_address, data))
+            return false;
+    }
+
     const auto address = kXenosMmioBase + index * sizeof(std::uint32_t);
     return GuestMmioBus::global().write_unobserved(
         address, sizeof(std::uint32_t), value);
@@ -647,9 +735,15 @@ bool PpcImportRegistry::dispatch_xenos_register_write(
 
 bool PpcImportRegistry::validate_xenos_register_write(
     void* context, std::uint32_t index, std::uint32_t value) {
-    (void)context;
     (void)value;
-    return index < kGuestMmioWindowSize / sizeof(std::uint32_t);
+    auto* const registry = static_cast<PpcImportRegistry*>(context);
+    if (!registry || index >= kGuestMmioWindowSize / sizeof(std::uint32_t))
+        return false;
+
+    std::uint32_t physical_address = 0;
+    bool writeback_enabled = false;
+    return registry->resolve_xenos_scratch_write(
+        index, physical_address, writeback_enabled);
 }
 
 Pm4CallbackResult PpcImportRegistry::dispatch_xenos_type3(
@@ -911,10 +1005,9 @@ Pm4CallbackResult PpcImportRegistry::dispatch_xenos_type3(
                 return Pm4CallbackResult::Rejected;
             }
         } else {
-            if (write_address >= kRegisterCount) return Pm4CallbackResult::Rejected;
-            if (!GuestMmioBus::global().write_unobserved(
-                    kXenosMmioBase + write_address * sizeof(std::uint32_t),
-                    sizeof(std::uint32_t), write_data))
+            if (write_address >= kRegisterCount ||
+                !dispatch_xenos_register_write(
+                    registry, write_address, write_data))
                 return Pm4CallbackResult::Rejected;
         }
         return Pm4CallbackResult::Accepted;
@@ -952,8 +1045,7 @@ Pm4CallbackResult PpcImportRegistry::dispatch_xenos_type3(
             ? read_register(and_operand & kRegisterMask) : and_operand;
         value |= ((info >> 30) & 1u) != 0
             ? read_register(or_operand & kRegisterMask) : or_operand;
-        return GuestMmioBus::global().write_unobserved(
-            kXenosMmioBase + target * sizeof(std::uint32_t), 4, value)
+        return dispatch_xenos_register_write(registry, target, value)
             ? Pm4CallbackResult::Accepted : Pm4CallbackResult::Rejected;
     }
 

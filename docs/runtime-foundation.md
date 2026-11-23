@@ -127,7 +127,17 @@ registers. Registry-level locking serializes ring setup, write-pointer updates
 and synchronous pumping. Observer teardown waits for in-flight callbacks.
 
 This is not an asynchronous GPU worker or complete Xenos device. Type-0 and
-type-1 packets currently update the Xenos register-file mirror only. Type-3
+type-1 packets update the Xenos register-file mirror. Writes to the scratch
+register window (0x578-0x57F) also write through to guest physical memory
+when the corresponding bit is enabled in SCRATCH_UMSK (0x1DC); the base
+address comes from SCRATCH_ADDR (0x1DD). The complete dword destination is
+checked for committed writable guest memory before a PM4 packet is accepted.
+Direct scalar CPU MMIO writes and register-target REG_RMW/COND_WRITE use the
+same writeback behavior. This follows Xenia's documented register table and
+command-processor write path:
+[register table](https://github.com/xenia-project/xenia/blob/95a5c3ee250f80c3b9d139658649d9ffb6db3eec/src/xenia/gpu/register_table.inc),
+[write path](https://github.com/xenia-project/xenia/blob/95a5c3ee250f80c3b9d139658649d9ffb6db3eec/src/xenia/gpu/command_processor.cc).
+Type-3
 NOP (opcode `0x10`) is consumed; bin-mask/bin-select state is tracked through
 `SET_BIN_MASK`/`SET_BIN_SELECT` (opcodes `0x50`/`0x51`) and their low/high
 dword forms (`0x60`-`0x63`); `MEM_WRITE` (opcode `0x3D`) writes its dword

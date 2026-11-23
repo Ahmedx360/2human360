@@ -450,6 +450,42 @@ int main() {
     import_thunk(context, memory.base());
     assert(context.r3.u32 == 0xBEEF1234u);
 
+    // Xenos scratch-register writes mirror selected register values into
+    // checked guest physical memory. The mask and address are programmed
+    // before a three-register Type-0 packet writes scratch slots 0, 1 and 2.
+    assert(imports.initialize_xenos_ring(0x00010000u, 6u, &error));
+    put_guest_be32(0xA0010000u, (1u << 16) | 0x01DCu); // SCRATCH_UMSK, then ADDR.
+    put_guest_be32(0xA0010004u, 0x5u);                 // Enable slots 0 and 2.
+    put_guest_be32(0xA0010008u, 0x00060040u);          // Guest physical alias A0060040.
+    put_guest_be32(0xA001000Cu, (2u << 16) | 0x0578u); // Three scratch registers.
+    put_guest_be32(0xA0010010u, 0x11111111u);
+    put_guest_be32(0xA0010014u, 0x22222222u);
+    put_guest_be32(0xA0010018u, 0x33333333u);
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 7u);
+    assert(imports.xenos_command_processor().read_index() == 7u);
+    assert(read_guest_be32(0xA0060040u) == 0x11111111u);
+    assert(read_guest_be32(0xA0060044u) == 0u); // Slot 1 is masked off.
+    assert(read_guest_be32(0xA0060048u) == 0x33333333u);
+    assert(GuestMmioBus::global().read(
+        kXenosMmioBase + 0x0579u * 4u, 4) == 0x22222222u);
+
+    // Direct CPU MMIO writes use the same scratch writeback behavior.
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01DCu * 4u, 0xDu);
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x057Bu * 4u, 0x44444444u);
+    assert(read_guest_be32(0xA006004Cu) == 0x44444444u);
+
+    // Invalid scratch destinations reject the PM4 packet before the register
+    // mirror or previously committed scratch memory is modified.
+    put_guest_be32(0xA001001Cu, 0x8000u | 0x01DDu); // SCRATCH_ADDR = uncommitted page.
+    put_guest_be32(0xA0010020u, 0x00080000u);
+    put_guest_be32(0xA0010024u, 0x8000u | 0x0578u); // One write to scratch slot 0.
+    put_guest_be32(0xA0010028u, 0x99999999u);
+    ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 11u);
+    assert(imports.xenos_command_processor().read_index() == 9u);
+    assert(GuestMmioBus::global().read(
+        kXenosMmioBase + 0x0578u * 4u, 4) == 0x11111111u);
+    assert(read_guest_be32(0xA0060040u) == 0x11111111u);
+
     const auto call_test_import = [&](std::uint32_t thunk, PPCContext& ctx) {
         ctx.ctr.u32 = thunk;
         const auto function = memory.get_function<PPCFunc*>(thunk);
