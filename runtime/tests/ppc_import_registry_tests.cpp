@@ -88,7 +88,7 @@ int main() {
                                     &test_import_handler, &error));
     std::size_t startup_hle_count = 0;
     assert(toohuman::runtime::register_boot_imports(imports, &error, &startup_hle_count));
-    assert(startup_hle_count == 72u);
+    assert(startup_hle_count == 76u);
     const std::vector<toohuman::runtime::XexImport> metadata{
         {"xboxkrnl.exe", 0x74u, 0, 1, 0x82001100u},
         {"xboxkrnl.exe", 0x011Bu, 0, 1, 0x82001104u},
@@ -137,12 +137,16 @@ int main() {
         {"xboxkrnl.exe", 0x01C9u, 0, 1, 0x820011B0u},
         {"xboxkrnl.exe", 0x01CAu, 0, 1, 0x820011B4u},
         {"xam.xex",      0x03D1u, 0, 1, 0x820011B8u},
+        {"xam.xex",      0x0190u, 0, 1, 0x820011C4u},
+        {"xam.xex",      0x0191u, 0, 1, 0x820011C8u},
+        {"xam.xex",      0x0192u, 0, 1, 0x820011CCu},
+        {"xam.xex",      0x0198u, 0, 1, 0x820011D0u},
         {"xboxkrnl.exe", 0x01B6u, 0, 1, 0x820011BCu},
         {"xboxkrnl.exe", 0x01C3u, 0, 1, 0x820011C0u}
     };
     std::size_t registered = 0;
     assert(imports.install(memory, metadata, &registered, &error));
-    assert(registered == 49u);
+    assert(registered == 53u);
     assert(memory.get_function<PPCFunc*>(0x82001100u) != &test_default_handler);
 
     // The real kernel imports configure the per-title primary Xenos ring.
@@ -672,6 +676,43 @@ int main() {
         (std::uint32_t(mode_bytes[2]) << 8) | mode_bytes[3];
     assert(mode_width == 1280u);
 
+    // XAM controller imports bind to the headless disconnected-device profile.
+    PPCContext input_capabilities{};
+    input_capabilities.r3.u32 = 0xFFu;
+    input_capabilities.r4.u32 = 1u;
+    input_capabilities.r5.u32 = 0;
+    call_test_import(0x820011C4u, input_capabilities);
+    assert(input_capabilities.r3.u32 == 0xA0u); // ERROR_BAD_ARGUMENTS.
+
+    input_capabilities = {};
+    input_capabilities.r5.u32 = 0x82013040u;
+    call_test_import(0x820011C4u, input_capabilities);
+    assert(input_capabilities.r3.u32 == 0x48Fu); // ERROR_DEVICE_NOT_CONNECTED.
+
+    PPCContext input_state{};
+    input_state.r5.u32 = 0; // NULL is a permitted connection query.
+    call_test_import(0x820011C8u, input_state);
+    assert(input_state.r3.u32 == 0x48Fu);
+
+    PPCContext input_set_state{};
+    call_test_import(0x820011CCu, input_set_state);
+    assert(input_set_state.r3.u32 == 0xA0u);
+    input_set_state = {};
+    input_set_state.r5.u32 = 0x82013040u;
+    call_test_import(0x820011CCu, input_set_state);
+    assert(input_set_state.r3.u32 == 0x48Fu);
+
+    PPCContext input_keystroke{};
+    input_keystroke.r3.u32 = 0x60000000u; // Invalid user-index pointer.
+    input_keystroke.r5.u32 = 0x82013050u;
+    call_test_import(0x820011D0u, input_keystroke);
+    assert(input_keystroke.r3.u32 == 0xA0u);
+    input_keystroke = {};
+    input_keystroke.r3.u32 = 0x82012080u;
+    input_keystroke.r5.u32 = 0x82013050u;
+    call_test_import(0x820011D0u, input_keystroke);
+    assert(input_keystroke.r3.u32 == 0x48Fu);
+
     PPCContext boot_context{};
     call_test_import(0x8200110Cu, boot_context); // KeGetCurrentProcessType
     assert(boot_context.r3.u32 == 1u);
@@ -1018,7 +1059,7 @@ int main() {
     auto directory_object = std::make_shared<toohuman::runtime::GuestFile>(
         directory_test_root, true, true, false, true);
     const auto directory_handle =
-        toohuman::runtime::toohuman::runtime::process_kernel_objects().insert(directory_object);
+        toohuman::runtime::process_kernel_objects().insert(directory_object);
     assert(directory_handle);
 
     constexpr std::uint32_t directory_name_descriptor = 0x82016200u;
@@ -1091,7 +1132,7 @@ int main() {
     call_test_import(0x820011A0u, boot_context);
     assert(boot_context.r3.u32 == 0xC0000005u);
 
-    assert(toohuman::runtime::toohuman::runtime::process_kernel_objects().close(*directory_handle));
+    assert(toohuman::runtime::process_kernel_objects().close(*directory_handle));
     std::filesystem::remove_all(directory_test_root);
 
 
@@ -1184,7 +1225,7 @@ int main() {
     boot_context.r4.u32 = 0x60000000u; // Invalid output pointer must not duplicate.
     call_test_import(0x8200119Cu, boot_context);
     assert(boot_context.r3.u32 == 0xC0000005u);
-    assert(toohuman::runtime::toohuman::runtime::process_kernel_objects().lookup(manual_event));
+    assert(toohuman::runtime::process_kernel_objects().lookup(manual_event));
 
     boot_context = {};
     boot_context.r3.u32 = manual_event;
@@ -1193,8 +1234,8 @@ int main() {
     assert(boot_context.r3.u32 == 0u);
     const auto duplicated_event1 = guest_be32(duplicate_out1);
     assert(duplicated_event1 != 0u && duplicated_event1 != manual_event);
-    assert(toohuman::runtime::toohuman::runtime::process_kernel_objects().lookup(duplicated_event1) ==
-           toohuman::runtime::toohuman::runtime::process_kernel_objects().lookup(manual_event));
+    assert(toohuman::runtime::process_kernel_objects().lookup(duplicated_event1) ==
+           toohuman::runtime::process_kernel_objects().lookup(manual_event));
 
     boot_context = {};
     boot_context.r3.u32 = duplicated_event1;
@@ -1204,8 +1245,8 @@ int main() {
     assert(boot_context.r3.u32 == 0u);
     const auto duplicated_event2 = guest_be32(duplicate_out2);
     assert(duplicated_event2 != 0u);
-    assert(!toohuman::runtime::toohuman::runtime::process_kernel_objects().lookup(duplicated_event1));
-    assert(toohuman::runtime::toohuman::runtime::process_kernel_objects().lookup(duplicated_event2));
+    assert(!toohuman::runtime::process_kernel_objects().lookup(duplicated_event1));
+    assert(toohuman::runtime::process_kernel_objects().lookup(duplicated_event2));
     boot_context = {};
     boot_context.r3.u32 = duplicated_event2;
     call_test_import(0x82001144u, boot_context); // NtClose.
@@ -1293,7 +1334,7 @@ int main() {
 
     // Thread completion handles share the event dispatcher table.
     toohuman::runtime::GuestThreadManager guest_threads(
-        toohuman::runtime::toohuman::runtime::process_kernel_objects());
+        toohuman::runtime::process_kernel_objects());
     const auto completed_thread = guest_threads.create(
         toohuman::runtime::GuestThreadStartup{},
         [](toohuman::runtime::GuestThreadStartup&, std::stop_token) { return 0x12345678u; },

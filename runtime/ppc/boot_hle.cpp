@@ -103,6 +103,8 @@ constexpr std::uint32_t kStatusInvalidHandle = 0xC0000008u;
 constexpr std::uint32_t kStatusInvalidParameter = 0xC000000Du;
 constexpr std::uint32_t kStatusAccessViolation = 0xC0000005u;
 constexpr std::uint32_t kStatusTimeout = 0x00000102u;
+constexpr std::uint32_t kXamErrorBadArguments = 0x000000A0u;
+constexpr std::uint32_t kXamErrorDeviceNotConnected = 0x0000048Fu;
 
 std::optional<std::chrono::milliseconds> decode_guest_timeout(
     std::uint8_t* base, std::uint32_t timeout_address) {
@@ -569,6 +571,46 @@ PPC_FUNC(ExGetXConfigSetting) {
 // xam.xex #0x282. Returning zero is Xenia's compatibility behavior.
 PPC_FUNC(XamGetSystemVersion) {
     ctx.r3.u32 = 0;
+}
+
+// XAM controller entry points use Win32-style X_RESULT codes. The runtime
+// has no host HID/controller provider yet, so valid queries report the
+// disconnected-device result rather than fabricate an idle pad.
+PPC_FUNC(XamInputGetCapabilities) {
+    if (ctx.r5.u32 == 0) {
+        ctx.r3.u32 = kXamErrorBadArguments;
+        return;
+    }
+    ctx.r3.u32 = kXamErrorDeviceNotConnected;
+}
+
+// XamInputGetState permits a null state pointer as a connection query.
+PPC_FUNC(XamInputGetState) {
+    (void)base;
+    ctx.r3.u32 = kXamErrorDeviceNotConnected;
+}
+
+PPC_FUNC(XamInputSetState) {
+    if (ctx.r5.u32 == 0) {
+        ctx.r3.u32 = kXamErrorBadArguments;
+        return;
+    }
+    ctx.r3.u32 = kXamErrorDeviceNotConnected;
+}
+
+PPC_FUNC(XamInputGetKeystrokeEx) {
+    const auto user_index_pointer = ctx.r3.u32;
+    const auto keystroke_pointer = ctx.r5.u32;
+    if (keystroke_pointer == 0 || user_index_pointer == 0 ||
+        !guest_range_valid(base, user_index_pointer, sizeof(std::uint32_t),
+                           GuestMemoryAccess::Read)) {
+        ctx.r3.u32 = kXamErrorBadArguments;
+        return;
+    }
+    // Validate and read the ABI input even though no physical controller
+    // provider is present to resolve it.
+    (void)get_be32(at(base, user_index_pointer));
+    ctx.r3.u32 = kXamErrorDeviceNotConnected;
 }
 
 // xam.xex #0x2DC. The caller passes ten arguments: args 9 and 10 are spilled

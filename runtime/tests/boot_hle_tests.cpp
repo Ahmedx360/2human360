@@ -237,6 +237,74 @@ void test_query_volume_information_file() {
     fs::remove_all(root);
 }
 
+void test_xam_controller_disconnected_profile() {
+    constexpr std::uint32_t kBadArguments = 0x000000A0u;
+    constexpr std::uint32_t kDeviceNotConnected = 0x0000048Fu;
+    constexpr std::uint32_t output = 0x7400u;
+    constexpr std::uint32_t user_index = 0x7500u;
+
+    // Capabilities requires an output pointer but does not fabricate a device.
+    PPCContext context{};
+    context.r5.u32 = 0;
+    boot_hle::XamInputGetCapabilities(context, base());
+    assert(context.r3.u32 == kBadArguments);
+
+    g_mem[output + 0] = 0xAAu;
+    g_mem[output + 1] = 0xBBu;
+    g_mem[output + 2] = 0xCCu;
+    g_mem[output + 3] = 0xDDu;
+    context = {};
+    context.r3.u32 = 0xFFu; // Any user.
+    context.r4.u32 = 1u;    // Gamepad.
+    context.r5.u32 = output;
+    boot_hle::XamInputGetCapabilities(context, base());
+    assert(context.r3.u32 == kDeviceNotConnected);
+    assert(be32(output) == 0xAABBCCDDu);
+
+    // GetState intentionally accepts NULL as a connection-only query.
+    context = {};
+    context.r3.u32 = 0xFFu;
+    context.r4.u32 = 1u;
+    context.r5.u32 = 0;
+    boot_hle::XamInputGetState(context, base());
+    assert(context.r3.u32 == kDeviceNotConnected);
+
+    context = {};
+    context.r5.u32 = 0;
+    boot_hle::XamInputSetState(context, base());
+    assert(context.r3.u32 == kBadArguments);
+    context = {};
+    context.r5.u32 = output;
+    boot_hle::XamInputSetState(context, base());
+    assert(context.r3.u32 == kDeviceNotConnected);
+
+    // KeystrokeEx requires both guest pointers; no connected device means
+    // the output record must remain untouched.
+    context = {};
+    context.r3.u32 = user_index;
+    context.r4.u32 = 1u;
+    context.r5.u32 = output;
+    boot_hle::XamInputGetKeystrokeEx(context, base());
+    assert(context.r3.u32 == kDeviceNotConnected);
+    assert(be32(output) == 0xAABBCCDDu);
+
+    context = {};
+    context.r3.u32 = user_index;
+    context.r5.u32 = 0;
+    boot_hle::XamInputGetKeystrokeEx(context, base());
+    assert(context.r3.u32 == kBadArguments);
+    context = {};
+    context.r3.u32 = 0;
+    context.r5.u32 = output;
+    boot_hle::XamInputGetKeystrokeEx(context, base());
+    assert(context.r3.u32 == kBadArguments);
+    context = {};
+    context.r3.u32 = 0xFFFFFFF0u; // Unmapped user-index pointer.
+    context.r5.u32 = output;
+    boot_hle::XamInputGetKeystrokeEx(context, base());
+    assert(context.r3.u32 == kBadArguments);
+}
+
 void test_video_display_queries() {
     constexpr std::uint32_t mode = 0x7000u;
     constexpr std::uint32_t display = 0x7100u;
@@ -693,6 +761,7 @@ int main() {
     test_rtl_image_xex_header_field();
     test_query_volume_information_file();
     test_video_display_queries();
+    test_xam_controller_disconnected_profile();
     test_critical_sections();
     test_tls();
     test_events();

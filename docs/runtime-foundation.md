@@ -245,8 +245,16 @@ import log remains the source of truth.
 prioritized by Too Human startup. It includes process/time queries; selected XConfig values; ANSI/Unicode string
 initialization and Latin-1 conversions; FILETIME/TIME_FIELDS conversions; XEX header/module/privilege queries;
 critical sections; 256 per-process kernel TLS indices with host-thread-local values; notification/synchronization events in a typed process handle table; selected
-XAM startup/message-box behavior; and diagnostic, exit, and networking-startup handlers. Register the handlers with
+XAM startup/message-box behavior; a disconnected-controller compatibility profile for `XamInputGetCapabilities`, `XamInputGetState`, `XamInputSetState`, and `XamInputGetKeystrokeEx`; and diagnostic, exit, and networking-startup handlers. Register the handlers with
 `register_boot_imports(registry)` before `initialize_title_runtime`.
+
+The XAM controller subset registers ordinals 0x0190, 0x0191, 0x0192,
+and 0x0198. It follows the Xenia/XAM result convention: required-null arguments
+return `ERROR_BAD_ARGUMENTS` (0xA0), while valid calls return
+`ERROR_DEVICE_NOT_CONNECTED` (0x48F), because this runtime has no host HID
+provider yet. `XamInputGetState` preserves the documented null-state connection
+query. No controller state is synthesized, and polling, keystrokes, and
+vibration remain unimplemented until a host input backend is added.
 
 The synchronization subset is deliberately bounded. Critical sections use recursive host mutexes and mirror the
 28-byte guest structure's lock count, recursion count, and owner. Events support notification/manual-reset and
