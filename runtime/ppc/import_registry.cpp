@@ -622,13 +622,13 @@ bool PpcImportRegistry::dispatch_xenos_type3(
     constexpr std::uint32_t kMaxIndirectBufferDwords = 0x00010000u;
     constexpr std::size_t kMaxIndirectBuffersPerBatch = 64u;
     constexpr std::size_t kMaxIndirectPackets = 256u;
-    (void)predicate;
-
     if (opcode == kPm4Nop)
         return true;
 
     if (opcode == kPm4IndirectBuffer || opcode == kPm4IndirectBufferPfd) {
-        if (payload.size() != 2u ||
+        // Bin-select predication is not modelled yet. Never execute a
+        // predicated indirect buffer as though its predicate were true.
+        if (predicate || payload.size() != 2u ||
             (payload[1] & ~kIndirectLengthMask) != 0 ||
             payload[1] == 0 || payload[1] > kMaxIndirectBufferDwords ||
             registry->xenos_indirect_depth_ != 0 ||
