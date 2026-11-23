@@ -618,14 +618,15 @@ bool PpcImportRegistry::validate_xenos_register_write(
     return index < kGuestMmioWindowSize / sizeof(std::uint32_t);
 }
 
-bool PpcImportRegistry::dispatch_xenos_type3(
+Pm4CallbackResult PpcImportRegistry::dispatch_xenos_type3(
     void* context, std::uint32_t opcode, bool predicate,
     std::span<const std::uint32_t> payload) {
     auto* const registry = static_cast<PpcImportRegistry*>(context);
-    if (!registry) return false;
+    if (!registry) return Pm4CallbackResult::Rejected;
 
     constexpr std::uint32_t kPm4Nop = 0x10u;
     constexpr std::uint32_t kPm4RegRmw = 0x21u;
+    constexpr std::uint32_t kPm4WaitRegMem = 0x3Cu;
     constexpr std::uint32_t kPm4CondWrite = 0x45u;
     constexpr std::uint32_t kPm4RegToMem = 0x3Eu;
     constexpr std::uint32_t kPm4MemWrite = 0x3Du;
@@ -645,14 +646,68 @@ bool PpcImportRegistry::dispatch_xenos_type3(
     // the current bin-select and bin-mask registers before executing a packet.
     if (predicate &&
         (registry->xenos_bin_select_ & registry->xenos_bin_mask_) == 0)
-        return true;
+        return Pm4CallbackResult::Accepted;
+
+    if (opcode == kPm4WaitRegMem) {
+        if (payload.size() != 5u || registry->memory_ == nullptr) {
+            std::fprintf(stderr,
+                "[TooHuman][Xenos] rejected PM4 WAIT_REG_MEM payload_dwords=%zu\\n",
+                payload.size());
+            return Pm4CallbackResult::Rejected;
+        }
+
+        // Xbox/Xenia WAIT_REG_MEM operands: waitInfo, poll address, reference,
+        // mask and wait interval. The wait interval is a polling hint; this
+        // synchronous pump never sleeps a game thread. An unmet predicate
+        // leaves the packet at RPTR until a later pump retries it.
+        const auto wait_info = payload[0];
+        const auto poll_address = payload[1];
+        const auto reference = payload[2];
+        const auto mask = payload[3];
+        (void)payload[4];
+        if ((wait_info & ~0x1FFu) != 0)
+            return Pm4CallbackResult::Rejected;
+
+        constexpr std::uint32_t kRegisterCount =
+            kGuestMmioWindowSize / sizeof(std::uint32_t);
+        const bool is_memory = (wait_info & 0x10u) != 0;
+        std::uint32_t observed = 0;
+        if (is_memory) {
+            if (!read_xenos_guest_physical_dword(
+                    *registry->memory_, poll_address, observed)) {
+                std::fprintf(stderr,
+                    "[TooHuman][Xenos] WAIT_REG_MEM physical poll is unreadable: 0x%08X\\n",
+                    poll_address);
+                return Pm4CallbackResult::Rejected;
+            }
+        } else {
+            if (poll_address >= kRegisterCount)
+                return Pm4CallbackResult::Rejected;
+            observed = static_cast<std::uint32_t>(GuestMmioBus::global().read(
+                kXenosMmioBase + poll_address * sizeof(std::uint32_t), 4));
+        }
+
+        bool matched = false;
+        switch (wait_info & 0x7u) {
+        case 0: matched = false; break; // Never.
+        case 1: matched = (observed & mask) < reference; break;
+        case 2: matched = (observed & mask) <= reference; break;
+        case 3: matched = (observed & mask) == reference; break;
+        case 4: matched = (observed & mask) != reference; break;
+        case 5: matched = (observed & mask) >= reference; break;
+        case 6: matched = (observed & mask) > reference; break;
+        case 7: matched = true; break; // Always.
+        }
+        return matched ? Pm4CallbackResult::Accepted
+                       : Pm4CallbackResult::Deferred;
+    }
 
     if (opcode == kPm4Nop)
-        return true;
+        return Pm4CallbackResult::Accepted;
 
     if (opcode == kPm4SetBinMaskLo || opcode == kPm4SetBinMaskHi ||
         opcode == kPm4SetBinSelectLo || opcode == kPm4SetBinSelectHi) {
-        if (payload.size() != 1u) return false;
+        if (payload.size() != 1u) return Pm4CallbackResult::Rejected;
         const auto word = static_cast<std::uint64_t>(payload[0]);
         constexpr std::uint64_t kLowMask = 0xFFFFFFFFull;
         if (opcode == kPm4SetBinMaskLo)
@@ -667,11 +722,11 @@ bool PpcImportRegistry::dispatch_xenos_type3(
         else
             registry->xenos_bin_select_ =
                 (registry->xenos_bin_select_ & kLowMask) | (word << 32);
-        return true;
+        return Pm4CallbackResult::Accepted;
     }
 
     if (opcode == kPm4SetBinMask || opcode == kPm4SetBinSelect) {
-        if (payload.size() != 2u) return false;
+        if (payload.size() != 2u) return Pm4CallbackResult::Rejected;
         // Packet order is low dword first, high dword second.
         const auto value = (static_cast<std::uint64_t>(payload[1]) << 32) |
                            payload[0];
@@ -679,7 +734,7 @@ bool PpcImportRegistry::dispatch_xenos_type3(
             registry->xenos_bin_mask_ = value;
         else
             registry->xenos_bin_select_ = value;
-        return true;
+        return Pm4CallbackResult::Accepted;
     }
 
     if (opcode == kPm4CondWrite) {
@@ -687,7 +742,7 @@ bool PpcImportRegistry::dispatch_xenos_type3(
             std::fprintf(stderr,
                 "[TooHuman][Xenos] rejected PM4 COND_WRITE predicate=%u payload_dwords=%zu\n",
                 predicate ? 1u : 0u, payload.size());
-            return false;
+            return Pm4CallbackResult::Rejected;
         }
 
         constexpr std::uint32_t kRegisterCount =
@@ -706,10 +761,10 @@ bool PpcImportRegistry::dispatch_xenos_type3(
                 std::fprintf(stderr,
                     "[TooHuman][Xenos] COND_WRITE poll address is unreadable: 0x%08X\n",
                     poll_address);
-                return false;
+                return Pm4CallbackResult::Rejected;
             }
         } else {
-            if (poll_address >= kRegisterCount) return false;
+            if (poll_address >= kRegisterCount) return Pm4CallbackResult::Rejected;
             observed = static_cast<std::uint32_t>(
                 GuestMmioBus::global().read(
                     kXenosMmioBase + poll_address * sizeof(std::uint32_t), 4));
@@ -726,7 +781,7 @@ bool PpcImportRegistry::dispatch_xenos_type3(
         case 6: matched = (observed & mask) > reference; break;
         case 7: matched = true; break;
         }
-        if (!matched) return true;
+        if (!matched) return Pm4CallbackResult::Accepted;
 
         if ((wait_info & 0x100u) != 0) {
             const std::array<std::uint32_t, 1> data{write_data};
@@ -735,16 +790,16 @@ bool PpcImportRegistry::dispatch_xenos_type3(
                 std::fprintf(stderr,
                     "[TooHuman][Xenos] COND_WRITE destination is not writable: 0x%08X\n",
                     write_address);
-                return false;
+                return Pm4CallbackResult::Rejected;
             }
         } else {
-            if (write_address >= kRegisterCount) return false;
+            if (write_address >= kRegisterCount) return Pm4CallbackResult::Rejected;
             if (!GuestMmioBus::global().write_unobserved(
                     kXenosMmioBase + write_address * sizeof(std::uint32_t),
                     sizeof(std::uint32_t), write_data))
-                return false;
+                return Pm4CallbackResult::Rejected;
         }
-        return true;
+        return Pm4CallbackResult::Accepted;
     }
 
     if (opcode == kPm4RegRmw) {
@@ -752,7 +807,7 @@ bool PpcImportRegistry::dispatch_xenos_type3(
             std::fprintf(stderr,
                 "[TooHuman][Xenos] rejected PM4 REG_RMW predicate=%u payload_dwords=%zu\n",
                 predicate ? 1u : 0u, payload.size());
-            return false;
+            return Pm4CallbackResult::Rejected;
         }
 
         constexpr std::uint32_t kRegisterMask = 0x1FFFu;
@@ -767,7 +822,7 @@ bool PpcImportRegistry::dispatch_xenos_type3(
              (and_operand & kRegisterMask) >= kMmioRegisterCount) ||
             (((info >> 30) & 1u) != 0 &&
              (or_operand & kRegisterMask) >= kMmioRegisterCount)) {
-            return false;
+            return Pm4CallbackResult::Rejected;
         }
 
         const auto read_register = [](std::uint32_t index) {
@@ -790,7 +845,7 @@ bool PpcImportRegistry::dispatch_xenos_type3(
                 "[TooHuman][Xenos] rejected PM4 REG_TO_MEM predicate=%u register=0x%08X payload_dwords=%zu\n",
                 predicate ? 1u : 0u,
                 payload.empty() ? 0u : payload[0], payload.size());
-            return false;
+            return Pm4CallbackResult::Rejected;
         }
         const auto value = static_cast<std::uint32_t>(
             GuestMmioBus::global().read(
@@ -801,9 +856,9 @@ bool PpcImportRegistry::dispatch_xenos_type3(
             std::fprintf(stderr,
                 "[TooHuman][Xenos] rejected PM4 REG_TO_MEM destination=0x%08X\n",
                 payload[1]);
-            return false;
+            return Pm4CallbackResult::Rejected;
         }
-        return true;
+        return Pm4CallbackResult::Accepted;
     }
 
     if (opcode == kPm4MemWrite) {
@@ -815,9 +870,9 @@ bool PpcImportRegistry::dispatch_xenos_type3(
                 "[TooHuman][Xenos] rejected PM4 MEM_WRITE address=0x%08X data_dwords=%zu\n",
                 payload.empty() ? 0u : payload[0],
                 payload.size() > 0u ? payload.size() - 1u : 0u);
-            return false;
+            return Pm4CallbackResult::Rejected;
         }
-        return true;
+        return Pm4CallbackResult::Accepted;
     }
 
     if (opcode == kPm4IndirectBuffer || opcode == kPm4IndirectBufferPfd) {
@@ -835,7 +890,7 @@ bool PpcImportRegistry::dispatch_xenos_type3(
                 payload.size() < 2u ? 0u : payload[1],
                 registry->xenos_indirect_depth_,
                 registry->xenos_indirect_buffers_this_batch_);
-            return false;
+            return Pm4CallbackResult::Rejected;
         }
 
         ++registry->xenos_indirect_depth_;
@@ -858,9 +913,9 @@ bool PpcImportRegistry::dispatch_xenos_type3(
                 indirect.dispatch.packets,
                 indirect.dispatch.dwords_consumed,
                 payload[0], payload[1]);
-            return false;
+            return Pm4CallbackResult::Rejected;
         }
-        return true;
+        return Pm4CallbackResult::Accepted;
     }
 
     std::fprintf(stderr,
@@ -870,7 +925,7 @@ bool PpcImportRegistry::dispatch_xenos_type3(
     for (std::size_t i = 0; i < preview; ++i)
         std::fprintf(stderr, " %08X", payload[i]);
     std::fprintf(stderr, "\n");
-    return false;
+    return Pm4CallbackResult::Rejected;
 }
 
 void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
