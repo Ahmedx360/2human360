@@ -589,10 +589,9 @@ GuestKernelObjectWaitResult GuestKernelObjectTable::wait_multiple(
 
         if (wait_all) {
             for (std::size_t i = 0; i < objects.size(); ++i) {
-                if (!is_ready(objects[i])) {
-                    all_ready = false;
-                    break;
-                }
+                // Probe every object even after finding an unsignaled one so an
+                // unsupported object type is not hidden behind an earlier timeout.
+                if (!is_ready(objects[i])) all_ready = false;
             }
             if (invalid_object)
                 return GuestKernelObjectWaitResult::InvalidHandle;
