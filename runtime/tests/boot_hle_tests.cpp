@@ -474,13 +474,22 @@ void test_wait_for_multiple_objects_hle() {
     boot_hle::NtWaitForMultipleObjectsEx(context, base());
     assert(context.r3.u32 == 0xC000000Du); // STATUS_INVALID_PARAMETER.
 
-    // WaitAll cannot contain two handles to the same dispatcher object.
+    // Duplicate dispatcher objects are invalid for either wait mode.
     put_be32_test(handles_array + 4u, *first_handle);
     context = {};
     context.r3.u32 = 2u;
     context.r4.u32 = handles_array;
-    context.r5.u32 = 0u;
-    context.r7.u32 = 0u; // KernelMode, not alertable.
+    context.r5.u32 = 0u; // WaitAll.
+    context.r7.u32 = 0u;
+    context.r8.u32 = timeout;
+    boot_hle::NtWaitForMultipleObjectsEx(context, base());
+    assert(context.r3.u32 == 0xC000000Du); // STATUS_INVALID_PARAMETER.
+
+    context = {};
+    context.r3.u32 = 2u;
+    context.r4.u32 = handles_array;
+    context.r5.u32 = 1u; // WaitAny.
+    context.r7.u32 = 0u;
     context.r8.u32 = timeout;
     boot_hle::NtWaitForMultipleObjectsEx(context, base());
     assert(context.r3.u32 == 0xC000000Du); // STATUS_INVALID_PARAMETER.
