@@ -15,6 +15,8 @@ struct Capture {
     std::vector<std::uint32_t> type3_payload;
     bool reject_register{};
     bool reject_type3{};
+    std::uint32_t reject_validation_index{0xFFFFFFFFu};
+    std::size_t validation_calls{};
 };
 
 bool write_register(void* opaque, std::uint32_t index, std::uint32_t value) {
@@ -22,6 +24,13 @@ bool write_register(void* opaque, std::uint32_t index, std::uint32_t value) {
     if (capture.reject_register) return false;
     capture.registers.emplace_back(index, value);
     return true;
+}
+
+bool validate_register(void* opaque, std::uint32_t index,
+                       std::uint32_t) {
+    auto& capture = *static_cast<Capture*>(opaque);
+    ++capture.validation_calls;
+    return index != capture.reject_validation_index;
 }
 
 bool type3(void* opaque, std::uint32_t opcode, bool predicate,
@@ -102,6 +111,26 @@ int main() {
         const auto stopped = dispatch_pm4_stream(stream, cb, 8);
         assert(!stopped);
         assert(stopped.error == Pm4DispatchError::CallbackRejected);
+        assert(stopped.packets == 0u);
+        assert(stopped.dwords_consumed == 0u);
+    }
+
+    {
+        // A packet's full register run must pass preflight before the first
+        // write is applied. The second index is outside the Xenos aperture.
+        constexpr std::array<std::uint32_t, 3> out_of_range_type0{
+            (1u << 16) | 0x3FFFu, 0x11111111u, 0x22222222u
+        };
+        Capture preflight;
+        preflight.reject_validation_index = 0x4000u;
+        const Pm4DispatchCallbacks cb{
+            &preflight, write_register, type3, validate_register
+        };
+        const auto stopped = dispatch_pm4_stream(out_of_range_type0, cb, 4u);
+        assert(!stopped);
+        assert(stopped.error == Pm4DispatchError::CallbackRejected);
+        assert(preflight.validation_calls == 2u);
+        assert(preflight.registers.empty());
         assert(stopped.packets == 0u);
         assert(stopped.dwords_consumed == 0u);
     }
