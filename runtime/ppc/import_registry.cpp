@@ -651,7 +651,7 @@ Pm4CallbackResult PpcImportRegistry::dispatch_xenos_type3(
     if (opcode == kPm4WaitRegMem) {
         if (payload.size() != 5u || registry->memory_ == nullptr) {
             std::fprintf(stderr,
-                "[TooHuman][Xenos] rejected PM4 WAIT_REG_MEM payload_dwords=%zu\\n",
+                "[TooHuman][Xenos] rejected PM4 WAIT_REG_MEM payload_dwords=%zu\n",
                 payload.size());
             return Pm4CallbackResult::Rejected;
         }
@@ -676,7 +676,7 @@ Pm4CallbackResult PpcImportRegistry::dispatch_xenos_type3(
             if (!read_xenos_guest_physical_dword(
                     *registry->memory_, poll_address, observed)) {
                 std::fprintf(stderr,
-                    "[TooHuman][Xenos] WAIT_REG_MEM physical poll is unreadable: 0x%08X\\n",
+                    "[TooHuman][Xenos] WAIT_REG_MEM physical poll is unreadable: 0x%08X\n",
                     poll_address);
                 return Pm4CallbackResult::Rejected;
             }
