@@ -398,6 +398,38 @@ void test_wait_for_multiple_objects_hle() {
 
     assert(process_kernel_objects().close(*first_handle));
     assert(process_kernel_objects().close(*second_handle));
+
+    // The same wait-set path must acquire the other dispatcher primitives.
+    auto semaphore = std::make_shared<GuestSemaphoreObject>(1u, 1u);
+    auto mutant = std::make_shared<GuestMutantObject>();
+    auto timer = std::make_shared<GuestTimerObject>(false);
+    timer->set_timer(std::chrono::milliseconds::zero(), 0u);
+    const auto semaphore_handle = process_kernel_objects().insert(semaphore);
+    const auto mutant_handle = process_kernel_objects().insert(mutant);
+    const auto timer_handle = process_kernel_objects().insert(timer);
+    assert(semaphore_handle && mutant_handle && timer_handle);
+    put_be32_test(handles_array, *semaphore_handle);
+    put_be32_test(handles_array + 4u, *mutant_handle);
+    put_be32_test(handles_array + 8u, *timer_handle);
+
+    context = {};
+    context.r3.u32 = 3u;
+    context.r4.u32 = handles_array;
+    context.r5.u32 = 0u; // WaitAll.
+    context.r7.u32 = timeout;
+    boot_hle::NtWaitForMultipleObjectsEx(context, base());
+    assert(context.r3.u32 == 0u);
+    assert(semaphore->count() == 0u);
+    assert(mutant->recursion_count() == 1u);
+    assert(timer->wait(std::chrono::milliseconds::zero()) ==
+           GuestKernelObjectWaitResult::Timeout); // Auto-reset timer was consumed.
+
+    std::uint32_t previous_count = 0;
+    assert(semaphore->release(1u, previous_count));
+    assert(mutant->release());
+    assert(process_kernel_objects().close(*semaphore_handle));
+    assert(process_kernel_objects().close(*mutant_handle));
+    assert(process_kernel_objects().close(*timer_handle));
 }
 
 void test_waitable_timer_hle() {
