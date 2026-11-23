@@ -254,9 +254,9 @@ int main() {
     // second register when the masked value matches.
     put_guest_be32(0xA0010044u,
         0xC0000000u | (5u << 16) | (0x45u << 8));
-    put_guest_be32(0xA0010048u, 3u); // Equal, register source, register target.
-    put_guest_be32(0xA001004Cu, 0x30u);
-    put_guest_be32(0xA0010050u, 0x55BB00FFu);
+    put_guest_be32(0xA0010048u, 0x13u); // Equal, memory source, register target.
+    put_guest_be32(0xA001004Cu, 0x00060000u);
+    put_guest_be32(0xA0010050u, 0xCAFEBABEu);
     put_guest_be32(0xA0010054u, 0xFFFFFFFFu);
     put_guest_be32(0xA0010058u, 0x31u);
     put_guest_be32(0xA001005Cu, 0x0BADF00Du);
