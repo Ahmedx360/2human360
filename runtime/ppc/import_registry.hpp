@@ -109,7 +109,7 @@ private:
         void* context, std::uint32_t index, std::uint32_t value);
     static bool validate_xenos_register_write(
         void* context, std::uint32_t index, std::uint32_t value);
-    static bool dispatch_xenos_type3(
+    static Pm4CallbackResult dispatch_xenos_type3(
         void* context, std::uint32_t opcode, bool predicate,
         std::span<const std::uint32_t> payload);
 
