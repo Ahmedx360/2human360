@@ -1568,9 +1568,8 @@ PPC_FUNC(KeWaitForMultipleObjects) {
                 ctx.r3.u32 = kStatusAccessViolation;
                 return;
             }
-            {
-                if (wait_type == 0u) {
-            for (const auto& previous : objects) {
+            if (wait_type == 0u) {
+                for (const auto& previous : objects) {
                     if (previous.get() == object.get()) {
                         ctx.r3.u32 = kStatusInvalidParameter;
                         return;
@@ -1585,7 +1584,7 @@ PPC_FUNC(KeWaitForMultipleObjects) {
     }
 
     // WaitReason, WaitMode and WaitBlockArray are scheduling hints/storage.
-    // The host implementation polls without APC delivery or a guest wait block.
+    // The shared wait-set notification domain avoids fixed-interval polling.
     const auto timeout = decode_guest_timeout(base, timeout_address);
     std::size_t signaled_index = 0;
     GuestKernelObjectWaitResult result{};
@@ -1616,6 +1615,7 @@ PPC_FUNC(KeWaitForMultipleObjects) {
         ctx.r3.u32 = kStatusAbandonedWait0;
     }
 }
+
 
 PPC_FUNC(KeWaitForSingleObject) {
     const auto object_address = ctx.r3.u32;
@@ -1756,10 +1756,11 @@ PPC_FUNC(NtWaitForMultipleObjectsEx) {
                 return;
             }
             if (wait_type == 0u) {
-            for (const auto& previous : objects) {
-                if (previous.get() == object.get()) {
-                    ctx.r3.u32 = kStatusInvalidParameter;
-                    return;
+                for (const auto& previous : objects) {
+                    if (previous.get() == object.get()) {
+                        ctx.r3.u32 = kStatusInvalidParameter;
+                        return;
+                    }
                 }
             }
             objects.push_back(std::move(object));
@@ -1793,6 +1794,7 @@ PPC_FUNC(NtWaitForMultipleObjectsEx) {
         break;
     }
 }
+
 
 // xboxkrnl #0xDA. NtDuplicateObject(HANDLE src /*r3*/, HANDLE* out /*r4*/, ULONG options /*r5*/).
 // Pseudo-handles (-1 process, -2 thread) are given a placeholder signaled event object.
