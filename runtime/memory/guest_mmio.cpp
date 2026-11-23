@@ -111,7 +111,15 @@ bool GuestMmioBus::write_impl(std::uint32_t address, std::uint8_t width,
     }
 
     if (observer) {
-        observer(observer_context, address, width, value);
+        if (width == 8) {
+            // Match the Xenos 64-bit MMIO path: two ordered 32-bit register
+            // writes, with the high dword at the lower address.
+            observer(observer_context, address, 4, value >> 32);
+            observer(observer_context, address + 4u, 4,
+                     static_cast<std::uint32_t>(value));
+        } else {
+            observer(observer_context, address, width, value);
+        }
         std::lock_guard lock(mutex_);
         --observer_callbacks_in_flight_;
         if (observer_callbacks_in_flight_ == 0) observer_idle_.notify_all();
