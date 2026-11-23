@@ -17,9 +17,11 @@ struct GuestKernelObjectWaitChanges {
 
     void notify() noexcept {
         if (waiters.load() == 0u) return;
-        {
+        try {
             std::lock_guard lock(mutex);
             ++epoch;
+        } catch (...) {
+            return;
         }
         condition.notify_all();
     }
