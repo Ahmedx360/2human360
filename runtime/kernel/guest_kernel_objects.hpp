@@ -24,14 +24,21 @@ public:
 };
 class GuestEventObject final : public GuestKernelObject {
 public:
-    explicit GuestEventObject(bool manual_reset, bool initially_signaled = false);
+    explicit GuestEventObject(bool manual_reset, bool initially_signaled = false,
+                              std::uint32_t guest_object_address = 0);
     [[nodiscard]] GuestKernelObjectType type() const noexcept override;
     [[nodiscard]] GuestKernelObjectWaitResult wait(
         std::optional<std::chrono::milliseconds> timeout) override;
     [[nodiscard]] bool set();
+    [[nodiscard]] bool reset();
     void clear();
+    [[nodiscard]] bool is_signaled() const noexcept;
+    [[nodiscard]] std::uint32_t guest_object_address() const noexcept override {
+        return guest_object_address_;
+    }
 private:
     const bool manual_reset_;
+    const std::uint32_t guest_object_address_{};
     bool signaled_{};
     std::mutex mutex_;
     std::condition_variable condition_;

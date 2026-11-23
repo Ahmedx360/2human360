@@ -1254,6 +1254,70 @@ PPC_FUNC(KeReleaseSemaphore) {
 }
 
 // xboxkrnl #0xB0. Wait on a guest-addressed dispatcher object.
+// xboxkrnl #0x70. Native KEVENT dispatcher records are 0x10 bytes.
+PPC_FUNC(KeInitializeEvent) {
+    const auto address = ctx.r3.u32;
+    const auto event_type = ctx.r4.u32; // 0 notification/manual, 1 synchronization/auto.
+    const auto initial_state = ctx.r5.u32;
+    if ((address & 3u) != 0 ||
+        !guest_range_valid(base, address, 0x10u, GuestMemoryAccess::Write)) {
+        ctx.r3.u32 = kStatusAccessViolation;
+        return;
+    }
+    if (event_type > 1u || initial_state > 1u) {
+        ctx.r3.u32 = kStatusInvalidParameter;
+        return;
+    }
+
+    std::shared_ptr<GuestEventObject> event;
+    try {
+        event = std::make_shared<GuestEventObject>(
+            event_type == 0u, initial_state != 0u, address);
+    } catch (...) {
+        ctx.r3.u32 = 0xC0000017u; // STATUS_NO_MEMORY.
+        return;
+    }
+    if (!process_kernel_objects().insert_at(address, event)) {
+        ctx.r3.u32 = kStatusInvalidParameter;
+        return;
+    }
+
+    auto* const bytes = at(base, address);
+    std::memset(bytes, 0, 0x10u);
+    bytes[0] = static_cast<std::uint8_t>(event_type);
+    put_be32(bytes + 4u, initial_state);
+    guest_memory_write_observed(bytes, 0x10u);
+    ctx.r3.u32 = kStatusSuccess;
+}
+
+// xboxkrnl #0x9D. Return the previous signal state.
+PPC_FUNC(KeSetEvent) {
+    auto object = process_kernel_objects().lookup(ctx.r3.u32);
+    auto event = std::dynamic_pointer_cast<GuestEventObject>(std::move(object));
+    if (!event) {
+        ctx.r3.u32 = 0;
+        return;
+    }
+    const auto previous = event->set() ? 1u : 0u;
+    if (event->guest_object_address() != 0)
+        put_be32(at(base, event->guest_object_address() + 4u), 1u);
+    ctx.r3.u32 = previous;
+}
+
+// xboxkrnl #0x8F. Return the previous signal state.
+PPC_FUNC(KeResetEvent) {
+    auto object = process_kernel_objects().lookup(ctx.r3.u32);
+    auto event = std::dynamic_pointer_cast<GuestEventObject>(std::move(object));
+    if (!event) {
+        ctx.r3.u32 = 0;
+        return;
+    }
+    const auto previous = event->reset() ? 1u : 0u;
+    if (event->guest_object_address() != 0)
+        put_be32(at(base, event->guest_object_address() + 4u), 0u);
+    ctx.r3.u32 = previous;
+}
+
 PPC_FUNC(KeWaitForSingleObject) {
     const auto object_address = ctx.r3.u32;
     auto object = process_kernel_objects().lookup(object_address);
@@ -1275,6 +1339,11 @@ PPC_FUNC(KeWaitForSingleObject) {
             semaphore && semaphore->guest_object_address() != 0) {
             put_be32(at(base, semaphore->guest_object_address() + 4u),
                      semaphore->count());
+        } else if (auto event =
+                       std::dynamic_pointer_cast<GuestEventObject>(object);
+                   event && event->guest_object_address() != 0) {
+            put_be32(at(base, event->guest_object_address() + 4u),
+                     event->is_signaled() ? 1u : 0u);
         }
         ctx.r3.u32 = kStatusSuccess;
     } else if (result == GuestKernelObjectWaitResult::Timeout) {

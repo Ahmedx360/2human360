@@ -98,6 +98,28 @@ int main() {
     assert(semaphore->count() == 0u);
     assert(objects.close(*semaphore_handle));
 
+    // Native events carry their guest dispatcher-header address as the object key.
+    constexpr GuestKernelHandle native_event_address = 0xA0123200u;
+    auto native_event = std::make_shared<GuestEventObject>(
+        true, true, native_event_address);
+    assert(objects.insert_at(native_event_address, native_event));
+    assert(native_event->guest_object_address() == native_event_address);
+    assert(objects.wait(native_event_address, 0ms) ==
+           GuestKernelObjectWaitResult::Signaled);
+    assert(native_event->is_signaled()); // Notification events remain set.
+    assert(native_event->reset());
+    assert(!native_event->is_signaled());
+    assert(objects.close(native_event_address));
+
+    constexpr GuestKernelHandle native_auto_event_address = 0xA0123220u;
+    auto native_auto_event = std::make_shared<GuestEventObject>(
+        false, true, native_auto_event_address);
+    assert(objects.insert_at(native_auto_event_address, native_auto_event));
+    assert(objects.wait(native_auto_event_address, 0ms) ==
+           GuestKernelObjectWaitResult::Signaled);
+    assert(!native_auto_event->is_signaled()); // Synchronization wait consumes state.
+    assert(objects.close(native_auto_event_address));
+
     // Native semaphore objects can be found by their guest KSEMAPHORE address.
     constexpr GuestKernelHandle native_semaphore_address = 0xA0123400u;
     auto native_semaphore = std::make_shared<GuestSemaphoreObject>(

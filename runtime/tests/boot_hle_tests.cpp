@@ -305,6 +305,88 @@ void test_xam_controller_disconnected_profile() {
     assert(context.r3.u32 == kBadArguments);
 }
 
+void test_native_event_dispatcher_object() {
+    constexpr std::uint32_t notification_event = 0x7600u;
+    constexpr std::uint32_t synchronization_event = 0x7620u;
+    constexpr std::uint32_t timeout = 0x7200u;
+    constexpr std::uint32_t kStatusTimeout = 0x00000102u;
+
+    std::memset(base() + timeout, 0, 8u);
+    PPCContext context{};
+    context.r3.u32 = notification_event;
+    context.r4.u32 = 0u; // NotificationEvent.
+    context.r5.u32 = 1u; // Initially signaled.
+    boot_hle::KeInitializeEvent(context, base());
+    assert(context.r3.u32 == 0u);
+    assert(g_mem[notification_event] == 0u);
+    assert(be32(notification_event + 4u) == 1u);
+
+    context = {};
+    context.r3.u32 = notification_event;
+    context.r7.u32 = timeout;
+    boot_hle::KeWaitForSingleObject(context, base());
+    assert(context.r3.u32 == 0u);
+    assert(be32(notification_event + 4u) == 1u);
+
+    context = {};
+    context.r3.u32 = notification_event;
+    boot_hle::KeResetEvent(context, base());
+    assert(context.r3.u32 == 1u);
+    assert(be32(notification_event + 4u) == 0u);
+    context = {};
+    context.r3.u32 = notification_event;
+    context.r7.u32 = timeout;
+    boot_hle::KeWaitForSingleObject(context, base());
+    assert(context.r3.u32 == kStatusTimeout);
+
+    context = {};
+    context.r3.u32 = notification_event;
+    context.r4.u32 = 1u; // Priority increment (ignored).
+    context.r5.u32 = 0u; // Do not wait.
+    boot_hle::KeSetEvent(context, base());
+    assert(context.r3.u32 == 0u);
+    assert(be32(notification_event + 4u) == 1u);
+
+    context = {};
+    context.r3.u32 = notification_event;
+    context.r7.u32 = timeout;
+    boot_hle::KeWaitForSingleObject(context, base());
+    assert(context.r3.u32 == 0u);
+    assert(be32(notification_event + 4u) == 1u); // Manual reset stays signaled.
+    assert(process_kernel_objects().close(notification_event));
+
+    context = {};
+    context.r3.u32 = synchronization_event;
+    context.r4.u32 = 1u; // SynchronizationEvent.
+    context.r5.u32 = 1u;
+    boot_hle::KeInitializeEvent(context, base());
+    assert(context.r3.u32 == 0u);
+    assert(g_mem[synchronization_event] == 1u);
+    assert(be32(synchronization_event + 4u) == 1u);
+
+    context = {};
+    context.r3.u32 = synchronization_event;
+    context.r7.u32 = timeout;
+    boot_hle::KeWaitForSingleObject(context, base());
+    assert(context.r3.u32 == 0u);
+    assert(be32(synchronization_event + 4u) == 0u); // Auto-reset is consumed.
+
+    context = {};
+    context.r3.u32 = synchronization_event;
+    context.r4.u32 = 0u;
+    context.r5.u32 = 0u;
+    boot_hle::KeSetEvent(context, base());
+    assert(context.r3.u32 == 0u);
+    assert(be32(synchronization_event + 4u) == 1u);
+
+    context = {};
+    context.r3.u32 = synchronization_event;
+    boot_hle::KeResetEvent(context, base());
+    assert(context.r3.u32 == 1u);
+    assert(be32(synchronization_event + 4u) == 0u);
+    assert(process_kernel_objects().close(synchronization_event));
+}
+
 void test_video_display_queries() {
     constexpr std::uint32_t mode = 0x7000u;
     constexpr std::uint32_t display = 0x7100u;
@@ -762,6 +844,7 @@ int main() {
     test_query_volume_information_file();
     test_video_display_queries();
     test_xam_controller_disconnected_profile();
+    test_native_event_dispatcher_object();
     test_critical_sections();
     test_tls();
     test_events();

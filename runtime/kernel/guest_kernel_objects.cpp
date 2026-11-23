@@ -5,8 +5,12 @@
 
 namespace toohuman::runtime {
 
-GuestEventObject::GuestEventObject(bool manual_reset, bool initially_signaled)
-    : manual_reset_(manual_reset), signaled_(initially_signaled) {}
+GuestEventObject::GuestEventObject(
+    bool manual_reset, bool initially_signaled,
+    std::uint32_t guest_object_address)
+    : manual_reset_(manual_reset),
+      guest_object_address_(guest_object_address),
+      signaled_(initially_signaled) {}
 
 GuestKernelObjectType GuestEventObject::type() const noexcept {
     return GuestKernelObjectType::Event;
@@ -40,9 +44,20 @@ bool GuestEventObject::set() {
     return previous;
 }
 
-void GuestEventObject::clear() {
+bool GuestEventObject::reset() {
     std::lock_guard lock(mutex_);
+    const bool previous = signaled_;
     signaled_ = false;
+    return previous;
+}
+
+void GuestEventObject::clear() {
+    (void)reset();
+}
+
+bool GuestEventObject::is_signaled() const noexcept {
+    std::lock_guard lock(mutex_);
+    return signaled_;
 }
 
 GuestSemaphoreObject::GuestSemaphoreObject(

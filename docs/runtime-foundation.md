@@ -256,6 +256,14 @@ provider yet. `XamInputGetState` preserves the documented null-state connection
 query. No controller state is synthesized, and polling, keystrokes, and
 vibration remain unimplemented until a host input backend is added.
 
+Native `KEVENT` support shares the same waitable-object table: `KeInitializeEvent`
+registers the 0x10-byte guest dispatcher record by address, `KeSetEvent` and
+`KeResetEvent` change both host wait state and the guest signal-state field, and
+`KeWaitForSingleObject` consumes synchronization events while leaving notification
+events signaled. The `KeSetEvent` priority increment and wait-switch hint are
+currently ignored; pulse-event behavior and multiple-object waits remain
+unimplemented.
+
 Semaphore support now includes `NtCreateSemaphore`/`NtReleaseSemaphore` handles and
 native `KeInitializeSemaphore`/`KeReleaseSemaphore` objects. The counting
 object consumes one count per successful wait, rejects releases that exceed its

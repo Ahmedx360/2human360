@@ -5,7 +5,7 @@
 namespace toohuman::runtime {
 namespace {
 
-constexpr std::array<TitleExportName, 253> kTitleImports{{
+constexpr std::array<TitleExportName, 254> kTitleImports{{
     {"xam.xex", 0x0001, "NetDll_WSAStartup", false},
     {"xam.xex", 0x0003, "NetDll_socket", false},
     {"xam.xex", 0x0004, "NetDll_closesocket", false},
@@ -119,6 +119,7 @@ constexpr std::array<TitleExportName, 253> kTitleImports{{
     {"xboxkrnl.exe", 0x0066, "KeGetCurrentProcessType", false},
     {"xboxkrnl.exe", 0x006b, "KeLockL2", false},
     {"xboxkrnl.exe", 0x006c, "KeUnlockL2", false},
+    {"xboxkrnl.exe", 0x0070, "KeInitializeEvent", false},
     {"xboxkrnl.exe", 0x0074, "KeInitializeSemaphore", false},
     {"xboxkrnl.exe", 0x007d, "KeLeaveCriticalRegion", false},
     {"xboxkrnl.exe", 0x0083, "KeQueryPerformanceFrequency", false},

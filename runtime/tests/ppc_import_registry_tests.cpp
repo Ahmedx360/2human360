@@ -88,7 +88,7 @@ int main() {
                                     &test_import_handler, &error));
     std::size_t startup_hle_count = 0;
     assert(toohuman::runtime::register_boot_imports(imports, &error, &startup_hle_count));
-    assert(startup_hle_count == 81u);
+    assert(startup_hle_count == 84u);
     const std::vector<toohuman::runtime::XexImport> metadata{
         {"xboxkrnl.exe", 0x0777u, 0, 1, 0x82001100u},
         {"xboxkrnl.exe", 0x011Bu, 0, 1, 0x82001104u},
@@ -146,12 +146,15 @@ int main() {
         {"xboxkrnl.exe", 0x00F3u, 0, 1, 0x820011DCu},
         {"xboxkrnl.exe", 0x0088u, 0, 1, 0x820011E0u},
         {"xboxkrnl.exe", 0x00B0u, 0, 1, 0x820011E4u},
+        {"xboxkrnl.exe", 0x0070u, 0, 1, 0x820011E8u},
+        {"xboxkrnl.exe", 0x009Du, 0, 1, 0x820011ECu},
+        {"xboxkrnl.exe", 0x008Fu, 0, 1, 0x820011F0u},
         {"xboxkrnl.exe", 0x01B6u, 0, 1, 0x820011BCu},
         {"xboxkrnl.exe", 0x01C3u, 0, 1, 0x820011C0u}
     };
     std::size_t registered = 0;
     assert(imports.install(memory, metadata, &registered, &error));
-    assert(registered == 58u);
+    assert(registered == 61u);
     assert(memory.get_function<PPCFunc*>(0x82001100u) != &test_default_handler);
 
     // The real kernel imports configure the per-title primary Xenos ring.
@@ -826,6 +829,67 @@ int main() {
     assert(native_wait.r3.u32 == 0u);
     assert(read_guest_be32(native_semaphore + 4u) == 0u);
     assert(toohuman::runtime::process_kernel_objects().close(native_semaphore));
+
+    // Native KEVENTs share the guest-address dispatcher table with semaphores.
+    constexpr std::uint32_t native_notification_event = 0x82015200u;
+    PPCContext init_native_event{};
+    init_native_event.r3.u32 = native_notification_event;
+    init_native_event.r4.u32 = 0u; // Notification/manual reset.
+    init_native_event.r5.u32 = 1u; // Initially signaled.
+    call_test_import(0x820011E8u, init_native_event);
+    assert(init_native_event.r3.u32 == 0u);
+    assert(memory.base()[native_notification_event] == 0u);
+    assert(read_guest_be32(native_notification_event + 4u) == 1u);
+
+    PPCContext wait_native_event{};
+    wait_native_event.r3.u32 = native_notification_event;
+    wait_native_event.r7.u32 = 0x82013004u;
+    call_test_import(0x820011E4u, wait_native_event);
+    assert(wait_native_event.r3.u32 == 0u);
+    assert(read_guest_be32(native_notification_event + 4u) == 1u);
+
+    PPCContext reset_native_event{};
+    reset_native_event.r3.u32 = native_notification_event;
+    call_test_import(0x820011F0u, reset_native_event);
+    assert(reset_native_event.r3.u32 == 1u);
+    assert(read_guest_be32(native_notification_event + 4u) == 0u);
+
+    wait_native_event = {};
+    wait_native_event.r3.u32 = native_notification_event;
+    wait_native_event.r7.u32 = 0x82013004u;
+    call_test_import(0x820011E4u, wait_native_event);
+    assert(wait_native_event.r3.u32 == 0x102u);
+
+    PPCContext set_native_event{};
+    set_native_event.r3.u32 = native_notification_event;
+    set_native_event.r4.u32 = 1u;
+    call_test_import(0x820011ECu, set_native_event);
+    assert(set_native_event.r3.u32 == 0u);
+    assert(read_guest_be32(native_notification_event + 4u) == 1u);
+    wait_native_event = {};
+    wait_native_event.r3.u32 = native_notification_event;
+    wait_native_event.r7.u32 = 0x82013004u;
+    call_test_import(0x820011E4u, wait_native_event);
+    assert(wait_native_event.r3.u32 == 0u);
+    assert(read_guest_be32(native_notification_event + 4u) == 1u);
+    assert(toohuman::runtime::process_kernel_objects().close(
+        native_notification_event));
+
+    constexpr std::uint32_t native_synchronization_event = 0x82015220u;
+    init_native_event = {};
+    init_native_event.r3.u32 = native_synchronization_event;
+    init_native_event.r4.u32 = 1u; // Synchronization/auto-reset.
+    init_native_event.r5.u32 = 1u;
+    call_test_import(0x820011E8u, init_native_event);
+    assert(init_native_event.r3.u32 == 0u);
+    wait_native_event = {};
+    wait_native_event.r3.u32 = native_synchronization_event;
+    wait_native_event.r7.u32 = 0x82013004u;
+    call_test_import(0x820011E4u, wait_native_event);
+    assert(wait_native_event.r3.u32 == 0u);
+    assert(read_guest_be32(native_synchronization_event + 4u) == 0u);
+    assert(toohuman::runtime::process_kernel_objects().close(
+        native_synchronization_event));
 
     PPCContext boot_context{};
     call_test_import(0x8200110Cu, boot_context); // KeGetCurrentProcessType
