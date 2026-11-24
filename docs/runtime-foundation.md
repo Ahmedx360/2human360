@@ -44,6 +44,8 @@ When the generated library is enabled, `TooHumanPpcRuntime` registers every non-
 `MmQueryAddressProtect` reports `X_PAGE_READWRITE`, `X_PAGE_READONLY`, or `X_PAGE_NOACCESS` for tracked heap allocations by inspecting the current committed guest page permissions. It returns zero for addresses outside those tracked allocations. This is limited to the guest heaps and does not implement a complete physical-memory manager.
 
 
+`MmSetAddressProtect` applies those same supported XDK protection states to an allocation. For `NtAllocateVirtualMemory` regions it also splits/coalesces the per-page metadata used by `NtQueryVirtualMemory`; for pool and stack allocations it requires the complete page-aligned range to fit inside one allocation so it cannot change permissions on a neighboring small allocation. Execute/guard flags and untracked or cross-allocation ranges remain unsupported.
+
 The PE-only workflow cannot provide this metadata. Use the optional XEX TOML configuration with the matching original `default.xex` to preserve imports when regenerating the PPC translation. The `TooHumanXexImportAudit <default.xex>` utility now loads and audits the supplied XEX directly; the two-file `<default.xex> <default.exe>` form remains available for extracted PE workflows. The audit prints library IDs/versions, descriptor records, function/IAT pairings and genuine variable imports. The supplied Too Human executable has two import libraries (`xam.xex` and `xboxkrnl.exe`), 242 function thunks and 11 genuine variable imports.
 
 ## Implemented: guest virtual-memory query and protection

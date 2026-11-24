@@ -1876,9 +1876,12 @@ PPC_FUNC(KeSetBasePriorityThread) {
     ctx.r3.u32 = 0; // previous priority
 }
 
-// xboxkrnl #0xC7. MmSetAddressProtect(PVOID, SIZE_T, ULONG): no-op; host pages remain read/write.
+// xboxkrnl #0xC7. MmSetAddressProtect(PVOID, SIZE_T, ULONG).
 PPC_FUNC(MmSetAddressProtect) {
-    ctx.r3.u32 = 0; // physical-heap pages stay RW on the host
+    if (auto* registry = PpcImportRegistry::active()) {
+        registry->set_guest_address_protection(
+            ctx.r3.u32, ctx.r4.u32, ctx.r5.u32);
+    }
 }
 
 // xam #0x2D9. XamShowDirtyDiscErrorUI: the title could not read its disc data.

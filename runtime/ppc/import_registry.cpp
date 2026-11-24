@@ -2051,4 +2051,154 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
     binding.handler(context, base);
 }
 
+void PpcImportRegistry::set_guest_address_protection(
+    std::uint32_t address, std::uint32_t length,
+    std::uint32_t protection_bits) {
+    // MmSetAddressProtect(base_address, region_size, protect_bits) is a
+    // void API. Keep the host page permissions and NtQueryVirtualMemory
+    // region metadata synchronized for supported allocations.
+    GuestMemoryProtection host_protection{};
+    if (memory_ == nullptr || length == 0u ||
+        (protection_bits & 0xF0u) != 0u ||
+        !translate_guest_protection(protection_bits, host_protection) ||
+        !guest_range_valid(address, length)) {
+        std::fprintf(stderr,
+            "[TooHuman] MmSetAddressProtect rejected address=0x%08X length=0x%08X protect=0x%08X\n",
+            static_cast<unsigned>(address), static_cast<unsigned>(length),
+            static_cast<unsigned>(protection_bits));
+        return;
+    }
+
+    // NtAllocateVirtualMemory allocations have per-page state metadata.
+    // Update it as well as the native page mapping so queries cannot report
+    // stale protection after MmSetAddressProtect.
+    if (virtual_heap_) {
+        const auto allocation = virtual_heap_->allocation_containing(address);
+        if (allocation) {
+            std::lock_guard region_lock(virtual_memory_regions_mutex_);
+            const auto region_it = virtual_memory_regions_.find(allocation->first);
+            if (region_it == virtual_memory_regions_.end()) return;
+            auto& region = region_it->second;
+            if (region.page_size == 0u) return;
+            const std::uint64_t page_mask =
+                static_cast<std::uint64_t>(region.page_size) - 1u;
+            const auto raw_end =
+                static_cast<std::uint64_t>(address) + length;
+            const auto aligned_base =
+                static_cast<std::uint64_t>(address) & ~page_mask;
+            const auto aligned_end = (raw_end + page_mask) & ~page_mask;
+            const auto allocation_end =
+                static_cast<std::uint64_t>(allocation->first) + allocation->second;
+            if (raw_end > GuestAddressSpace::kSize ||
+                aligned_end <= aligned_base ||
+                aligned_base < allocation->first ||
+                aligned_end > allocation_end) {
+                std::fprintf(stderr,
+                    "[TooHuman] MmSetAddressProtect range crosses virtual allocation\n");
+                return;
+            }
+
+            const auto range_begin = static_cast<std::uint32_t>(
+                aligned_base - allocation->first);
+            const auto range_end = static_cast<std::uint32_t>(
+                aligned_end - allocation->first);
+            std::uint64_t committed_cursor = range_begin;
+            for (const auto& range : region.protections) {
+                const auto old_begin = static_cast<std::uint64_t>(range.offset);
+                const auto old_end = old_begin + range.size;
+                if (old_end <= committed_cursor) continue;
+                if (old_begin > committed_cursor || !range.committed) break;
+                committed_cursor = std::min<std::uint64_t>(old_end, range_end);
+                if (committed_cursor == range_end) break;
+            }
+            if (committed_cursor != range_end ||
+                !memory_->protect_region(
+                    static_cast<std::uint32_t>(aligned_base),
+                    static_cast<std::size_t>(aligned_end - aligned_base),
+                    host_protection, nullptr)) {
+                std::fprintf(stderr,
+                    "[TooHuman] MmSetAddressProtect could not protect committed virtual pages\n");
+                return;
+            }
+
+            std::vector<VirtualMemoryProtectionRange> updated;
+            updated.reserve(region.protections.size() + 2u);
+            for (const auto& range : region.protections) {
+                const auto old_begin = static_cast<std::uint64_t>(range.offset);
+                const auto old_end = old_begin + range.size;
+                if (old_end <= range_begin || old_begin >= range_end) {
+                    updated.push_back(range);
+                    continue;
+                }
+                if (old_begin < range_begin) {
+                    updated.push_back({range.offset,
+                        static_cast<std::uint32_t>(range_begin - old_begin),
+                        range.protection, range.committed});
+                }
+                const auto overlap_begin = std::max(
+                    old_begin, static_cast<std::uint64_t>(range_begin));
+                const auto overlap_end = std::min(
+                    old_end, static_cast<std::uint64_t>(range_end));
+                updated.push_back({static_cast<std::uint32_t>(overlap_begin),
+                    static_cast<std::uint32_t>(overlap_end - overlap_begin),
+                    protection_bits, range.committed});
+                if (old_end > range_end) {
+                    updated.push_back({range_end,
+                        static_cast<std::uint32_t>(old_end - range_end),
+                        range.protection, range.committed});
+                }
+            }
+            std::vector<VirtualMemoryProtectionRange> merged;
+            merged.reserve(updated.size());
+            for (const auto& range : updated) {
+                if (!merged.empty() &&
+                    merged.back().protection == range.protection &&
+                    merged.back().committed == range.committed &&
+                    static_cast<std::uint64_t>(merged.back().offset) +
+                        merged.back().size == range.offset) {
+                    merged.back().size += range.size;
+                } else {
+                    merged.push_back(range);
+                }
+            }
+            region.protections = std::move(merged);
+            return;
+        }
+    }
+
+    // Pool/stack allocations do not have per-reservation metadata. Only
+    // protect complete committed host pages wholly contained in one exact
+    // allocation; this avoids changing the permissions of neighboring
+    // small allocations that may share a host page.
+    std::optional<std::pair<std::uint32_t, std::size_t>> allocation;
+    if (guest_heap_) allocation = guest_heap_->allocation_containing(address);
+    if (!allocation && stack_heap_)
+        allocation = stack_heap_->allocation_containing(address);
+    if (!allocation) return;
+    const auto raw_end = static_cast<std::uint64_t>(address) + length;
+    const auto page_size = GuestAddressSpace::page_size();
+    if (page_size == 0u || (page_size & (page_size - 1u)) != 0u ||
+        raw_end > GuestAddressSpace::kSize) return;
+    const auto page_mask = static_cast<std::uint64_t>(page_size) - 1u;
+    const auto aligned_base = static_cast<std::uint64_t>(address) & ~page_mask;
+    const auto aligned_end = (raw_end + page_mask) & ~page_mask;
+    const auto allocation_end =
+        static_cast<std::uint64_t>(allocation->first) + allocation->second;
+    if (aligned_base < allocation->first || aligned_end <= aligned_base ||
+        aligned_end > allocation_end) {
+        std::fprintf(stderr,
+            "[TooHuman] MmSetAddressProtect requires whole allocated pages\n");
+        return;
+    }
+    if (!memory_->protect_region(
+            static_cast<std::uint32_t>(aligned_base),
+            static_cast<std::size_t>(aligned_end - aligned_base),
+            host_protection, nullptr)) {
+        std::fprintf(stderr,
+            "[TooHuman] MmSetAddressProtect host protection update failed\n");
+    }
+    return;
+
+}
+
 } // namespace toohuman::runtime

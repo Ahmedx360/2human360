@@ -1811,6 +1811,9 @@ int main() {
         {"xboxkrnl.exe", 0x0193u, 0, 0, 0x82000604u, 0}
     };
     toohuman::runtime::PpcImportRegistry variable_registry;
+    assert(variable_registry.register_handler(
+        "xboxkrnl.exe", 0x00C7u,
+        &toohuman::runtime::boot_hle::MmSetAddressProtect, &error));
     std::size_t bound_variables = 0;
     assert(variable_registry.prepare_variable_imports(
         variable_memory, variable_image, xex_header, variable_imports,
@@ -1858,12 +1861,13 @@ int main() {
         {"xboxkrnl.exe", 0x00E1u, 0, 1, thunk_base + 36, 0},
         {"xboxkrnl.exe", 0x00BAu, 0, 1, thunk_base + 40, 0},
         {"xboxkrnl.exe", 0x00BDu, 0, 1, thunk_base + 44, 0},
-        {"xboxkrnl.exe", 0x00C4u, 0, 1, thunk_base + 48, 0}
+        {"xboxkrnl.exe", 0x00C4u, 0, 1, thunk_base + 48, 0},
+        {"xboxkrnl.exe", 0x00C7u, 0, 1, thunk_base + 52, 0}
     };
     std::size_t registered_pool_imports = 0;
     assert(variable_registry.install(
         variable_memory, pool_imports, &registered_pool_imports, &error));
-    assert(registered_pool_imports == 13);
+    assert(registered_pool_imports == 14);
 
     PPCContext header_field_context{};
     header_field_context.ctr.u32 = thunk_base + 16;
@@ -1923,6 +1927,22 @@ int main() {
     physical_protection.r3.u32 = physical_block;
     call_import(thunk_base + 48, physical_protection);
     assert(physical_protection.r3.u32 == 0x04u); // X_PAGE_READWRITE.
+
+    PPCContext set_physical_protection{};
+    set_physical_protection.r3.u32 = physical_block;
+    set_physical_protection.r4.u32 = 0x1000u;
+    set_physical_protection.r5.u32 = 0x02u; // X_PAGE_READONLY.
+    call_import(thunk_base + 52, set_physical_protection);
+    physical_protection = {};
+    physical_protection.r3.u32 = physical_block;
+    call_import(thunk_base + 48, physical_protection);
+    assert(physical_protection.r3.u32 == 0x02u);
+    set_physical_protection.r5.u32 = 0x04u; // Restore X_PAGE_READWRITE.
+    call_import(thunk_base + 52, set_physical_protection);
+    physical_protection = {};
+    physical_protection.r3.u32 = physical_block;
+    call_import(thunk_base + 48, physical_protection);
+    assert(physical_protection.r3.u32 == 0x04u);
 
     PPCContext physical_free{};
     physical_free.r3.u32 = 0u; // Allocation type.
@@ -2056,6 +2076,20 @@ int main() {
     assert(read_guest_be(*stack_io + 8) == virtual_address);
     assert(read_guest_be(*stack_io + 12) == vm_page_size);
     assert(read_guest_be(*stack_io + 16) == 0x04u); // Previous PAGE_READWRITE.
+
+    PPCContext set_virtual_protection{};
+    set_virtual_protection.r3.u32 = virtual_address + vm_page_size + 0x100u;
+    set_virtual_protection.r4.u32 = vm_page_size;
+    set_virtual_protection.r5.u32 = 0x02u; // PAGE_READONLY.
+    call_import(thunk_base + 52, set_virtual_protection);
+    vm_context = {};
+    vm_context.r3.u32 = virtual_address + vm_page_size + 0x100u;
+    vm_context.r4.u32 = io_buffer + 8u;
+    call_import(thunk_base + 32, vm_context);
+    assert(vm_context.r3.u32 == 0u);
+    assert(read_guest_be(io_buffer + 28u) == 0x02u);
+    set_virtual_protection.r5.u32 = 0x04u;
+    call_import(thunk_base + 52, set_virtual_protection);
 
     address_protection = {};
     address_protection.r3.u32 = virtual_address + 0x100u;
