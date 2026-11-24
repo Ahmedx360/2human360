@@ -73,6 +73,74 @@ bool guest_range_valid(std::uint32_t address, std::uint64_t length) noexcept {
                                 (std::uint64_t{1} << 32));
 }
 
+// Minimal per-host-thread Xbox execution state. APC delivery is not implemented,
+// but tracking these counters gives IRQL and critical-region imports consistent
+// nesting semantics across guest calls on the same emulated thread.
+thread_local std::uint32_t g_guest_irql = 0u;
+thread_local std::uint32_t g_guest_critical_region_depth = 0u;
+constexpr std::uint32_t kGuestIrqlDispatch = 2u;
+constexpr std::uint32_t kGuestSpinLockHeldBigEndian = 0x01000000u;
+
+bool guest_spin_lock_word(std::uint8_t* base, std::uint32_t address,
+                          std::atomic_ref<std::uint32_t>& word) noexcept {
+    if (address == 0u || (address & 3u) != 0u ||
+        !GuestAddressSpace::is_accessible_range(
+            base, address, sizeof(std::uint32_t), GuestMemoryAccess::Read) ||
+        !GuestAddressSpace::is_accessible_range(
+            base, address, sizeof(std::uint32_t), GuestMemoryAccess::Write)) {
+        return false;
+    }
+    auto* host_word = reinterpret_cast<std::uint32_t*>(base + address);
+    if ((reinterpret_cast<std::uintptr_t>(host_word) &
+         (alignof(std::uint32_t) - 1u)) != 0u) return false;
+    word = std::atomic_ref<std::uint32_t>(*host_word);
+    return true;
+}
+
+bool acquire_guest_spin_lock(std::uint8_t* base, std::uint32_t address) {
+    if (address == 0u || (address & 3u) != 0u ||
+        !GuestAddressSpace::is_accessible_range(
+            base, address, sizeof(std::uint32_t), GuestMemoryAccess::Read) ||
+        !GuestAddressSpace::is_accessible_range(
+            base, address, sizeof(std::uint32_t), GuestMemoryAccess::Write)) {
+        return false;
+    }
+    auto* host_word = reinterpret_cast<std::uint32_t*>(base + address);
+    if ((reinterpret_cast<std::uintptr_t>(host_word) &
+         (alignof(std::uint32_t) - 1u)) != 0u) return false;
+    std::atomic_ref<std::uint32_t> lock(*host_word);
+    for (;;) {
+        std::uint32_t expected = 0u;
+        if (lock.compare_exchange_weak(
+                expected, kGuestSpinLockHeldBigEndian,
+                std::memory_order_acquire, std::memory_order_relaxed)) {
+            return true;
+        }
+        // Let cancellation and cooperative thread suspension take effect
+        // while contending for a guest dispatcher spin lock.
+        throw_if_guest_thread_stop_requested();
+        std::this_thread::yield();
+    }
+}
+
+bool release_guest_spin_lock(std::uint8_t* base,
+                             std::uint32_t address) noexcept {
+    if (address == 0u || (address & 3u) != 0u ||
+        !GuestAddressSpace::is_accessible_range(
+            base, address, sizeof(std::uint32_t), GuestMemoryAccess::Read) ||
+        !GuestAddressSpace::is_accessible_range(
+            base, address, sizeof(std::uint32_t), GuestMemoryAccess::Write)) {
+        return false;
+    }
+    auto* host_word = reinterpret_cast<std::uint32_t*>(base + address);
+    if ((reinterpret_cast<std::uintptr_t>(host_word) &
+         (alignof(std::uint32_t) - 1u)) != 0u) return false;
+    std::atomic_ref<std::uint32_t> lock(*host_word);
+    auto expected = kGuestSpinLockHeldBigEndian;
+    return lock.compare_exchange_strong(
+        expected, 0u, std::memory_order_release, std::memory_order_relaxed);
+}
+
 bool translate_guest_protection(std::uint32_t flags,
                                 GuestMemoryProtection& protection) noexcept {
     // Cache modifiers are accepted. Guard pages and unknown flags are not
