@@ -989,19 +989,50 @@ PPC_FUNC(RtlInitAnsiString) {
 // xboxkrnl #0x12D. UNICODE_STRING has the same 8-byte descriptor layout as ANSI_STRING,
 // but Length and MaximumLength are byte counts and the source is big-endian UTF-16.
 PPC_FUNC(RtlInitUnicodeString) {
-    auto* dest = at(base, ctx.r3.u32);
-    const auto src = ctx.r4.u32;
-    std::uint16_t length = 0, maximum = 0;
-    if (src != 0) {
-        std::uint32_t characters = 0;
-        while (characters < 0x7FFEu && get_be16(at(base, src) + characters * 2) != 0)
-            ++characters;
-        length = static_cast<std::uint16_t>(characters * 2);
-        maximum = static_cast<std::uint16_t>((characters + 1) * 2);
+    const auto descriptor = ctx.r3.u32;
+    const auto source = ctx.r4.u32;
+    if (!guest_range_valid(
+            base, descriptor, 8u, GuestMemoryAccess::Write)) {
+        ctx.r3.u32 = kStatusAccessViolation;
+        return;
     }
-    put_be16(dest, length);
-    put_be16(dest + 2, maximum);
-    put_be32(dest + 4, src);
+
+    std::uint16_t length = 0u;
+    std::uint16_t maximum = 0u;
+    if (source != 0u) {
+        constexpr std::uint32_t kMaxUnicodeCharacters = 0x7FFEu;
+        bool terminated = false;
+        std::uint32_t character_count = 0u;
+        for (; character_count <= kMaxUnicodeCharacters;
+             ++character_count) {
+            const auto current =
+                static_cast<std::uint64_t>(source) +
+                static_cast<std::uint64_t>(character_count) * 2u;
+            if (current > std::numeric_limits<std::uint32_t>::max() ||
+                !guest_range_valid(
+                    base, static_cast<std::uint32_t>(current), 2u,
+                    GuestMemoryAccess::Read)) {
+                ctx.r3.u32 = kStatusAccessViolation;
+                return;
+            }
+            if (get_be16(at(base, static_cast<std::uint32_t>(current))) == 0u) {
+                terminated = true;
+                break;
+            }
+        }
+        if (!terminated) {
+            ctx.r3.u32 = kStatusAccessViolation;
+            return;
+        }
+        length = static_cast<std::uint16_t>(character_count * 2u);
+        maximum = static_cast<std::uint16_t>(length + 2u);
+    }
+
+    // UNICODE_STRING is {USHORT Length, USHORT MaximumLength, PWSTR Buffer}.
+    // Store all three fields in guest big-endian order.
+    put_be16(at(base, descriptor), length);
+    put_be16(at(base, descriptor + 2u), maximum);
+    put_be32(at(base, descriptor + 4u), source);
 }
 
 PPC_FUNC(RtlMultiByteToUnicodeN) {
