@@ -1437,6 +1437,69 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
             }
             return;
         }
+        if (import.ordinal == 0x011D) { // RtlCompareStringN
+            const auto first_address = context.r3.u32;
+            const auto first_length_arg = context.r4.u32;
+            const auto second_address = context.r5.u32;
+            const auto second_length_arg = context.r6.u32;
+            const bool case_insensitive = context.r7.u32 != 0u;
+            constexpr std::uint32_t kNullTerminated = 0xFFFFu;
+            constexpr std::uint32_t kMaxStringScan = 0x10000u;
+
+            const auto bounded_string_length = [&](std::uint32_t address) {
+                if (address == 0u)
+                    invalid_guest_memory_call("RtlCompareStringN", address, 1u);
+                for (std::uint32_t length = 0; length < kMaxStringScan; ++length) {
+                    const auto current = static_cast<std::uint64_t>(address) + length;
+                    if (current > std::numeric_limits<std::uint32_t>::max() ||
+                        !GuestAddressSpace::is_accessible_range(
+                            base, static_cast<std::uint32_t>(current), 1u,
+                            GuestMemoryAccess::Read)) {
+                        invalid_guest_memory_call(
+                            "RtlCompareStringN", address, length + 1u);
+                    }
+                    if (base[static_cast<std::uint32_t>(current)] == 0u)
+                        return length;
+                }
+                invalid_guest_memory_call(
+                    "RtlCompareStringN", address, kMaxStringScan);
+            };
+
+            const auto first_length = first_length_arg == kNullTerminated
+                ? bounded_string_length(first_address) : first_length_arg;
+            const auto second_length = second_length_arg == kNullTerminated
+                ? bounded_string_length(second_address) : second_length_arg;
+            if (!guest_range_valid(first_address, first_length) ||
+                !guest_range_valid(second_address, second_length) ||
+                (first_length != 0u &&
+                 !GuestAddressSpace::is_accessible_range(
+                     base, first_address, first_length, GuestMemoryAccess::Read)) ||
+                (second_length != 0u &&
+                 !GuestAddressSpace::is_accessible_range(
+                     base, second_address, second_length, GuestMemoryAccess::Read))) {
+                invalid_guest_memory_call(
+                    "RtlCompareStringN", first_address, first_length);
+            }
+
+            const auto compare_length = std::min(first_length, second_length);
+            std::int32_t comparison = 0;
+            for (std::uint32_t index = 0; index < compare_length; ++index) {
+                auto first = base[first_address + index];
+                auto second = base[second_address + index];
+                if (case_insensitive) {
+                    if (first >= 'A' && first <= 'Z')
+                        first = static_cast<std::uint8_t>(first + ('a' - 'A'));
+                    if (second >= 'A' && second <= 'Z')
+                        second = static_cast<std::uint8_t>(second + ('a' - 'A'));
+                }
+                if (first == second) continue;
+                comparison = static_cast<std::int32_t>(first) -
+                             static_cast<std::int32_t>(second);
+                break;
+            }
+            context.r3.u32 = static_cast<std::uint32_t>(comparison);
+            return;
+        }
     }
 
     if (binding.handler == nullptr &&
