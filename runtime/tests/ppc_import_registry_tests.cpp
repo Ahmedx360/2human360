@@ -168,11 +168,13 @@ int main() {
         {"xboxkrnl.exe", 0x0089u, 0, 1, 0x82001228u},
         {"xboxkrnl.exe", 0x00B1u, 0, 1, 0x8200122Cu},
         {"xboxkrnl.exe", 0x00B3u, 0, 1, 0x82001230u},
-        {"xboxkrnl.exe", 0x00B4u, 0, 1, 0x82001234u}
+        {"xboxkrnl.exe", 0x00B4u, 0, 1, 0x82001234u},
+        {"xboxkrnl.exe", 0x012Du, 0, 1, 0x82001238u},
+        {"xboxkrnl.exe", 0x012Cu, 0, 1, 0x8200123Cu}
     };
     std::size_t registered = 0;
     assert(imports.install(memory, metadata, &registered, &error));
-    assert(registered == 79u);
+    assert(registered == 81u);
     assert(memory.get_function<PPCFunc*>(0x82001100u) != &test_default_handler);
 
     // The real kernel imports configure the per-title primary Xenos ring.
@@ -747,6 +749,86 @@ const auto store_guest_ascii = [&](std::uint32_t address, const char* value) {
     call_test_import(0x82001214u, compare_strings);
     assert(compare_strings.r3.u32 == 0u);
 
+    // RtlInitUnicodeString writes a big-endian UNICODE_STRING descriptor
+    // over the guest UTF-16 source without allocating or copying its buffer.
+    constexpr std::uint32_t unicode_descriptor = 0x82012040u;
+    constexpr std::uint32_t unicode_source = 0x82012400u;
+    const auto put_guest_be16 = [&](std::uint32_t address, std::uint16_t value) {
+        memory.base()[address] = static_cast<std::uint8_t>(value >> 8);
+        memory.base()[address + 1u] = static_cast<std::uint8_t>(value);
+    };
+    put_guest_be16(unicode_source, static_cast<std::uint16_t>('H'));
+    put_guest_be16(unicode_source + 2u, static_cast<std::uint16_t>('i'));
+    put_guest_be16(unicode_source + 4u, 0u);
+    PPCContext init_unicode{};
+    init_unicode.r3.u32 = unicode_descriptor;
+    init_unicode.r4.u32 = unicode_source;
+    call_test_import(0x82001238u, init_unicode);
+    assert(read_guest_be32(unicode_descriptor) == 0x00040006u);
+    assert(read_guest_be32(unicode_descriptor + 4u) == unicode_source);
+
+    // A null source resets all three fields, including the previous buffer.
+    put_guest_be32(unicode_descriptor, 0xFFFFFFFFu);
+    put_guest_be32(unicode_descriptor + 4u, 0xFFFFFFFFu);
+    PPCContext reset_unicode{};
+    reset_unicode.r3.u32 = unicode_descriptor;
+    reset_unicode.r4.u32 = 0u;
+    call_test_import(0x82001238u, reset_unicode);
+    assert(read_guest_be32(unicode_descriptor) == 0u);
+    assert(read_guest_be32(unicode_descriptor + 4u) == 0u);
+
+    PPCContext invalid_unicode_descriptor{};
+    invalid_unicode_descriptor.r3.u32 = 0x82018000u;
+    invalid_unicode_descriptor.r4.u32 = unicode_source;
+    call_test_import(0x82001238u, invalid_unicode_descriptor);
+    assert(invalid_unicode_descriptor.r3.u32 == 0xC0000005u);
+
+    // Invalid source memory must not partially overwrite the destination.
+    put_guest_be32(unicode_descriptor, 0xFFFFFFFFu);
+    put_guest_be32(unicode_descriptor + 4u, 0xFFFFFFFFu);
+    PPCContext invalid_unicode_source{};
+    invalid_unicode_source.r3.u32 = unicode_descriptor;
+    invalid_unicode_source.r4.u32 = 0x82018000u; // Uncommitted guest page.
+    call_test_import(0x82001238u, invalid_unicode_source);
+    assert(invalid_unicode_source.r3.u32 == 0xC0000005u);
+    assert(read_guest_be32(unicode_descriptor) == 0xFFFFFFFFu);
+    assert(read_guest_be32(unicode_descriptor + 4u) == 0xFFFFFFFFu);
+
+    // RtlInitAnsiString uses the same descriptor layout, but lengths are
+    // byte counts and the source is a bounded single-byte string.
+    constexpr std::uint32_t ansi_descriptor = 0x82012060u;
+    constexpr std::uint32_t ansi_source = 0x82012280u;
+    store_guest_ascii(ansi_source, "abc");
+    PPCContext init_ansi{};
+    init_ansi.r3.u32 = ansi_descriptor;
+    init_ansi.r4.u32 = ansi_source;
+    call_test_import(0x8200123Cu, init_ansi);
+    assert(read_guest_be32(ansi_descriptor) == 0x00030004u);
+    assert(read_guest_be32(ansi_descriptor + 4u) == ansi_source);
+
+    PPCContext reset_ansi{};
+    reset_ansi.r3.u32 = ansi_descriptor;
+    reset_ansi.r4.u32 = 0u;
+    call_test_import(0x8200123Cu, reset_ansi);
+    assert(read_guest_be32(ansi_descriptor) == 0u);
+    assert(read_guest_be32(ansi_descriptor + 4u) == 0u);
+
+    PPCContext invalid_ansi_descriptor{};
+    invalid_ansi_descriptor.r3.u32 = 0x82018000u;
+    invalid_ansi_descriptor.r4.u32 = ansi_source;
+    call_test_import(0x8200123Cu, invalid_ansi_descriptor);
+    assert(invalid_ansi_descriptor.r3.u32 == 0xC0000005u);
+
+    put_guest_be32(ansi_descriptor, 0xFFFFFFFFu);
+    put_guest_be32(ansi_descriptor + 4u, 0xFFFFFFFFu);
+    PPCContext invalid_ansi_source{};
+    invalid_ansi_source.r3.u32 = ansi_descriptor;
+    invalid_ansi_source.r4.u32 = 0x82018000u;
+    call_test_import(0x8200123Cu, invalid_ansi_source);
+    assert(invalid_ansi_source.r3.u32 == 0xC0000005u);
+    assert(read_guest_be32(ansi_descriptor) == 0xFFFFFFFFu);
+    assert(read_guest_be32(ansi_descriptor + 4u) == 0xFFFFFFFFu);
+
 // Xbox critical-region depth and IRQL are tracked per guest host thread.
     PPCContext enter_critical{};
     call_test_import(0x8200121Cu, enter_critical); // KeEnterCriticalRegion.
@@ -1279,18 +1361,18 @@ const auto store_guest_ascii = [&](std::uint32_t address, const char* value) {
     boot_context.r3.u32 = 0xD0000008u; // Customer/driver status is normalized before lookup.
     call_test_import(0x82001148u, boot_context);
     assert(boot_context.r3.u32 == 6u);
-    constexpr std::uint32_t unicode_source = 0x82014000u;
-    constexpr std::uint32_t unicode_descriptor = 0x82014020u;
-    memory.base()[unicode_source] = 0;
-    memory.base()[unicode_source + 1] = 'A';
-    memory.base()[unicode_source + 2] = 0;
-    memory.base()[unicode_source + 3] = 0;
+    constexpr std::uint32_t legacy_unicode_source = 0x82014000u;
+    constexpr std::uint32_t legacy_unicode_descriptor = 0x82014020u;
+    memory.base()[legacy_unicode_source] = 0;
+    memory.base()[legacy_unicode_source + 1] = 'A';
+    memory.base()[legacy_unicode_source + 2] = 0;
+    memory.base()[legacy_unicode_source + 3] = 0;
     boot_context = {};
-    boot_context.r3.u32 = unicode_descriptor;
-    boot_context.r4.u32 = unicode_source;
+    boot_context.r3.u32 = legacy_unicode_descriptor;
+    boot_context.r4.u32 = legacy_unicode_source;
     call_test_import(0x8200114Cu, boot_context);
-    assert(guest_be32(unicode_descriptor) == 0x00020004u);
-    assert(guest_be32(unicode_descriptor + 4) == unicode_source);
+    assert(guest_be32(legacy_unicode_descriptor) == 0x00020004u);
+    assert(guest_be32(legacy_unicode_descriptor + 4) == legacy_unicode_source);
 
     // XConfig values use guest-endian encoding and report the returned size.
     constexpr std::uint32_t xconfig_value = 0x82014100u;
