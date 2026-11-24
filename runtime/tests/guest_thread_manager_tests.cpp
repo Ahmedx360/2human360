@@ -233,6 +233,66 @@ int main() {
     assert(alias_cleanup_calls.load() == 1u);
     assert(!alias_table.lookup(alias_handle));
 
+    // NtSuspendThread-style cooperative suspension is counted. Execution
+    // pauses at guest import/HLE checkpoints, then resumes only after the
+    // suspend count returns to zero.
+    GuestThreadManager suspend_manager;
+    std::atomic<std::uint32_t> safe_point_count{0};
+    std::atomic<bool> finish_suspended_worker{false};
+    const auto cooperative = suspend_manager.create(
+        GuestThreadStartup{},
+        [&](GuestThreadStartup&, std::stop_token) {
+            while (!finish_suspended_worker.load(std::memory_order_acquire)) {
+                throw_if_guest_thread_stop_requested();
+                safe_point_count.fetch_add(1u, std::memory_order_release);
+                std::this_thread::yield();
+            }
+            return 0x87654321u;
+        },
+        false, &error);
+    assert(cooperative.has_value());
+    const auto progress_deadline =
+        std::chrono::steady_clock::now() + 2s;
+    while (safe_point_count.load(std::memory_order_acquire) < 10u &&
+           std::chrono::steady_clock::now() < progress_deadline) {
+        std::this_thread::yield();
+    }
+    assert(safe_point_count.load(std::memory_order_acquire) >= 10u);
+
+    assert(suspend_manager.suspend(*cooperative, &previous_count, &error));
+    assert(previous_count == 0u);
+    assert(suspend_manager.suspend(*cooperative, &previous_count, &error));
+    assert(previous_count == 1u);
+    assert(suspend_manager.get_state(*cooperative, state, &suspend_count));
+    assert(state == GuestThreadLifecycleState::Suspended);
+    assert(suspend_count == 2u);
+
+    // Allow a checkpoint already in flight to finish before measuring the
+    // stable paused interval.
+    std::this_thread::sleep_for(30ms);
+    const auto paused_count = safe_point_count.load(std::memory_order_acquire);
+    std::this_thread::sleep_for(30ms);
+    assert(safe_point_count.load(std::memory_order_acquire) == paused_count);
+
+    assert(suspend_manager.resume(*cooperative, &previous_count, &error));
+    assert(previous_count == 2u);
+    std::this_thread::sleep_for(20ms);
+    assert(safe_point_count.load(std::memory_order_acquire) == paused_count);
+    assert(suspend_manager.resume(*cooperative, &previous_count, &error));
+    assert(previous_count == 1u);
+
+    const auto resumed_deadline = std::chrono::steady_clock::now() + 2s;
+    while (safe_point_count.load(std::memory_order_acquire) == paused_count &&
+           std::chrono::steady_clock::now() < resumed_deadline) {
+        std::this_thread::yield();
+    }
+    assert(safe_point_count.load(std::memory_order_acquire) > paused_count);
+    finish_suspended_worker.store(true, std::memory_order_release);
+    assert(suspend_manager.wait(*cooperative, 2s) == GuestThreadWaitResult::Signaled);
+    assert(suspend_manager.get_exit_code(*cooperative, exit_code));
+    assert(exit_code == 0x87654321u);
+    assert(suspend_manager.close_handle(*cooperative));
+
     assert(!manager.resume(0xFFFFFFFFu, nullptr, &error));
     assert(manager.wait(0xFFFFFFFFu, 0ms) == GuestThreadWaitResult::InvalidHandle);
     return 0;
