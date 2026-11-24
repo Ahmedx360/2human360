@@ -64,6 +64,7 @@ PPCFunc XexGetProcedureAddress;
 PPCFunc XexCheckExecutablePrivilege;
 PPCFunc XexGetModuleSection;
 PPCFunc NtDuplicateObject;
+PPCFunc XamShowDirtyDiscErrorUI;
 PPCFunc MmSetAddressProtect;
 PPCFunc KeSetBasePriorityThread;
 PPCFunc ObDereferenceObject;
