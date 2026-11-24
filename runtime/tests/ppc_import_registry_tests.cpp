@@ -168,11 +168,12 @@ int main() {
         {"xboxkrnl.exe", 0x00B1u, 0, 1, 0x8200122Cu},
         {"xboxkrnl.exe", 0x00B3u, 0, 1, 0x82001230u},
         {"xboxkrnl.exe", 0x00B4u, 0, 1, 0x82001234u},
-        {"xboxkrnl.exe", 0x012Du, 0, 1, 0x82001238u}
+        {"xboxkrnl.exe", 0x012Du, 0, 1, 0x82001238u},
+        {"xboxkrnl.exe", 0x012Cu, 0, 1, 0x8200123Cu}
     };
     std::size_t registered = 0;
     assert(imports.install(memory, metadata, &registered, &error));
-    assert(registered == 79u);
+    assert(registered == 80u);
     assert(memory.get_function<PPCFunc*>(0x82001100u) != &test_default_handler);
 
     // The real kernel imports configure the per-title primary Xenos ring.
@@ -780,6 +781,41 @@ int main() {
     assert(invalid_unicode_source.r3.u32 == 0xC0000005u);
     assert(read_guest_be32(unicode_descriptor) == 0xFFFFFFFFu);
     assert(read_guest_be32(unicode_descriptor + 4u) == 0xFFFFFFFFu);
+
+    // RtlInitAnsiString uses the same descriptor layout, but lengths are
+    // byte counts and the source is a bounded single-byte string.
+    constexpr std::uint32_t ansi_descriptor = 0x82012060u;
+    constexpr std::uint32_t ansi_source = 0x82012280u;
+    store_guest_ascii(ansi_source, "abc");
+    PPCContext init_ansi{};
+    init_ansi.r3.u32 = ansi_descriptor;
+    init_ansi.r4.u32 = ansi_source;
+    call_test_import(0x8200123Cu, init_ansi);
+    assert(read_guest_be32(ansi_descriptor) == 0x00030004u);
+    assert(read_guest_be32(ansi_descriptor + 4u) == ansi_source);
+
+    PPCContext reset_ansi{};
+    reset_ansi.r3.u32 = ansi_descriptor;
+    reset_ansi.r4.u32 = 0u;
+    call_test_import(0x8200123Cu, reset_ansi);
+    assert(read_guest_be32(ansi_descriptor) == 0u);
+    assert(read_guest_be32(ansi_descriptor + 4u) == 0u);
+
+    PPCContext invalid_ansi_descriptor{};
+    invalid_ansi_descriptor.r3.u32 = 0x82018000u;
+    invalid_ansi_descriptor.r4.u32 = ansi_source;
+    call_test_import(0x8200123Cu, invalid_ansi_descriptor);
+    assert(invalid_ansi_descriptor.r3.u32 == 0xC0000005u);
+
+    put_guest_be32(ansi_descriptor, 0xFFFFFFFFu);
+    put_guest_be32(ansi_descriptor + 4u, 0xFFFFFFFFu);
+    PPCContext invalid_ansi_source{};
+    invalid_ansi_source.r3.u32 = ansi_descriptor;
+    invalid_ansi_source.r4.u32 = 0x82018000u;
+    call_test_import(0x8200123Cu, invalid_ansi_source);
+    assert(invalid_ansi_source.r3.u32 == 0xC0000005u);
+    assert(read_guest_be32(ansi_descriptor) == 0xFFFFFFFFu);
+    assert(read_guest_be32(ansi_descriptor + 4u) == 0xFFFFFFFFu);
 
     // Kernel IRQL/critical-region operations are per host guest-thread.
     PPCContext enter_critical{};
