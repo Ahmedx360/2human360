@@ -105,7 +105,7 @@ jobs:
           print(f"Mappings: {len(rows)}; stored-name files present: {stored}; logical-name files present: {logical}")
           PY
           } 2>&1 | tee build/diagnostics/title-content-layout.log
-          ./build/clang/TooHumanXexImportAudit Default.xex 2>&1 | tee build/diagnostics/title-xex-audit.log
+          ./build/clang/runtime/TooHumanXexImportAudit Default.xex 2>&1 | tee build/diagnostics/title-xex-audit.log
 
       - name: Attempt real title entry-point boot (diagnostic)
         if: ${{ hashFiles('Default.xex') != '' }}
@@ -120,7 +120,7 @@ jobs:
           mkdir -p build/diagnostics "$TH_SAVE_ROOT"
           ulimit -c 0
           set +e
-          timeout --signal=TERM --kill-after=5s 120s ./build/clang/TooHumanRuntimeProbe Default.xex --run > build/diagnostics/title-boot.log 2>&1
+          timeout --signal=TERM --kill-after=5s 120s ./build/clang/runtime/TooHumanRuntimeProbe Default.xex --run > build/diagnostics/title-boot.log 2>&1
           result=$?
           echo "Runtime probe exit code: $result" | tee build/diagnostics/title-boot-exit.txt
           cat build/diagnostics/title-boot.log
