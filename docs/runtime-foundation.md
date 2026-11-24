@@ -360,6 +360,11 @@ sorts entries deterministically, supports case-insensitive `*`/`?` matching,
 retains its search expression and cursor across calls, and reports
 `STATUS_NO_SUCH_FILE` separately from `STATUS_NO_MORE_FILES`.
 
+The Too Human executable opens `game:\\filetable.txt`, whose rows map a stored disc filename to its logical asset filename. The stored first column is truncated to the disc's 42-byte filename limit; the logical second column can be longer (up to 63 bytes in the current parser). `GuestVfs` lazily reads this table and resolves root-level logical names to stored names, case-insensitively. The mapping also applies to opens relative to a handle for the game-volume root. Invalid, overlong, duplicate-ambiguous, or path-traversal rows are ignored. The host directory continues to contain the stored filenames; callers open the logical name used by the game.
+
+When a read-only game-volume request has no exact file but a sibling with an added `.gz` suffix exists (for example `game:\\contents.zzz` backed by `contents.zzz.gz`), the VFS opens that sibling. It deliberately returns the gzip bytes unchanged: the title contains its own compression handling, including gzip header/CRC checks, and the host VFS must not decompress the stream a second time. The `contents.zzz` catalog itself is not yet decoded by the runtime; its uploaded sample contains a 248-entry 20-byte table and a 248-entry sorted 32-bit table, whose semantic fields still need to be confirmed against the game’s parser.
+
+
 The Xbox 360 `NtQueryDirectoryFile` export uses this title's compact ABI:
 `r3` is the directory handle, `r7` the I/O status block, `r8` the output
 buffer, `r9` its byte length, `r10` the optional 8-byte `ANSI_STRING`
