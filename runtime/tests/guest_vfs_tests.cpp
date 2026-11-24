@@ -54,7 +54,7 @@ int main() {
         for (const auto& [stored_name, logical_name] : filetable_rows)
             table << stored_name << ',' << logical_name << "\r\n";
         table << "../outside.bin,Unsafe.g41.gz\r\n";
-        table << std::string(43u, 'x') << ",TooLongStored.g41.gz\\r\\n";
+        table << std::string(43u, 'x') << ",TooLongStored.g41.gz\r\n";
     }
     { std::ofstream(tmp / "game" / stored_texture, std::ios::binary) << "texture"; }
     { std::ofstream(tmp / "game" / stored_effect, std::ios::binary) << "effect"; }
