@@ -29,9 +29,9 @@ struct GuestThreadManager::Record final : GuestKernelObject {
         : startup(std::move(value)),
           entry(std::move(callback)),
           cleanup(std::move(cleanup_callback)),
-          execution_control(initial_suspend_count),
           state(initial_suspend_count ? GuestThreadLifecycleState::Suspended
-                                      : GuestThreadLifecycleState::Running) {}
+                                      : GuestThreadLifecycleState::Running),
+          execution_control(initial_suspend_count) {}
 
     ~Record() override {
         Cleanup final_cleanup;
