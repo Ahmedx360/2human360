@@ -263,7 +263,7 @@ registers the 0x10-byte guest dispatcher record by address, `KeSetEvent` and
 events signaled. `KePulseEvent` and `NtPulseEvent` release only threads already queued at the
 pulse instant (one for synchronization events, all for notification events)
 and leave the event unsignaled. Priority increment and wait-switch hints are
-ignored; multiple-object waits remain unimplemented.
+ignored. Both `NtWaitForMultipleObjectsEx` (handle array) and `KeWaitForMultipleObjects` (native dispatcher-object pointer array) now implement WaitAll and WaitAny. The `Ke` form currently accepts validated native event and semaphore records; its WaitBlockArray and scheduling hints are ignored.
 
 Waitable timer handles now support `NtCreateTimer`, `NtSetTimerEx` and
 `NtCancelTimer`. Notification timers remain signaled after expiry, while
@@ -288,16 +288,14 @@ plus limit), and `KeWaitForSingleObject` can wait on the address registered by
 `KeInitializeSemaphore`. When an XDK-inlined initializer bypasses the import,
 first-touch wait/set/reset/release lazily recognizes only validated native
 header types 0/1 (event) and 5 (semaphore). Other dispatcher object types are
-still rejected. Named semaphore attributes and multiple-object waits remain
-unsupported.
+still rejected. Named semaphore attributes remain unsupported. Native multi-waits currently synthesize only event and semaphore dispatcher records; native mutant/timer layouts are not yet supported.
 
 The synchronization subset is deliberately bounded. Critical sections use recursive host mutexes and mirror the
 28-byte guest structure's lock count, recursion count, and owner. Events support notification/manual-reset and
 synchronization/auto-reset behavior, initial state, set/clear, finite or infinite waits, and close. The Xbox ABI is
 preserved: `NtCreateEvent` receives its output handle in r3, object attributes in r4, event type in r5 and initial
-state in r6; `NtWaitForSingleObjectEx` receives handle, wait mode, alertable flag and timeout pointer in r3-r6.
-`NtWaitForSingleObjectEx` and `NtClose` use the shared object table. Event set/clear remains event-only. Named-object
-lookup, APC delivery/alertable completion, multiple-wait operations, and other dispatcher-object types are not implemented. Kernel TLS values are per host thread, matching the intended one-host-thread-per-guest-thread
+state in r6; `NtWaitForSingleObjectEx` receives handle, wait mode, alertable flag and timeout pointer in r3-r6; `NtWaitForMultipleObjectsEx` receives count, handle-array pointer, WaitType, wait mode, alertable flag and timeout pointer in r3-r8.
+`NtWaitForSingleObjectEx`, `NtWaitForMultipleObjectsEx`, and `NtClose` use the shared object table. The multiple-wait handler accepts up to 64 handles and implements both WaitAll and WaitAny with finite or infinite timeouts; WaitAll rejects duplicate object references, while WaitAny preserves first-ready-slot behavior for duplicate entries. Events, semaphores, mutants, and timers are checked and acquired while their object locks are held in a stable order, so WaitAll does not consume a partial set; completed thread objects are probed as level-triggered objects. The wait engine uses a shared epoch-based condition-variable notification domain, with timer deadlines as timed wake sources; it does not poll at a fixed interval. Event set/clear remains event-only. Named-object lookup, APC delivery/alertable completion, pulse-event participation in multi-waits, and other dispatcher-object types remain incomplete. Kernel TLS values are per host thread, matching the intended one-host-thread-per-guest-thread
 execution model.
 
 Thread stacks and both guard regions use the host's native page size, with a 16 KiB minimum guest stack. This avoids assuming every host has 4 KiB pages. Partial context-allocation failures roll back already allocated runtime blocks and the stack reservation.
@@ -365,6 +363,7 @@ retains its search expression and cursor across calls, and reports
 The Too Human executable opens `game:\\filetable.txt`, whose rows map a stored disc filename to its logical asset filename. The stored first column is truncated to the disc's 42-byte filename limit; the logical second column can be longer (up to 63 bytes in the current parser). `GuestVfs` lazily reads this table and resolves root-level logical names to stored names, case-insensitively. The mapping also applies to opens relative to a handle for the game-volume root. Invalid, overlong, duplicate-ambiguous, or path-traversal rows are ignored. The host directory continues to contain the stored filenames; callers open the logical name used by the game.
 
 When a read-only game-volume request has no exact file but a sibling with an added `.gz` suffix exists (for example `game:\\contents.zzz` backed by `contents.zzz.gz`), the VFS opens that sibling. It deliberately returns the gzip bytes unchanged: the title contains its own compression handling, including gzip header/CRC checks, and the host VFS must not decompress the stream a second time. The `contents.zzz` catalog itself is not yet decoded by the runtime; its uploaded sample contains a 248-entry 20-byte table and a 248-entry sorted 32-bit table, whose semantic fields still need to be confirmed against the game’s parser.
+
 
 The Xbox 360 `NtQueryDirectoryFile` export uses this title's compact ABI:
 `r3` is the directory handle, `r7` the I/O status block, `r8` the output

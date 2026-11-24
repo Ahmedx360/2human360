@@ -92,6 +92,7 @@ struct GuestThreadManager::Record final : GuestKernelObject {
             state = GuestThreadLifecycleState::Completed;
             deferred_cleanup = take_cleanup_locked();
         }
+        notify_guest_kernel_object_waiters();
         perform_cleanup(std::move(deferred_cleanup));
     }
 
