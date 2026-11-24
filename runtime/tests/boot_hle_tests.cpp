@@ -27,6 +27,12 @@ std::uint64_t be64(std::uint32_t a) {
     return (std::uint64_t(be32(a)) << 32) | be32(a + 4);
 }
 void put16(std::uint32_t a, std::uint16_t v) { g_mem[a] = v >> 8; g_mem[a + 1] = std::uint8_t(v); }
+void put_be32_test(std::uint32_t a, std::uint32_t v) {
+    g_mem[a] = static_cast<std::uint8_t>(v >> 24);
+    g_mem[a + 1] = static_cast<std::uint8_t>(v >> 16);
+    g_mem[a + 2] = static_cast<std::uint8_t>(v >> 8);
+    g_mem[a + 3] = static_cast<std::uint8_t>(v);
+}
 
 }
 
@@ -303,6 +309,278 @@ void test_xam_controller_disconnected_profile() {
     context.r5.u32 = output;
     boot_hle::XamInputGetKeystrokeEx(context, base());
     assert(context.r3.u32 == kBadArguments);
+}
+
+
+
+void test_ke_wait_for_multiple_objects() {
+    constexpr std::uint32_t first_event = 0x7D00u;
+    constexpr std::uint32_t second_event = 0x7D20u;
+    constexpr std::uint32_t objects_array = 0x7D40u;
+    constexpr std::uint32_t timeout = 0x7D60u;
+    std::memset(base() + timeout, 0, 8u);
+
+    PPCContext context{};
+    context.r3.u32 = first_event;
+    context.r4.u32 = 1u; // SynchronizationEvent.
+    context.r5.u32 = 1u; // Initially signaled.
+    boot_hle::KeInitializeEvent(context, base());
+    assert(context.r3.u32 == 0u);
+
+    context = {};
+    context.r3.u32 = second_event;
+    context.r4.u32 = 1u;
+    context.r5.u32 = 0u;
+    boot_hle::KeInitializeEvent(context, base());
+    assert(context.r3.u32 == 0u);
+
+    put_be32_test(objects_array, first_event);
+    put_be32_test(objects_array + 4u, second_event);
+
+    context = {};
+    context.r3.u32 = 2u;
+    context.r4.u32 = objects_array;
+    context.r5.u32 = 0u; // WaitAll.
+    context.r6.u32 = 0u; // WaitReason.
+    context.r7.u32 = 0u; // KernelMode.
+    context.r8.u32 = 0u; // Not alertable.
+    context.r9.u32 = timeout;
+    boot_hle::KeWaitForMultipleObjects(context, base());
+    assert(context.r3.u32 == 0x00000102u); // STATUS_TIMEOUT.
+    assert(be32(first_event + 4u) == 1u);
+    assert(be32(second_event + 4u) == 0u);
+
+    context = {};
+    context.r3.u32 = second_event;
+    context.r4.u32 = 0u;
+    context.r5.u32 = 0u;
+    boot_hle::KeSetEvent(context, base());
+    assert(context.r3.u32 == 0u);
+
+    context = {};
+    context.r3.u32 = 2u;
+    context.r4.u32 = objects_array;
+    context.r5.u32 = 0u;
+    context.r7.u32 = 0u;
+    context.r9.u32 = timeout;
+    boot_hle::KeWaitForMultipleObjects(context, base());
+    assert(context.r3.u32 == 0u);
+    assert(be32(first_event + 4u) == 0u);
+    assert(be32(second_event + 4u) == 0u);
+
+    context = {};
+    context.r3.u32 = first_event;
+    context.r4.u32 = 0u;
+    context.r5.u32 = 0u;
+    boot_hle::KeSetEvent(context, base());
+    context = {};
+    context.r3.u32 = second_event;
+    context.r4.u32 = 0u;
+    context.r5.u32 = 0u;
+    boot_hle::KeSetEvent(context, base());
+
+    context = {};
+    context.r3.u32 = 2u;
+    context.r4.u32 = objects_array;
+    context.r5.u32 = 1u; // WaitAny.
+    context.r7.u32 = 0u;
+    context.r9.u32 = timeout;
+    boot_hle::KeWaitForMultipleObjects(context, base());
+    assert(context.r3.u32 == 0u);
+    assert(be32(first_event + 4u) == 0u);
+    assert(be32(second_event + 4u) == 1u);
+
+    context = {};
+    context.r3.u32 = 2u;
+    context.r4.u32 = objects_array;
+    context.r5.u32 = 1u;
+    context.r7.u32 = 0u;
+    context.r9.u32 = timeout;
+    boot_hle::KeWaitForMultipleObjects(context, base());
+    assert(context.r3.u32 == 1u);
+    assert(be32(second_event + 4u) == 0u);
+
+    assert(process_kernel_objects().close(first_event));
+    assert(process_kernel_objects().close(second_event));
+}
+
+void test_wait_for_multiple_objects_hle() {
+    constexpr std::uint32_t handles_array = 0x7C00u;
+    constexpr std::uint32_t timeout = 0x7C40u;
+    std::memset(base() + timeout, 0, 8u);
+
+    auto first = std::make_shared<GuestEventObject>(false, true);
+    auto second = std::make_shared<GuestEventObject>(false, false);
+    auto first_handle = process_kernel_objects().insert(first);
+    auto second_handle = process_kernel_objects().insert(second);
+    assert(first_handle && second_handle);
+    put_be32_test(handles_array, *first_handle);
+    put_be32_test(handles_array + 4u, *second_handle);
+
+    PPCContext context{};
+    context.r3.u32 = 2u;
+    context.r4.u32 = handles_array;
+    context.r5.u32 = 0u; // WaitAll.
+    context.r6.u32 = 0u; // KernelMode.
+    context.r7.u32 = 0u; // Not alertable.
+    context.r8.u32 = timeout;
+    boot_hle::NtWaitForMultipleObjectsEx(context, base());
+    assert(context.r3.u32 == 0x00000102u); // STATUS_TIMEOUT.
+    // WaitAll must not consume the first auto-reset event when the second is
+    // not ready. The implementation acquires the set atomically under locks.
+    assert(first->is_signaled());
+    assert(!second->is_signaled());
+
+    (void)second->set();
+    context = {};
+    context.r3.u32 = 2u;
+    context.r4.u32 = handles_array;
+    context.r5.u32 = 0u;
+    context.r7.u32 = 0u; // KernelMode, not alertable.
+    context.r8.u32 = timeout;
+    boot_hle::NtWaitForMultipleObjectsEx(context, base());
+    assert(context.r3.u32 == 0u);
+    assert(!first->is_signaled());
+    assert(!second->is_signaled());
+
+    (void)first->set();
+    (void)second->set();
+    context = {};
+    context.r3.u32 = 2u;
+    context.r4.u32 = handles_array;
+    context.r5.u32 = 1u; // WaitAny.
+    context.r6.u32 = 1u; // UserMode.
+    context.r7.u32 = 0u; // Not alertable.
+    context.r8.u32 = timeout;
+    boot_hle::NtWaitForMultipleObjectsEx(context, base());
+    assert(context.r3.u32 == 0u); // First signaled handle wins.
+    assert(!first->is_signaled());
+    assert(second->is_signaled());
+
+    context = {};
+    context.r3.u32 = 2u;
+    context.r4.u32 = handles_array;
+    context.r5.u32 = 1u;
+    context.r7.u32 = 0u; // KernelMode, not alertable.
+    context.r8.u32 = timeout;
+    boot_hle::NtWaitForMultipleObjectsEx(context, base());
+    assert(context.r3.u32 == 1u);
+    assert(!second->is_signaled());
+
+    context = {};
+    context.r3.u32 = 0u;
+    context.r4.u32 = handles_array;
+    context.r5.u32 = 1u;
+    boot_hle::NtWaitForMultipleObjectsEx(context, base());
+    assert(context.r3.u32 == 0xC000000Du); // STATUS_INVALID_PARAMETER.
+
+    // WaitAll rejects duplicate objects. WaitAny permits them and returns
+    // the first ready array slot, matching the Lost Odyssey wait-set behavior.
+    put_be32_test(handles_array + 4u, *first_handle);
+    context = {};
+    context.r3.u32 = 2u;
+    context.r4.u32 = handles_array;
+    context.r5.u32 = 0u; // WaitAll.
+    context.r7.u32 = 0u;
+    context.r8.u32 = timeout;
+    boot_hle::NtWaitForMultipleObjectsEx(context, base());
+    assert(context.r3.u32 == 0xC000000Du); // STATUS_INVALID_PARAMETER.
+
+    (void)first->set();
+    context = {};
+    context.r3.u32 = 2u;
+    context.r4.u32 = handles_array;
+    context.r5.u32 = 1u; // WaitAny.
+    context.r7.u32 = 0u;
+    context.r8.u32 = timeout;
+    boot_hle::NtWaitForMultipleObjectsEx(context, base());
+    assert(context.r3.u32 == 0u);
+    assert(!first->is_signaled());
+
+    put_be32_test(handles_array + 4u, 0xDEADBEEFu);
+    context = {};
+    context.r3.u32 = 2u;
+    context.r4.u32 = handles_array;
+    context.r5.u32 = 1u;
+    context.r7.u32 = 0u; // KernelMode, not alertable.
+    context.r8.u32 = timeout;
+    boot_hle::NtWaitForMultipleObjectsEx(context, base());
+    assert(context.r3.u32 == 0xC0000008u); // STATUS_INVALID_HANDLE.
+
+    assert(process_kernel_objects().close(*first_handle));
+    assert(process_kernel_objects().close(*second_handle));
+
+    // The same wait-set path must acquire the other dispatcher primitives.
+    auto semaphore = std::make_shared<GuestSemaphoreObject>(1u, 1u);
+    auto mutant = std::make_shared<GuestMutantObject>();
+    auto timer = std::make_shared<GuestTimerObject>(false);
+    timer->set_timer(std::chrono::milliseconds::zero(), 0u);
+    const auto semaphore_handle = process_kernel_objects().insert(semaphore);
+    const auto mutant_handle = process_kernel_objects().insert(mutant);
+    const auto timer_handle = process_kernel_objects().insert(timer);
+    assert(semaphore_handle && mutant_handle && timer_handle);
+    put_be32_test(handles_array, *semaphore_handle);
+    put_be32_test(handles_array + 4u, *mutant_handle);
+    put_be32_test(handles_array + 8u, *timer_handle);
+
+    context = {};
+    context.r3.u32 = 3u;
+    context.r4.u32 = handles_array;
+    context.r5.u32 = 0u; // WaitAll.
+    context.r7.u32 = 0u; // KernelMode, not alertable.
+    context.r8.u32 = timeout;
+    boot_hle::NtWaitForMultipleObjectsEx(context, base());
+    assert(context.r3.u32 == 0u);
+    assert(semaphore->count() == 0u);
+    assert(mutant->recursion_count() == 1u);
+    assert(timer->wait(std::chrono::milliseconds::zero()) ==
+           GuestKernelObjectWaitResult::Timeout); // Auto-reset timer was consumed.
+
+    std::uint32_t previous_count = 0;
+    assert(semaphore->release(1u, previous_count));
+    assert(mutant->release());
+    assert(process_kernel_objects().close(*semaphore_handle));
+    assert(process_kernel_objects().close(*mutant_handle));
+    assert(process_kernel_objects().close(*timer_handle));
+
+    // Multi-waits sleep on the shared notification epoch rather than polling.
+    auto wake_event = std::make_shared<GuestEventObject>(false, false);
+    const auto wake_handle = process_kernel_objects().insert(wake_event);
+    assert(wake_handle);
+    put_be32_test(handles_array, *wake_handle);
+    std::thread signaler([wake_event] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        (void)wake_event->set();
+    });
+    context = {};
+    context.r3.u32 = 1u;
+    context.r4.u32 = handles_array;
+    context.r5.u32 = 1u; // WaitAny.
+    context.r6.u32 = 0u;
+    context.r7.u32 = 0u;
+    context.r8.u32 = 0u; // Infinite timeout.
+    boot_hle::NtWaitForMultipleObjectsEx(context, base());
+    signaler.join();
+    assert(context.r3.u32 == 0u);
+    assert(!wake_event->is_signaled());
+    assert(process_kernel_objects().close(*wake_handle));
+
+    // A wait-set also wakes at the earliest armed timer deadline.
+    auto delayed_timer = std::make_shared<GuestTimerObject>(false);
+    delayed_timer->set_timer(std::chrono::milliseconds(5), 0u);
+    const auto delayed_timer_handle = process_kernel_objects().insert(delayed_timer);
+    assert(delayed_timer_handle);
+    put_be32_test(handles_array, *delayed_timer_handle);
+    context = {};
+    context.r3.u32 = 1u;
+    context.r4.u32 = handles_array;
+    context.r5.u32 = 1u;
+    context.r6.u32 = 0u;
+    context.r7.u32 = 0u;
+    context.r8.u32 = 0u;
+    boot_hle::NtWaitForMultipleObjectsEx(context, base());
+    assert(context.r3.u32 == 0u);
+    assert(process_kernel_objects().close(*delayed_timer_handle));
 }
 
 void test_waitable_timer_hle() {
@@ -971,6 +1249,8 @@ int main() {
     test_video_display_queries();
     test_xam_controller_disconnected_profile();
     test_native_event_dispatcher_object();
+    test_ke_wait_for_multiple_objects();
+    test_wait_for_multiple_objects_hle();
     test_waitable_timer_hle();
     test_critical_sections();
     test_tls();

@@ -7,6 +7,8 @@
 #include <cstdlib>
 #include <limits>
 #include <system_error>
+#include <sstream>
+#include <unordered_set>
 
 namespace toohuman::runtime {
 namespace fs = std::filesystem;
@@ -313,6 +315,90 @@ GuestVfs GuestVfs::from_environment() {
     return GuestVfs(game ? game : "game", save ? save : "th_save");
 }
 
+std::optional<std::string> GuestVfs::filetable_storage_name(
+    const std::string& logical_name) const {
+    const auto key = lower(logical_name);
+    std::lock_guard lock(filetable_mutex_);
+    if (!filetable_loaded_) {
+        filetable_loaded_ = true;
+        const auto actual_name = find_case_insensitive(game_root_, "filetable.txt");
+        if (actual_name) {
+            std::ifstream input(game_root_ / *actual_name, std::ios::binary | std::ios::ate);
+            if (input) {
+                const auto end = input.tellg();
+                constexpr std::uint64_t kMaxFileTableBytes = 16u * 1024u * 1024u;
+                if (end >= 0 &&
+                    static_cast<std::uint64_t>(end) <= kMaxFileTableBytes) {
+                    const auto byte_count = static_cast<std::size_t>(end);
+                    std::string contents(byte_count, '\0');
+                    input.seekg(0);
+                    if (contents.empty() ||
+                        input.read(contents.data(), static_cast<std::streamsize>(contents.size()))) {
+                        if (contents.size() >= 3u &&
+                            static_cast<unsigned char>(contents[0]) == 0xEFu &&
+                            static_cast<unsigned char>(contents[1]) == 0xBBu &&
+                            static_cast<unsigned char>(contents[2]) == 0xBFu) {
+                            contents.erase(0, 3u);
+                        }
+
+                        const auto trim = [](std::string value) {
+                            const auto is_space = [](unsigned char c) {
+                                return c == ' ' || c == '\t' || c == '\r' || c == '\n';
+                            };
+                            while (!value.empty() &&
+                                   is_space(static_cast<unsigned char>(value.front())))
+                                value.erase(value.begin());
+                            while (!value.empty() &&
+                                   is_space(static_cast<unsigned char>(value.back())))
+                                value.pop_back();
+                            return value;
+                        };
+                        const auto is_root_filename = [](const std::string& value,
+                                                          std::size_t max_bytes) {
+                            return !value.empty() && value.size() <= max_bytes &&
+                                value != "." && value != ".." &&
+                                value.find_first_of("/\\:,") == std::string::npos &&
+                                value.find('\0') == std::string::npos;
+                        };
+
+                        std::istringstream lines(contents);
+                        std::string line;
+                        std::unordered_set<std::string> ambiguous;
+                        while (std::getline(lines, line)) {
+                            const auto separator = line.find(',');
+                            if (separator == std::string::npos ||
+                                line.find(',', separator + 1u) != std::string::npos)
+                                continue;
+
+                            // filetable.txt stores: stored-name,logical-name.
+                            // The executable prefixes the logical second field
+                            // with "game:\\" when constructing its lookup key.
+                            const auto stored_name = trim(line.substr(0, separator));
+                            const auto logical_file = trim(line.substr(separator + 1u));
+                            if (!is_root_filename(stored_name, 42u) ||
+                                !is_root_filename(logical_file, 63u))
+                                continue;
+
+                            const auto logical_key = lower(logical_file);
+                            if (ambiguous.contains(logical_key)) continue;
+                            const auto [entry, inserted] =
+                                filetable_storage_names_.emplace(logical_key, stored_name);
+                            if (!inserted && lower(entry->second) != lower(stored_name)) {
+                                filetable_storage_names_.erase(entry);
+                                ambiguous.insert(logical_key);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    const auto found = filetable_storage_names_.find(key);
+    if (found == filetable_storage_names_.end()) return std::nullopt;
+    return found->second;
+}
+
 std::optional<fs::path> GuestVfs::resolve(
     const std::string& guest_name, const fs::path* root_dir,
     bool* writable, bool root_writable) const {
@@ -324,6 +410,8 @@ std::optional<fs::path> GuestVfs::resolve(
 
     fs::path root;
     bool can_write = false;
+    bool game_volume = false;
+    bool game_root_handle = false;
     if (root_dir != nullptr) {
         // Root-directory handles may only be used for relative names and may
         // never acquire more write access than their originating volume.
@@ -352,18 +440,33 @@ std::optional<fs::path> GuestVfs::resolve(
                 name.erase(0, next == std::string::npos ? name.size() : next);
             }
         }
+        game_volume = game;
+        game_root_handle = game;
         root = game ? game_root_ : save_root_;
         can_write = !game;
     }
 
-    // Leading separators in device paths are root-relative, not host absolute.
-    while (!name.empty() && name.front() == '/') name.erase(name.begin());
-    if (writable) *writable = can_write;
-
     const auto canonical_root = canonical_path(root);
     if (!canonical_root) return std::nullopt;
-    fs::path result = *canonical_root;
+    if (root_dir != nullptr) {
+        const auto canonical_game_root = canonical_path(game_root_);
+        if (canonical_game_root && is_within(*canonical_game_root, *canonical_root)) {
+            game_volume = true;
+            game_root_handle = *canonical_game_root == *canonical_root;
+        }
+    }
 
+    // Leading separators in device paths are root-relative, not host absolute.
+    while (!name.empty() && name.front() == '/') name.erase(name.begin());
+    // filetable aliases are root-level game-volume names. Directory-relative
+    // opens work too when the directory handle is the game-volume root.
+    if (game_root_handle) {
+        if (const auto stored_name = filetable_storage_name(name))
+            name = *stored_name;
+    }
+    if (writable) *writable = can_write;
+
+    fs::path result = *canonical_root;
     std::size_t start = 0;
     while (start < name.size()) {
         const auto end = name.find('/', start);
@@ -390,9 +493,32 @@ std::optional<fs::path> GuestVfs::resolve(
             return std::nullopt;
         result = *canonical_candidate;
     }
+
+    // Some extracted disc sets keep gzip-wrapped files with a trailing .gz
+    // while the title opens the uncompressed logical name. Resolve that
+    // sibling transparently, but do not inflate it here: the title's own
+    // compression layer validates the gzip header/CRC and consumes the stream.
+    if (game_volume) {
+        std::error_code exists_error;
+        const bool exact_exists = fs::exists(result, exists_error);
+        const auto lowered_name = lower(name);
+        const bool already_gzip = lowered_name.size() >= 3u &&
+            lowered_name.compare(lowered_name.size() - 3u, 3u, ".gz") == 0;
+        if (!exists_error && !exact_exists && !already_gzip) {
+            const auto compressed_leaf = result.filename().string() + ".gz";
+            if (const auto actual = find_case_insensitive(
+                    result.parent_path(), compressed_leaf)) {
+                const auto compressed_candidate =
+                    canonical_path(result.parent_path() / *actual);
+                if (compressed_candidate &&
+                    is_within(*canonical_root, *compressed_candidate)) {
+                    result = *compressed_candidate;
+                }
+            }
+        }
+    }
     return result;
 }
-
 GuestVfsOpenResult GuestVfs::open(
     const std::string& guest_name, const fs::path* root_dir,
     std::uint32_t disposition, bool want_write, bool directory_only,

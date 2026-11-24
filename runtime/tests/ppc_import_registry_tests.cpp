@@ -88,7 +88,7 @@ int main() {
                                     &test_import_handler, &error));
     std::size_t startup_hle_count = 0;
     assert(toohuman::runtime::register_boot_imports(imports, &error, &startup_hle_count));
-    assert(startup_hle_count == 91u);
+    assert(startup_hle_count == 94u);
     const std::vector<toohuman::runtime::XexImport> metadata{
         {"xboxkrnl.exe", 0x0777u, 0, 1, 0x82001100u},
         {"xboxkrnl.exe", 0x011Bu, 0, 1, 0x82001104u},
@@ -158,11 +158,12 @@ int main() {
         {"xboxkrnl.exe", 0x00E2u, 0, 1, 0x820011F8u},
         {"xboxkrnl.exe", 0x01B6u, 0, 1, 0x820011BCu},
         {"xboxkrnl.exe", 0x01C3u, 0, 1, 0x820011C0u},
-        {"xboxkrnl.exe", 0x00BEu, 0, 1, 0x82001210u}
+        {"xboxkrnl.exe", 0x00FCu, 0, 1, 0x82001210u},
+        {"xboxkrnl.exe", 0x00BEu, 0, 1, 0x82001300u}
     };
     std::size_t registered = 0;
     assert(imports.install(memory, metadata, &registered, &error));
-    assert(registered == 69u);
+    assert(registered == 70u);
     assert(memory.get_function<PPCFunc*>(0x82001100u) != &test_default_handler);
 
     // The real kernel imports configure the per-title primary Xenos ring.
@@ -342,10 +343,10 @@ int main() {
     assert(read_guest_be32(0xA0060004u) == 0x11223344u);
     assert(read_guest_be32(0xA0020000u) == 43u);
 
-    // Seed this assertion's input register directly: this fixture must
-    // not depend on an earlier indirect-buffer command having run.
+    // Seed this assertion's input register directly: reinitializing the
+    // primary ring does not clear the Xenos MMIO register file.
     assert(GuestMmioBus::global().write_unobserved(
-        kXenosMmioBase + 0x32u * 4u, 4, 0u));
+        kXenosMmioBase + 0x32u * 4u, 4, 0xFEEDBEEFu));
     // A non-matching condition consumes the packet without writing its target.
     put_guest_be32(0xA00100ACu,
         0xC0000000u | (5u << 16) | (0x45u << 8));
@@ -357,16 +358,17 @@ int main() {
     put_guest_be32(0xA00100C4u, 0x12345678u);
     ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 50u);
     assert(imports.xenos_command_processor().read_index() == 50u);
-    assert(GuestMmioBus::global().read(kXenosMmioBase + 0x32u * 4u, 4) == 0u);
+    assert(GuestMmioBus::global().read(kXenosMmioBase + 0x32u * 4u, 4) ==
+           0xFEEDBEEFu); // Non-matching COND_WRITE preserves the prior register value.
 
     // WAIT_REG_MEM defers without consuming the packet or publishing RPTR.
     // A guest write to the polled register wakes the pump and retries the wait.
     put_guest_be32(0xA00100D4u,
         0xC0000000u | (4u << 16) | (0x3Cu << 8));
     put_guest_be32(0xA00100D8u, 3u); // Equal, register source.
-    put_guest_be32(0xA00100DCu, 0x12345678u);
-    put_guest_be32(0xA00100E0u, 0xFFFFFFFFu);
-    put_guest_be32(0xA00100E4u, 0u);
+    put_guest_be32(0xA00100DCu, 3u); // Poll Xenos register index 3.
+    put_guest_be32(0xA00100E0u, 0x12345678u); // Expected register value.
+    put_guest_be32(0xA00100E4u, 0xFFFFFFFFu); // Compare all bits.
     put_guest_be32(0xA00100E8u, 0u);
     ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 59u);
     assert(imports.xenos_command_processor().read_index() == 53u);
@@ -432,9 +434,9 @@ int main() {
     put_guest_be32(0xA0030008u,
         0xC0000000u | (4u << 16) | (0x3Cu << 8));
     put_guest_be32(0xA003000Cu, 3u); // Equal, register source.
-    put_guest_be32(0xA0030010u, 0xCAFEBABEu);
-    put_guest_be32(0xA0030014u, 0xFFFFFFFFu);
-    put_guest_be32(0xA0030018u, 0u);
+    put_guest_be32(0xA0030010u, 3u); // Poll Xenos register index 3.
+    put_guest_be32(0xA0030014u, 0xCAFEBABEu); // Expected register value.
+    put_guest_be32(0xA0030018u, 0xFFFFFFFFu); // Compare all bits.
     put_guest_be32(0xA003001Cu, 0u);
     put_guest_be32(0xA0030020u, 0x35u); // Type-0 write after the wait.
     put_guest_be32(0xA0030024u, 0xBBBBBBBBu);
@@ -568,6 +570,13 @@ int main() {
     // Guest-memory WAIT_REG_MEM wakes from a translated PPC RAM store that
     // overlaps the watched physical dword; no extra CP_RB_WPTR is required.
     assert(imports.initialize_xenos_ring(0x00010000u, 6u, &error));
+    // A ring reinitialization preserves the Xenos MMIO register file. Seed
+    // the deferred packet's following target register to a known value.
+    assert(GuestMmioBus::global().write_unobserved(
+        kXenosMmioBase + 0x34u * 4u, 4, 0u));
+    // The same physical word was written by the earlier MEM_WRITE coverage;
+    // clear it so this wait starts with an unmet comparison.
+    put_guest_be32(0xA0060000u, 0u);
     put_guest_be32(0xA0010000u,
         0xC0000000u | (4u << 16) | (0x3Cu << 8)); // WAIT_REG_MEM, five operands.
     put_guest_be32(0xA0010004u, 0x13u);           // Equal, memory source.
@@ -676,18 +685,19 @@ int main() {
     // uncached physical alias, and does not invent mappings for arbitrary VAs.
     PPCContext physical_alias_query{};
     physical_alias_query.r3.u32 = 0xA0060000u;
-    call_test_import(0x82001210u, physical_alias_query);
+    call_test_import(0x82001300u, physical_alias_query);
     assert(physical_alias_query.r3.u32 == 0x00060000u);
 
     PPCContext ordinary_virtual_query{};
     ordinary_virtual_query.r3.u32 = 0x82012000u;
-    call_test_import(0x82001210u, ordinary_virtual_query);
+    call_test_import(0x82001300u, ordinary_virtual_query);
     assert(ordinary_virtual_query.r3.u32 == 0u);
 
     PPCContext uncommitted_alias_query{};
     uncommitted_alias_query.r3.u32 = 0xA0080000u;
-    call_test_import(0x82001210u, uncommitted_alias_query);
+    call_test_import(0x82001300u, uncommitted_alias_query);
     assert(uncommitted_alias_query.r3.u32 == 0u);
+
     // The volume-information export uses the Xbox ABI:
     // (handle, iosb, information, length, information_class).
     // Supply valid non-handle arguments so the test reaches handle dispatch.
@@ -1049,6 +1059,11 @@ int main() {
     boot_context = {};
     call_test_import(0x82001194u, boot_context); // NtResumeThread.
     assert(boot_context.r3.u32 == 0xC0000002u);
+    boot_context = {};
+    boot_context.r3.u32 = 0x1000u;
+    boot_context.r4.u32 = 0x82012000u;
+    call_test_import(0x82001210u, boot_context); // NtSuspendThread.
+    assert(boot_context.r3.u32 == 0xC0000008u);
     boot_context = {};
     call_test_import(0x8200118Cu, boot_context); // ExTerminateThread outside a worker.
     assert(boot_context.r3.u32 == 0xC0000001u);
