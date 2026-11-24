@@ -698,7 +698,7 @@ int main() {
     };
     store_guest_ascii(0x82012200u, "Alpha");
     store_guest_ascii(0x82012220u, "alpha");
-    store_guest_ascii(0x82012240u, "alphabet");
+    store_guest_ascii(0x82012240u, "Alphabet");
     PPCContext compare_strings{};
     compare_strings.r3.u32 = 0x82012200u;
     compare_strings.r4.u32 = 5u;
@@ -706,7 +706,7 @@ int main() {
     compare_strings.r6.u32 = 5u;
     compare_strings.r7.u32 = 0u;
     call_test_import(0x82001214u, compare_strings);
-    assert(static_cast<std::int32_t>(compare_strings.r3.u32) < 0);
+    assert(compare_strings.r3.u32 == 0xFFFFFFE0u);
 
     compare_strings = {};
     compare_strings.r3.u32 = 0x82012200u;
