@@ -342,6 +342,10 @@ int main() {
     assert(read_guest_be32(0xA0060004u) == 0x11223344u);
     assert(read_guest_be32(0xA0020000u) == 43u);
 
+    // Seed the target register explicitly; the previous PM4 section is
+    // not responsible for this fixture's initial register state.
+    assert(GuestMmioBus::global().write_unobserved(
+        kXenosMmioBase + 0x32u * 4u, 4, 0xFEEDBEEFu));
     // A non-matching condition consumes the packet without writing its target.
     put_guest_be32(0xA00100ACu,
         0xC0000000u | (5u << 16) | (0x45u << 8));
@@ -568,8 +572,8 @@ int main() {
     // The previous PM4 MEM_WRITE test used this physical dword; clear it so
     // the new memory wait begins with an unsatisfied comparison.
     put_guest_be32(0xA0060000u, 0u);
-    ppc_test_store_u32(memory.base(),
-                       kXenosMmioBase + 0x34u * 4u, 0u);
+    assert(GuestMmioBus::global().write_unobserved(
+        kXenosMmioBase + 0x34u * 4u, 4, 0u));
     put_guest_be32(0xA0010000u,
         0xC0000000u | (4u << 16) | (0x3Cu << 8)); // WAIT_REG_MEM, five operands.
     put_guest_be32(0xA0010004u, 0x13u);           // Equal, memory source.
