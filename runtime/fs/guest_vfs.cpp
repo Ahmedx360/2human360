@@ -330,7 +330,7 @@ std::optional<std::string> GuestVfs::filetable_storage_name(
                 if (end >= 0 &&
                     static_cast<std::uint64_t>(end) <= kMaxFileTableBytes) {
                     const auto byte_count = static_cast<std::size_t>(end);
-                    std::string contents(byte_count, '\\0');
+                    std::string contents(byte_count, '\0');
                     input.seekg(0);
                     if (contents.empty() ||
                         input.read(contents.data(), static_cast<std::streamsize>(contents.size()))) {
@@ -343,7 +343,7 @@ std::optional<std::string> GuestVfs::filetable_storage_name(
 
                         const auto trim = [](std::string value) {
                             const auto is_space = [](unsigned char c) {
-                                return c == ' ' || c == '\\t' || c == '\\r' || c == '\\n';
+                                return c == ' ' || c == '\t' || c == '\r' || c == '\n';
                             };
                             while (!value.empty() &&
                                    is_space(static_cast<unsigned char>(value.front())))
@@ -358,8 +358,8 @@ std::optional<std::string> GuestVfs::filetable_storage_name(
                             // enumerates the assets from the game-volume root.
                             return !value.empty() && value.size() <= 63u &&
                                 value != "." && value != ".." &&
-                                value.find_first_of("/\\\\:,") == std::string::npos &&
-                                value.find('\\0') == std::string::npos;
+                                value.find_first_of("/\\:,") == std::string::npos &&
+                                value.find('\0') == std::string::npos;
                         };
 
                         std::istringstream lines(contents);
