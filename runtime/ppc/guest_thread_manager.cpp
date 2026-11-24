@@ -1,4 +1,5 @@
 #include "ppc/guest_thread_manager.hpp"
+#include "ppc/guest_thread_execution.hpp"
 
 #include <utility>
 
@@ -28,9 +29,9 @@ struct GuestThreadManager::Record final : GuestKernelObject {
         : startup(std::move(value)),
           entry(std::move(callback)),
           cleanup(std::move(cleanup_callback)),
-          suspend_count(initial_suspend_count),
           state(initial_suspend_count ? GuestThreadLifecycleState::Suspended
-                                      : GuestThreadLifecycleState::Running) {}
+                                      : GuestThreadLifecycleState::Running),
+          execution_control(initial_suspend_count) {}
 
     ~Record() override {
         Cleanup final_cleanup;
@@ -140,7 +141,7 @@ public:
     std::condition_variable_any condition;
     std::jthread worker;
     GuestThreadLifecycleState state{GuestThreadLifecycleState::Running};
-    std::uint32_t suspend_count{};
+    GuestThreadExecutionControl execution_control;
     std::uint32_t exit_code{GuestThreadManager::kStillActive};
     std::uint32_t active_waiters{};
     bool handle_closed{};
@@ -265,19 +266,24 @@ std::optional<GuestThreadHandle> GuestThreadManager::create(
     owned_handles_.push_back(*handle);
     try {
         record->worker = std::jthread([record](std::stop_token stop) {
+            // Never hold the record lock while waiting on the execution gate:
+            // resume/suspend acquire the record lock before changing the gate.
+            // Blocking here with both locks held would deadlock initially
+            // suspended threads when their first NtResumeThread arrives.
+            const bool resumed = record->execution_control.wait(stop);
+            if (!resumed || stop.stop_requested()) {
+                record->complete(kStatusThreadIsTerminating);
+                return;
+            }
             {
-                std::unique_lock lock(record->mutex);
-                const bool resumed = record->condition.wait(
-                    lock, stop, [&] { return record->suspend_count == 0; });
-                if (!resumed || stop.stop_requested()) {
-                    lock.unlock();
-                    record->complete(kStatusThreadIsTerminating);
-                    return;
-                }
-                record->state = GuestThreadLifecycleState::Running;
+                std::lock_guard lock(record->mutex);
+                record->state = record->execution_control.suspend_count() == 0u
+                    ? GuestThreadLifecycleState::Running
+                    : GuestThreadLifecycleState::Suspended;
             }
             record->condition.notify_all();
 
+            GuestThreadExecutionScope execution_scope(stop, &record->execution_control);
             std::uint32_t code = kStatusUnsuccessful;
             try {
                 code = record->entry(record->startup, stop);
@@ -307,11 +313,38 @@ bool GuestThreadManager::resume(GuestThreadHandle handle,
     }
     {
         std::lock_guard lock(record->mutex);
-        if (previous_count) *previous_count = record->suspend_count;
+        if (previous_count)
+            *previous_count = record->execution_control.suspend_count();
         if (record->state == GuestThreadLifecycleState::Completed) return true;
-        if (record->suspend_count != 0) --record->suspend_count;
+        (void)record->execution_control.resume();
     }
     record->condition.notify_all();
+    return true;
+}
+
+bool GuestThreadManager::suspend(GuestThreadHandle handle,
+                                 std::uint32_t* previous_count,
+                                 std::string* error) {
+    reap_completed_workers();
+    auto record = find_thread(handle);
+    if (!record) {
+        set_error(error, "Guest thread handle is invalid, closed, or not a thread");
+        return false;
+    }
+    {
+        std::lock_guard lock(record->mutex);
+        if (record->state == GuestThreadLifecycleState::Completed) {
+            set_error(error, "Guest thread has already completed");
+            return false;
+        }
+        const auto previous = record->execution_control.suspend_count();
+        if (previous == 0xFFFFFFFFu) {
+            set_error(error, "Guest thread suspend count is exhausted");
+            return false;
+        }
+        (void)record->execution_control.suspend();
+        if (previous_count) *previous_count = previous;
+    }
     return true;
 }
 
@@ -328,8 +361,16 @@ bool GuestThreadManager::get_state(
     auto record = find_thread(handle);
     if (!record) return false;
     std::lock_guard lock(record->mutex);
-    state = record->state;
-    if (suspend_count) *suspend_count = record->suspend_count;
+    if (record->state == GuestThreadLifecycleState::Completed) {
+        state = GuestThreadLifecycleState::Completed;
+    } else {
+        const auto count = record->execution_control.suspend_count();
+        state = count == 0u ? GuestThreadLifecycleState::Running
+                            : GuestThreadLifecycleState::Suspended;
+        if (suspend_count) *suspend_count = count;
+        return true;
+    }
+    if (suspend_count) *suspend_count = 0u;
     return true;
 }
 
