@@ -341,6 +341,10 @@ int main() {
     assert(read_guest_be32(0xA0060004u) == 0x11223344u);
     assert(read_guest_be32(0xA0020000u) == 43u);
 
+    // Seed this assertion's input register directly: reinitializing the
+    // primary ring does not clear the Xenos MMIO register file.
+    assert(GuestMmioBus::global().write_unobserved(
+        kXenosMmioBase + 0x32u * 4u, 4, 0xFEEDBEEFu));
     // A non-matching condition consumes the packet without writing its target.
     put_guest_be32(0xA00100ACu,
         0xC0000000u | (5u << 16) | (0x45u << 8));
@@ -564,6 +568,10 @@ int main() {
     // Guest-memory WAIT_REG_MEM wakes from a translated PPC RAM store that
     // overlaps the watched physical dword; no extra CP_RB_WPTR is required.
     assert(imports.initialize_xenos_ring(0x00010000u, 6u, &error));
+    // A ring reinitialization preserves the Xenos MMIO register file. Seed
+    // the deferred packet's following target register to a known value.
+    assert(GuestMmioBus::global().write_unobserved(
+        kXenosMmioBase + 0x34u * 4u, 4, 0u));
     // The same physical word was written by the earlier MEM_WRITE coverage;
     // clear it so this wait starts with an unmet comparison.
     put_guest_be32(0xA0060000u, 0u);
