@@ -60,6 +60,8 @@ public:
                                                     std::uint8_t* base);
     [[nodiscard]] std::uint32_t resume_guest_thread(PPCContext& context,
                                                     std::uint8_t* base);
+    [[nodiscard]] std::uint32_t suspend_guest_thread(PPCContext& context,
+                                                     std::uint8_t* base);
     [[nodiscard]] std::uint32_t resume_guest_kernel_thread(PPCContext& context);
 
     void dispatch(PPCContext& context, std::uint8_t* base);
