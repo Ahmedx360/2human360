@@ -1138,6 +1138,10 @@ PPC_FUNC(NtResumeThread) {
     auto* registry = PpcImportRegistry::active();
     ctx.r3.u32 = registry ? registry->resume_guest_thread(ctx, base) : kStatusUnsuccessful;
 }
+PPC_FUNC(NtSuspendThread) {
+    auto* registry = PpcImportRegistry::active();
+    ctx.r3.u32 = registry ? registry->suspend_guest_thread(ctx, base) : kStatusUnsuccessful;
+}
 PPC_FUNC(KeResumeThread) {
     auto* registry = PpcImportRegistry::active();
     ctx.r3.u32 = registry ? registry->resume_guest_kernel_thread(ctx) : 0xFFFFFFFFu;
