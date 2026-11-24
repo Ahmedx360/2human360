@@ -1357,7 +1357,7 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
             !translate_guest_protection(protection_bits, host_protection) ||
             !guest_range_valid(address, length)) {
             std::fprintf(stderr,
-                "[TooHuman] MmSetAddressProtect rejected address=0x%08X length=0x%08X protect=0x%08X\\n",
+                "[TooHuman] MmSetAddressProtect rejected address=0x%08X length=0x%08X protect=0x%08X\n",
                 static_cast<unsigned>(address), static_cast<unsigned>(length),
                 static_cast<unsigned>(protection_bits));
             return;
@@ -1388,7 +1388,7 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
                     aligned_base < allocation->first ||
                     aligned_end > allocation_end) {
                     std::fprintf(stderr,
-                        "[TooHuman] MmSetAddressProtect range crosses virtual allocation\\n");
+                        "[TooHuman] MmSetAddressProtect range crosses virtual allocation\n");
                     return;
                 }
 
@@ -1411,7 +1411,7 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
                         static_cast<std::size_t>(aligned_end - aligned_base),
                         host_protection, nullptr)) {
                     std::fprintf(stderr,
-                        "[TooHuman] MmSetAddressProtect could not protect committed virtual pages\\n");
+                        "[TooHuman] MmSetAddressProtect could not protect committed virtual pages\n");
                     return;
                 }
 
@@ -1481,7 +1481,7 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
         if (aligned_base < allocation->first || aligned_end <= aligned_base ||
             aligned_end > allocation_end) {
             std::fprintf(stderr,
-                "[TooHuman] MmSetAddressProtect requires whole allocated pages\\n");
+                "[TooHuman] MmSetAddressProtect requires whole allocated pages\n");
             return;
         }
         if (!memory_->protect_region(
@@ -1489,7 +1489,7 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
                 static_cast<std::size_t>(aligned_end - aligned_base),
                 host_protection, nullptr)) {
             std::fprintf(stderr,
-                "[TooHuman] MmSetAddressProtect host protection update failed\\n");
+                "[TooHuman] MmSetAddressProtect host protection update failed\n");
         }
         return;
     }
