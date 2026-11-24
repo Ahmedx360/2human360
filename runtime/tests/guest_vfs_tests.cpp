@@ -54,6 +54,7 @@ int main() {
         for (const auto& [stored_name, logical_name] : filetable_rows)
             table << stored_name << ',' << logical_name << "\r\n";
         table << "../outside.bin,Unsafe.g41.gz\r\n";
+        table << std::string(43u, 'x') << ",TooLongStored.g41.gz\\r\\n";
     }
     { std::ofstream(tmp / "game" / stored_texture, std::ios::binary) << "texture"; }
     { std::ofstream(tmp / "game" / stored_effect, std::ios::binary) << "effect"; }
@@ -63,6 +64,11 @@ int main() {
     const unsigned char gzip_signature[] = {0x1Fu, 0x8Bu, 0x08u, 0x00u};
     {
         std::ofstream compressed(tmp / "game" / "contents.zzz.gz", std::ios::binary);
+        compressed.write(reinterpret_cast<const char*>(gzip_signature),
+                         sizeof(gzip_signature));
+    }
+    {
+        std::ofstream compressed(tmp / "game" / "relative_only.zzz.gz", std::ios::binary);
         compressed.write(reinterpret_cast<const char*>(gzip_signature),
                          sizeof(gzip_signature));
     }
@@ -107,6 +113,10 @@ int main() {
     assert(vfs.open("game:\\" + stored_texture, nullptr, 1, false, false).file->path().filename() ==
            stored_texture);
     assert(vfs.open("game:\\Unsafe.g41.gz", nullptr, 1, false, false).status ==
+           GuestVfsStatus::ObjectNameNotFound);
+    // Stored disc names are limited to 42 bytes even though logical aliases
+    // can be longer; a 43-byte physical name must be ignored.
+    assert(vfs.open("game:\\TooLongStored.g41.gz", nullptr, 1, false, false).status ==
            GuestVfsStatus::ObjectNameNotFound);
 
     auto compressed_index = vfs.open(
@@ -187,6 +197,17 @@ int main() {
     // A root-directory handle preserves the read-only game-volume policy.
     auto game_dir = vfs.open("game:\\", nullptr, 1, false, true);
     assert(game_dir.status == GuestVfsStatus::Success && game_dir.file->is_directory());
+    const auto game_root_path = game_dir.file->path();
+    auto relative_mapped = vfs.open(
+        logical_texture, &game_root_path, 1, false, false,
+        game_dir.file->volume_writable());
+    assert(relative_mapped.status == GuestVfsStatus::Success);
+    assert(relative_mapped.file->path().filename() == stored_texture);
+    auto relative_compressed = vfs.open(
+        "relative_only.zzz", &game_root_path, 1, false, false,
+        game_dir.file->volume_writable());
+    assert(relative_compressed.status == GuestVfsStatus::Success);
+    assert(relative_compressed.file->path().filename() == "relative_only.zzz.gz");
     bool child_volume_writable = true;
     const auto child = vfs.resolve("new.bin", &game_dir.file->path(),
                                    &child_volume_writable, game_dir.file->volume_writable());
