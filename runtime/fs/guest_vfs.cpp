@@ -321,7 +321,6 @@ std::optional<std::string> GuestVfs::filetable_storage_name(
     std::lock_guard lock(filetable_mutex_);
     if (!filetable_loaded_) {
         filetable_loaded_ = true;
-        std::error_code ec;
         const auto actual_name = find_case_insensitive(game_root_, "filetable.txt");
         if (actual_name) {
             std::ifstream input(game_root_ / *actual_name, std::ios::binary | std::ios::ate);
