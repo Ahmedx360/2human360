@@ -1626,6 +1626,64 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
             context.r3.u32 = static_cast<std::uint32_t>(comparison);
             return;
         }
+        if (import.ordinal == 0x012D) { // RtlInitUnicodeString
+            const auto descriptor = context.r3.u32;
+            const auto source = context.r4.u32;
+            if (descriptor == 0u ||
+                !GuestAddressSpace::is_accessible_range(
+                    base, descriptor, 8u, GuestMemoryAccess::Write)) {
+                invalid_guest_memory_call(
+                    "RtlInitUnicodeString", descriptor, 8u);
+            }
+
+            std::uint16_t byte_length = 0u;
+            std::uint16_t maximum_length = 0u;
+            if (source != 0u) {
+                constexpr std::uint32_t kMaxUnicodeCharacters = 0x7FFEu;
+                bool terminated = false;
+                std::uint32_t character_count = 0u;
+                for (; character_count <= kMaxUnicodeCharacters;
+                     ++character_count) {
+                    const auto current =
+                        static_cast<std::uint64_t>(source) +
+                        static_cast<std::uint64_t>(character_count) * 2u;
+                    if (current > std::numeric_limits<std::uint32_t>::max() ||
+                        !guest_range_valid(static_cast<std::uint32_t>(current), 2u) ||
+                        !GuestAddressSpace::is_accessible_range(
+                            base, static_cast<std::uint32_t>(current), 2u,
+                            GuestMemoryAccess::Read)) {
+                        invalid_guest_memory_call(
+                            "RtlInitUnicodeString", source,
+                            (character_count + 1u) * 2u);
+                    }
+                    const auto* const word =
+                        base + static_cast<std::uint32_t>(current);
+                    const auto value = static_cast<std::uint16_t>(
+                        (static_cast<std::uint16_t>(word[0]) << 8) |
+                        static_cast<std::uint16_t>(word[1]));
+                    if (value == 0u) {
+                        terminated = true;
+                        break;
+                    }
+                }
+                if (!terminated) {
+                    invalid_guest_memory_call(
+                        "RtlInitUnicodeString", source,
+                        (kMaxUnicodeCharacters + 1u) * 2u);
+                }
+                byte_length = static_cast<std::uint16_t>(
+                    character_count * 2u);
+                maximum_length = static_cast<std::uint16_t>(byte_length + 2u);
+            }
+
+            // UNICODE_STRING is {USHORT Length, USHORT MaximumLength,
+            // PWSTR Buffer}; all fields use Xbox big-endian guest order.
+            store_be16(base + descriptor, byte_length);
+            store_be16(base + descriptor + 2u, maximum_length);
+            store_be32(base + descriptor + 4u, source);
+            return;
+        }
+
     }
 
     if (binding.handler == nullptr &&
