@@ -1,6 +1,8 @@
 #include "fs/guest_vfs.hpp"
 
+#include <array>
 #include <cassert>
+#include <utility>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -16,21 +18,42 @@ int main() {
     fs::create_directories(tmp / "game" / "Data");
     { std::ofstream(tmp / "game" / "Data" / "File.TXT", std::ios::binary) << "hello world"; }
 
-    // The title's filetable rows are stored-name,logical-name. The logical
-    // second column is resolved to the physical first-column file on game:.
-    const std::string stored_texture =
-        "w02_07_Tree_Forest_Facade_DOWN_#012.g20.gz";
-    const std::string logical_texture =
-        "w02_07_Tree_Forest_Facade_DOWN_D00_Tex.g20.gz";
-    const std::string stored_effect =
-        "w04_06_FctryPlantB_MchinePrts_D#016.zzz.gz";
-    const std::string logical_effect =
-        "w04_06_FctryPlantB_MchinePrts_D02_Tex.zzz.gz";
+    // The supplied title filetable sample contains stored-name,logical-name
+    // rows. The second column is the logical name the game opens on game:.
+    const std::array<std::pair<const char*, const char*>, 23> filetable_rows{{
+        {"End_Credits_Credit_Eurostile32B#000.zzz.gz", "End_Credits_Credit_Eurostile32Bold_0.zzz.gz"},
+        {"w00_06_AesirCyberneticsLab_huma#001.g41.gz", "w00_06_AesirCyberneticsLab_human_Tex.g41.gz"},
+        {"w00_08_AesirFrontierTown_exteri#002.g00.gz", "w00_08_AesirFrontierTown_exterior_Tex.g00.gz"},
+        {"w00_09_Flight_Cityscape_Night_L#003.g45.gz", "w00_09_Flight_Cityscape_Night_L1_Tex.g45.gz"},
+        {"w00_09_Flight_Cityscape_Night_L#004.g45.gz", "w00_09_Flight_Cityscape_Night_L2_Tex.g45.gz"},
+        {"w00_09_Flight_Cityscape_Night_L#005.g45.gz", "w00_09_Flight_Cityscape_Night_L3_Tex.g45.gz"},
+        {"w00_09_Flight_Cityscape_Night_R#006.g45.gz", "w00_09_Flight_Cityscape_Night_R1_Tex.g45.gz"},
+        {"w00_09_Flight_Cityscape_Night_R#007.g45.gz", "w00_09_Flight_Cityscape_Night_R2_Tex.g45.gz"},
+        {"w00_09_Flight_Cityscape_Night_R#008.g45.gz", "w00_09_Flight_Cityscape_Night_R3_Tex.g45.gz"},
+        {"w00_scene40_HeimdallOffice_larg#009.g05.gz", "w00_scene40_HeimdallOffice_large_Tex.g05.gz"},
+        {"w01_07a_deathfromabove_arena_D0#010.g01.gz", "w01_07a_deathfromabove_arena_D00_Tex.g01.gz"},
+        {"w01_07a_deathfromabove_arena_D0#011.g23.gz", "w01_07a_deathfromabove_arena_D01_Tex.g23.gz"},
+        {"w02_07_Tree_Forest_Facade_DOWN_#012.g20.gz", "w02_07_Tree_Forest_Facade_DOWN_D00_Tex.g20.gz"},
+        {"w02_07_Tree_Forest_Facade_UP_D0#013.g20.gz", "w02_07_Tree_Forest_Facade_UP_D00_Tex.g20.gz"},
+        {"w03_10_maintenancebatteryroom_D#014.g08.gz", "w03_10_maintenancebatteryroom_D00_Tex.g08.gz"},
+        {"w04_06_FctryPlantB_MchinePrts_D#015.g06.gz", "w04_06_FctryPlantB_MchinePrts_D00_Tex.g06.gz"},
+        {"w04_06_FctryPlantB_MchinePrts_D#016.zzz.gz", "w04_06_FctryPlantB_MchinePrts_D02_Tex.zzz.gz"},
+        {"w04_09_WalkwayC_GarmBalcony01_D#017.g06.gz", "w04_09_WalkwayC_GarmBalcony01_D00_Tex.g06.gz"},
+        {"w04_10_MiniBoss_GarmBalcony02_D#018.g06.gz", "w04_10_MiniBoss_GarmBalcony02_D00_Tex.g06.gz"},
+        {"w04_12_CitadelTortureGalleryA_D#019.g09.gz", "w04_12_CitadelTortureGalleryA_D00_Tex.g09.gz"},
+        {"w04_13_CtdlGllryB_LwrElvtrRm_D0#020.g09.gz", "w04_13_CtdlGllryB_LwrElvtrRm_D00_Tex.g09.gz"},
+        {"w04_18_CitadelBridge_DiningRm_D#021.g09.gz", "w04_18_CitadelBridge_DiningRm_D00_Tex.g09.gz"},
+        {"w04_20_HelBossFightLab_cinemati#022.g07.gz", "w04_20_HelBossFightLab_cinematic_Tex.g07.gz"}
+    }};
+    const std::string stored_texture = filetable_rows[12].first;
+    const std::string logical_texture = filetable_rows[12].second;
+    const std::string stored_effect = filetable_rows[16].first;
+    const std::string logical_effect = filetable_rows[16].second;
     {
         std::ofstream table(tmp / "game" / "filetable.txt", std::ios::binary);
-        table << stored_texture << ',' << logical_texture << "\r\n"
-              << stored_effect << ',' << logical_effect << "\r\n"
-              << "../outside.bin,Unsafe.g41.gz\r\n";
+        for (const auto& [stored_name, logical_name] : filetable_rows)
+            table << stored_name << ',' << logical_name << "\r\n";
+        table << "../outside.bin,Unsafe.g41.gz\r\n";
     }
     { std::ofstream(tmp / "game" / stored_texture, std::ios::binary) << "texture"; }
     { std::ofstream(tmp / "game" / stored_effect, std::ios::binary) << "effect"; }
@@ -54,6 +77,16 @@ int main() {
         assert(r.file->read(buf, 5, 6) == 5 && std::memcmp(buf, "world", 5) == 0);
         assert(r.file->size() == 11);
     }
+    // Every supplied sample row maps the logical second column to the
+    // stored first column, regardless of asset-group extension or #ordinal.
+    for (const auto& [stored_name, logical_name] : filetable_rows) {
+        const auto resolved = vfs.resolve(
+            std::string("game:\\") + logical_name, nullptr, nullptr);
+        assert(resolved.has_value());
+        assert(resolved->filename() == stored_name);
+        assert(resolved->parent_path() == fs::weakly_canonical(tmp / "game"));
+    }
+
     // Resolve a logical asset name through filetable.txt and retain the
     // compressed physical filename for the guest-side gzip reader.
     auto mapped_texture = vfs.open(
