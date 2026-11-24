@@ -800,8 +800,10 @@ int main() {
     assert(raise_irql.r3.u32 == 0u); // Previous IRQL was restored.
 
     // Xbox critical-region depth and IRQL are tracked per guest host thread.
+    PPCContext enter_critical{};
     call_test_import(0x8200121Cu, enter_critical); // KeEnterCriticalRegion.
     call_test_import(0x8200121Cu, enter_critical); // Nested enter.
+    PPCContext leave_critical{};
     call_test_import(0x82001220u, leave_critical); // KeLeaveCriticalRegion.
     call_test_import(0x82001220u, leave_critical); // Balanced nested leave.
 
