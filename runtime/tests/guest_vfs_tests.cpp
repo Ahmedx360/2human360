@@ -15,6 +15,34 @@ int main() {
     fs::remove_all(tmp);
     fs::create_directories(tmp / "game" / "Data");
     { std::ofstream(tmp / "game" / "Data" / "File.TXT", std::ios::binary) << "hello world"; }
+
+    // The title's filetable rows are stored-name,logical-name. The logical
+    // second column is resolved to the physical first-column file on game:.
+    const std::string stored_texture =
+        "w02_07_Tree_Forest_Facade_DOWN_#012.g20.gz";
+    const std::string logical_texture =
+        "w02_07_Tree_Forest_Facade_DOWN_D00_Tex.g20.gz";
+    const std::string stored_effect =
+        "w04_06_FctryPlantB_MchinePrts_D#016.zzz.gz";
+    const std::string logical_effect =
+        "w04_06_FctryPlantB_MchinePrts_D02_Tex.zzz.gz";
+    {
+        std::ofstream table(tmp / "game" / "filetable.txt", std::ios::binary);
+        table << stored_texture << ',' << logical_texture << "\\r\\n"
+              << stored_effect << ',' << logical_effect << "\\r\\n"
+              << "../outside.bin,Unsafe.g41.gz\\r\\n";
+    }
+    { std::ofstream(tmp / "game" / stored_texture, std::ios::binary) << "texture"; }
+    { std::ofstream(tmp / "game" / stored_effect, std::ios::binary) << "effect"; }
+
+    // The logical contents.zzz path may be supplied by an extracted .gz
+    // sibling. The VFS leaves gzip bytes intact for the guest's decompressor.
+    const unsigned char gzip_signature[] = {0x1Fu, 0x8Bu, 0x08u, 0x00u};
+    {
+        std::ofstream compressed(tmp / "game" / "contents.zzz.gz", std::ios::binary);
+        compressed.write(reinterpret_cast<const char*>(gzip_signature),
+                         sizeof(gzip_signature));
+    }
     GuestVfs vfs(tmp / "game", tmp / "save");
 
     // Case-insensitive lookup through several device spellings.
@@ -26,6 +54,43 @@ int main() {
         assert(r.file->read(buf, 5, 6) == 5 && std::memcmp(buf, "world", 5) == 0);
         assert(r.file->size() == 11);
     }
+    // Resolve a logical asset name through filetable.txt and retain the
+    // compressed physical filename for the guest-side gzip reader.
+    auto mapped_texture = vfs.open(
+        "game:\\\\" + logical_texture, nullptr, 1, false, false);
+    assert(mapped_texture.status == GuestVfsStatus::Success);
+    assert(mapped_texture.file->path().filename() == stored_texture);
+    char texture_data[8]{};
+    assert(mapped_texture.file->read(texture_data, 7u, 0u) == 7u);
+    assert(std::memcmp(texture_data, "texture", 7u) == 0);
+
+    auto mapped_effect = vfs.open(
+        "game:\\\\" + logical_effect, nullptr, 1, false, false);
+    assert(mapped_effect.status == GuestVfsStatus::Success);
+    assert(mapped_effect.file->path().filename() == stored_effect);
+
+    // The first column is not treated as a logical-name alias, and malformed
+    // traversal rows are ignored rather than escaping the game root.
+    assert(vfs.open("game:\\\\" + stored_texture, nullptr, 1, false, false).file->path().filename() ==
+           stored_texture);
+    assert(vfs.open("game:\\\\Unsafe.g41.gz", nullptr, 1, false, false).status ==
+           GuestVfsStatus::ObjectNameNotFound);
+
+    auto compressed_index = vfs.open(
+        "game:\\\\contents.zzz", nullptr, 1, false, false);
+    assert(compressed_index.status == GuestVfsStatus::Success);
+    assert(compressed_index.file->path().filename() == "contents.zzz.gz");
+    unsigned char signature[4]{};
+    assert(compressed_index.file->read(signature, sizeof(signature), 0u) ==
+           sizeof(signature));
+    assert(std::memcmp(signature, gzip_signature, sizeof(signature)) == 0);
+
+    // An exact uncompressed file wins when both spellings are present.
+    { std::ofstream(tmp / "game" / "contents.zzz", std::ios::binary) << "plain"; }
+    auto exact_index = vfs.open("game:\\\\contents.zzz", nullptr, 1, false, false);
+    assert(exact_index.status == GuestVfsStatus::Success);
+    assert(exact_index.file->path().filename() == "contents.zzz");
+
     // Missing files, traversal, and read-only game volume.
     assert(vfs.open("game:\\nope.bin", nullptr, 1, false, false).status == GuestVfsStatus::ObjectNameNotFound);
     assert(vfs.open("game:\\..\\x", nullptr, 1, false, false).status == GuestVfsStatus::ObjectNameNotFound);
