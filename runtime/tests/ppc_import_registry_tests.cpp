@@ -689,7 +689,7 @@ int main() {
     // ASCII case. The title uses 0xFFFF lengths for NUL-terminated strings.
     const auto store_guest_ascii = [&](std::uint32_t address, const char* value) {
         std::size_t length = 0;
-        while (value[length] != '\\0') {
+        while (value[length] != '\0') {
             memory.base()[address + static_cast<std::uint32_t>(length)] =
                 static_cast<std::uint8_t>(value[length]);
             ++length;
