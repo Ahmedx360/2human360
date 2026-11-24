@@ -1344,6 +1344,34 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
         }
     }
     if (binding.handler == nullptr &&
+        import.library == "xboxkrnl.exe" && import.ordinal == 0x00C4) {
+        // MmQueryAddressProtect. Query only allocations owned by one of the
+        // runtime heaps; derive the current XDK read/write flags from the
+        // guest page mapping so NtProtectVirtualMemory changes are reflected.
+        const auto address = context.r3.u32;
+        const bool allocated =
+            (guest_heap_ && guest_heap_->allocation_containing(address)) ||
+            (virtual_heap_ && virtual_heap_->allocation_containing(address)) ||
+            (stack_heap_ && stack_heap_->allocation_containing(address));
+        if (!allocated) {
+            context.r3.u32 = 0u;
+            return;
+        }
+        const bool readable = GuestAddressSpace::is_accessible_range(
+            base, address, 1u, GuestMemoryAccess::Read);
+        const bool writable = GuestAddressSpace::is_accessible_range(
+            base, address, 1u, GuestMemoryAccess::Write);
+        if (!readable && !writable) {
+            context.r3.u32 = 0x01u; // X_PAGE_NOACCESS.
+        } else if (readable && !writable) {
+            context.r3.u32 = 0x02u; // X_PAGE_READONLY.
+        } else {
+            context.r3.u32 = 0x04u; // X_PAGE_READWRITE.
+        }
+        return;
+    }
+
+    if (binding.handler == nullptr &&
         import.library == "xboxkrnl.exe" && import.ordinal == 0x00BE) {
         // MmGetPhysicalAddress. This runtime currently exposes the Xbox
         // uncached physical-memory alias (0xA0000000..0xBFFFFFFF) directly.
