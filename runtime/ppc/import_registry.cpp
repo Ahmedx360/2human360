@@ -81,22 +81,6 @@ thread_local std::uint32_t g_guest_critical_region_depth = 0u;
 constexpr std::uint32_t kGuestIrqlDispatch = 2u;
 constexpr std::uint32_t kGuestSpinLockHeldBigEndian = 0x01000000u;
 
-bool guest_spin_lock_word(std::uint8_t* base, std::uint32_t address,
-                          std::atomic_ref<std::uint32_t>& word) noexcept {
-    if (address == 0u || (address & 3u) != 0u ||
-        !GuestAddressSpace::is_accessible_range(
-            base, address, sizeof(std::uint32_t), GuestMemoryAccess::Read) ||
-        !GuestAddressSpace::is_accessible_range(
-            base, address, sizeof(std::uint32_t), GuestMemoryAccess::Write)) {
-        return false;
-    }
-    auto* host_word = reinterpret_cast<std::uint32_t*>(base + address);
-    if ((reinterpret_cast<std::uintptr_t>(host_word) &
-         (alignof(std::uint32_t) - 1u)) != 0u) return false;
-    word = std::atomic_ref<std::uint32_t>(*host_word);
-    return true;
-}
-
 bool acquire_guest_spin_lock(std::uint8_t* base, std::uint32_t address) {
     if (address == 0u || (address & 3u) != 0u ||
         !GuestAddressSpace::is_accessible_range(
