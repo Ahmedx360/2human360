@@ -266,14 +266,17 @@ std::optional<GuestThreadHandle> GuestThreadManager::create(
     owned_handles_.push_back(*handle);
     try {
         record->worker = std::jthread([record](std::stop_token stop) {
+            // Never hold the record lock while waiting on the execution gate:
+            // resume/suspend acquire the record lock before changing the gate.
+            // Blocking here with both locks held would deadlock initially
+            // suspended threads when their first NtResumeThread arrives.
+            const bool resumed = record->execution_control.wait(stop);
+            if (!resumed || stop.stop_requested()) {
+                record->complete(kStatusThreadIsTerminating);
+                return;
+            }
             {
-                std::unique_lock lock(record->mutex);
-                const bool resumed = record->execution_control.wait(stop);
-                if (!resumed || stop.stop_requested()) {
-                    lock.unlock();
-                    record->complete(kStatusThreadIsTerminating);
-                    return;
-                }
+                std::lock_guard lock(record->mutex);
                 record->state = record->execution_control.suspend_count() == 0u
                     ? GuestThreadLifecycleState::Running
                     : GuestThreadLifecycleState::Suspended;
