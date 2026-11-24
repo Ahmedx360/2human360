@@ -90,6 +90,21 @@ jobs:
         run: |
           mkdir -p build/diagnostics
           sha256sum Default.xex Default.exe filetable.txt contents.zzz.gz | tee build/diagnostics/title-input-sha256.txt
+          {
+            echo "## contents.zzz.gz container check"
+            gzip -t contents.zzz.gz
+            gzip -l contents.zzz.gz
+            echo "## filetable mapping availability"
+            python3 - <<'PY'
+          import csv
+          from pathlib import Path
+          rows = list(csv.reader(Path("filetable.txt").open(newline="", encoding="utf-8-sig")))
+          rows = [row for row in rows if len(row) >= 2 and row[0] and row[1]]
+          stored = sum(Path(row[0]).is_file() for row in rows)
+          logical = sum(Path(row[1]).is_file() for row in rows)
+          print(f"Mappings: {len(rows)}; stored-name files present: {stored}; logical-name files present: {logical}")
+          PY
+          } 2>&1 | tee build/diagnostics/title-content-layout.log
           ./build/clang/TooHumanXexImportAudit Default.xex 2>&1 | tee build/diagnostics/title-xex-audit.log
 
       - name: Attempt real title entry-point boot (diagnostic)
