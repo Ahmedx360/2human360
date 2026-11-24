@@ -1321,7 +1321,7 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
             if ((base_address & 0x1Fu) != 0 ||
                 !guest_heap_->deallocate(base_address)) {
                 std::fprintf(stderr,
-                    "[TooHuman] MmFreePhysicalMemory rejected base=0x%08X type=0x%08X\\n",
+                    "[TooHuman] MmFreePhysicalMemory rejected base=0x%08X type=0x%08X\n",
                     static_cast<unsigned>(base_address),
                     static_cast<unsigned>(context.r3.u32));
             }
