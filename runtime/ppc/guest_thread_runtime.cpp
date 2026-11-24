@@ -91,7 +91,6 @@ std::uint32_t GuestThreadRuntime::create_thread(PPCContext& context, std::uint8_
     auto handle = threads_.create(
         std::move(startup),
         [this, entry](GuestThreadStartup& state, std::stop_token stop) {
-            GuestThreadExecutionScope scope(stop);
             try {
                 std::string invoke_error;
                 if (!invoke_recompiled_function(memory_, entry, state.context, &invoke_error))
@@ -118,6 +117,23 @@ std::uint32_t GuestThreadRuntime::resume_thread(PPCContext& context, std::uint8_
     std::uint32_t previous = 0;
     std::string error;
     if (!threads_.resume(context.r3.u32, &previous, &error)) return kStatusInvalidHandle;
+    if (out) store_be32(base, out, previous);
+    return kStatusSuccess;
+}
+std::uint32_t GuestThreadRuntime::suspend_thread(PPCContext& context,
+                                                       std::uint8_t* base) {
+    if (!memory_.valid() || base != memory_.base()) return kStatusUnsuccessful;
+    const auto out = context.r4.u32;
+    if (out && !writable_guest_range(out, 4)) return kStatusAccessViolation;
+    std::uint32_t previous = 0;
+    std::string error;
+    if (!threads_.suspend(context.r3.u32, &previous, &error)) {
+        GuestThreadLifecycleState state{};
+        if (threads_.get_state(context.r3.u32, state) &&
+            state == GuestThreadLifecycleState::Completed)
+            return 0xC000004Bu; // STATUS_THREAD_IS_TERMINATING.
+        return kStatusInvalidHandle;
+    }
     if (out) store_be32(base, out, previous);
     return kStatusSuccess;
 }
