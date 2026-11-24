@@ -216,6 +216,11 @@ std::uint32_t PpcImportRegistry::resume_guest_thread(PPCContext& context,
     std::lock_guard lock(thread_runtime_mutex_);
     return thread_runtime_ ? thread_runtime_->resume_thread(context, base) : 0xC0000002u;
 }
+std::uint32_t PpcImportRegistry::suspend_guest_thread(PPCContext& context,
+                                                         std::uint8_t* base) {
+    std::lock_guard lock(thread_runtime_mutex_);
+    return thread_runtime_ ? thread_runtime_->suspend_thread(context, base) : 0xC0000002u;
+}
 std::uint32_t PpcImportRegistry::resume_guest_kernel_thread(PPCContext& context) {
     std::lock_guard lock(thread_runtime_mutex_);
     return thread_runtime_ ? thread_runtime_->resume_kernel_thread(context) : 0xFFFFFFFFu;
