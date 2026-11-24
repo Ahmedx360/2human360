@@ -13,7 +13,7 @@ std::atomic<std::uint32_t> suspend_entry_iterations{0};
 std::atomic<bool> finish_suspend_entry{false};
 PPC_FUNC_IMPL(test_guest_thread_suspend_entry) {
     while (!finish_suspend_entry.load(std::memory_order_acquire)) {
-        throw_if_guest_thread_stop_requested();
+        toohuman::runtime::throw_if_guest_thread_stop_requested();
         suspend_entry_iterations.fetch_add(1u, std::memory_order_release);
         std::this_thread::yield();
     }
@@ -139,10 +139,10 @@ int main() {
         suspend.r4.u32 = 0x8200500Cu;
         assert(threads.suspend_thread(suspend, memory.base()) == 0u);
         assert(read_be32(memory.base(), 0x8200500Cu) == 0u);
-        std::this_thread::sleep_for(30ms);
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
         const auto paused_iterations =
             suspend_entry_iterations.load(std::memory_order_acquire);
-        std::this_thread::sleep_for(30ms);
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
         assert(suspend_entry_iterations.load(std::memory_order_acquire) ==
                paused_iterations);
 
