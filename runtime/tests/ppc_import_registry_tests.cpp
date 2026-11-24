@@ -88,7 +88,7 @@ int main() {
                                     &test_import_handler, &error));
     std::size_t startup_hle_count = 0;
     assert(toohuman::runtime::register_boot_imports(imports, &error, &startup_hle_count));
-    assert(startup_hle_count == 93u);
+    assert(startup_hle_count == 94u);
     const std::vector<toohuman::runtime::XexImport> metadata{
         {"xboxkrnl.exe", 0x0777u, 0, 1, 0x82001100u},
         {"xboxkrnl.exe", 0x011Bu, 0, 1, 0x82001104u},
@@ -157,11 +157,12 @@ int main() {
         {"xboxkrnl.exe", 0x007Fu, 0, 1, 0x820011F4u},
         {"xboxkrnl.exe", 0x00E2u, 0, 1, 0x820011F8u},
         {"xboxkrnl.exe", 0x01B6u, 0, 1, 0x820011BCu},
-        {"xboxkrnl.exe", 0x01C3u, 0, 1, 0x820011C0u}
+        {"xboxkrnl.exe", 0x01C3u, 0, 1, 0x820011C0u},
+        {"xboxkrnl.exe", 0x00FCu, 0, 1, 0x82001210u}
     };
     std::size_t registered = 0;
     assert(imports.install(memory, metadata, &registered, &error));
-    assert(registered == 68u);
+    assert(registered == 69u);
     assert(memory.get_function<PPCFunc*>(0x82001100u) != &test_default_handler);
 
     // The real kernel imports configure the per-title primary Xenos ring.
@@ -564,9 +565,11 @@ int main() {
     // Guest-memory WAIT_REG_MEM wakes from a translated PPC RAM store that
     // overlaps the watched physical dword; no extra CP_RB_WPTR is required.
     assert(imports.initialize_xenos_ring(0x00010000u, 6u, &error));
-    // The same physical word was written by the earlier MEM_WRITE coverage;
-    // clear it so this wait starts with an unmet comparison.
+    // The previous PM4 MEM_WRITE test used this physical dword; clear it so
+    // the new memory wait begins with an unsatisfied comparison.
     put_guest_be32(0xA0060000u, 0u);
+    ppc_test_store_u32(memory.base(),
+                       kXenosMmioBase + 0x34u * 4u, 0u);
     put_guest_be32(0xA0010000u,
         0xC0000000u | (4u << 16) | (0x3Cu << 8)); // WAIT_REG_MEM, five operands.
     put_guest_be32(0xA0010004u, 0x13u);           // Equal, memory source.
@@ -1031,6 +1034,11 @@ int main() {
     assert(boot_context.r3.u32 == 0xFFFFFFFFu);
     boot_context = {};
     call_test_import(0x82001194u, boot_context); // NtResumeThread.
+    assert(boot_context.r3.u32 == 0xC0000002u);
+    boot_context = {};
+    boot_context.r3.u32 = 0x1000u;
+    boot_context.r4.u32 = 0x82012000u;
+    call_test_import(0x82001210u, boot_context); // NtSuspendThread.
     assert(boot_context.r3.u32 == 0xC0000002u);
     boot_context = {};
     call_test_import(0x8200118Cu, boot_context); // ExTerminateThread outside a worker.
