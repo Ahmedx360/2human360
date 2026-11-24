@@ -157,11 +157,12 @@ int main() {
         {"xboxkrnl.exe", 0x007Fu, 0, 1, 0x820011F4u},
         {"xboxkrnl.exe", 0x00E2u, 0, 1, 0x820011F8u},
         {"xboxkrnl.exe", 0x01B6u, 0, 1, 0x820011BCu},
-        {"xboxkrnl.exe", 0x01C3u, 0, 1, 0x820011C0u}
+        {"xboxkrnl.exe", 0x01C3u, 0, 1, 0x820011C0u},
+        {"xboxkrnl.exe", 0x00BEu, 0, 1, 0x82001210u}
     };
     std::size_t registered = 0;
     assert(imports.install(memory, metadata, &registered, &error));
-    assert(registered == 68u);
+    assert(registered == 69u);
     assert(memory.get_function<PPCFunc*>(0x82001100u) != &test_default_handler);
 
     // The real kernel imports configure the per-title primary Xenos ring.
@@ -667,6 +668,22 @@ int main() {
         assert(function != nullptr);
         function(ctx, memory.base());
     };
+    // MmGetPhysicalAddress resolves committed addresses in the runtime's
+    // uncached physical alias, and does not invent mappings for arbitrary VAs.
+    PPCContext physical_alias_query{};
+    physical_alias_query.r3.u32 = 0xA0060000u;
+    call_test_import(0x82001210u, physical_alias_query);
+    assert(physical_alias_query.r3.u32 == 0x00060000u);
+
+    PPCContext ordinary_virtual_query{};
+    ordinary_virtual_query.r3.u32 = 0x82012000u;
+    call_test_import(0x82001210u, ordinary_virtual_query);
+    assert(ordinary_virtual_query.r3.u32 == 0u);
+
+    PPCContext uncommitted_alias_query{};
+    uncommitted_alias_query.r3.u32 = 0xA0080000u;
+    call_test_import(0x82001210u, uncommitted_alias_query);
+    assert(uncommitted_alias_query.r3.u32 == 0u);
     // The volume-information export uses the Xbox ABI:
     // (handle, iosb, information, length, information_class).
     // Supply valid non-handle arguments so the test reaches handle dispatch.
