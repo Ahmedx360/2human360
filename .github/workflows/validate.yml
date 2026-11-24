@@ -65,7 +65,7 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p build/diagnostics
-          cmake --build build/clang --target TooHumanRuntimeProbe TooHumanPpcImportRegistryTests TooHumanBootHleTests TooHumanGuestThreadStartupTests TooHumanGuestThreadManagerTests TooHumanGuestThreadRuntimeTests TooHumanGuestVfsTests TooHumanGuestKernelObjectTests TooHumanGuestMemoryTests TooHumanGuestHeapTests TooHumanXbox360PeTests TooHumanXexImageTests TooHumanPm4GuestRingTests TooHumanXenosCommandProcessorTests --parallel 1 2>&1 | tee build/diagnostics/clang-build.log
+          cmake --build build/clang --target TooHumanRuntimeProbe TooHumanXexImportAudit TooHumanPpcImportRegistryTests TooHumanBootHleTests TooHumanGuestThreadStartupTests TooHumanGuestThreadManagerTests TooHumanGuestThreadRuntimeTests TooHumanGuestVfsTests TooHumanGuestKernelObjectTests TooHumanGuestMemoryTests TooHumanGuestHeapTests TooHumanXbox360PeTests TooHumanXexImageTests TooHumanPm4GuestRingTests TooHumanXenosCommandProcessorTests --parallel 1 2>&1 | tee build/diagnostics/clang-build.log
 
       - name: Preserve compiler failure diagnostics
         if: failure()
@@ -83,6 +83,42 @@ jobs:
           path: build/diagnostics/clang-build-failure-tail.log
           if-no-files-found: ignore
           retention-days: 7
+
+      - name: Audit the uploaded Too Human XEX
+        if: ${{ hashFiles('Default.xex') != '' }}
+        shell: bash
+        run: |
+          mkdir -p build/diagnostics
+          sha256sum Default.xex Default.exe filetable.txt contents.zzz.gz | tee build/diagnostics/title-input-sha256.txt
+          ./build/clang/TooHumanXexImportAudit Default.xex 2>&1 | tee build/diagnostics/title-xex-audit.log
+
+      - name: Attempt real title entry-point boot (diagnostic)
+        if: ${{ hashFiles('Default.xex') != '' }}
+        continue-on-error: true
+        timeout-minutes: 3
+        env:
+          TH_TRACE_IMPORTS: "1"
+          TH_GAME_ROOT: ${{ github.workspace }}
+          TH_SAVE_ROOT: ${{ runner.temp }}/too-human-save
+        shell: bash
+        run: |
+          mkdir -p build/diagnostics "$TH_SAVE_ROOT"
+          ulimit -c 0
+          set +e
+          timeout --signal=TERM --kill-after=5s 120s ./build/clang/TooHumanRuntimeProbe Default.xex --run > build/diagnostics/title-boot.log 2>&1
+          result=$?
+          echo "Runtime probe exit code: $result" | tee build/diagnostics/title-boot-exit.txt
+          cat build/diagnostics/title-boot.log
+          exit "$result"
+
+      - name: Upload real-title boot diagnostics
+        if: always() && hashFiles('build/diagnostics/title-*') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: too-human-real-title-boot-diagnostics
+          path: build/diagnostics/title-*
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Test XEX import dispatch
         env:
