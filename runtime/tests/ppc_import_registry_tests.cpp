@@ -159,11 +159,19 @@ int main() {
         {"xboxkrnl.exe", 0x01B6u, 0, 1, 0x820011BCu},
         {"xboxkrnl.exe", 0x01C3u, 0, 1, 0x820011C0u},
         {"xboxkrnl.exe", 0x00BEu, 0, 1, 0x82001210u},
-        {"xboxkrnl.exe", 0x011Du, 0, 1, 0x82001214u}
+        {"xboxkrnl.exe", 0x011Du, 0, 1, 0x82001214u},
+        {"xboxkrnl.exe", 0x004Du, 0, 1, 0x82001218u},
+        {"xboxkrnl.exe", 0x005Fu, 0, 1, 0x8200121Cu},
+        {"xboxkrnl.exe", 0x007Du, 0, 1, 0x82001220u},
+        {"xboxkrnl.exe", 0x0085u, 0, 1, 0x82001224u},
+        {"xboxkrnl.exe", 0x0089u, 0, 1, 0x82001228u},
+        {"xboxkrnl.exe", 0x00B1u, 0, 1, 0x8200122Cu},
+        {"xboxkrnl.exe", 0x00B3u, 0, 1, 0x82001230u},
+        {"xboxkrnl.exe", 0x00B4u, 0, 1, 0x82001234u}
     };
     std::size_t registered = 0;
     assert(imports.install(memory, metadata, &registered, &error));
-    assert(registered == 70u);
+    assert(registered == 78u);
     assert(memory.get_function<PPCFunc*>(0x82001100u) != &test_default_handler);
 
     // The real kernel imports configure the per-title primary Xenos ring.
@@ -343,10 +351,6 @@ int main() {
     assert(read_guest_be32(0xA0060004u) == 0x11223344u);
     assert(read_guest_be32(0xA0020000u) == 43u);
 
-    // Seed the COND_WRITE target register so this fixture is independent
-    // of earlier primary/indirect ring commands.
-    assert(GuestMmioBus::global().write_unobserved(
-        kXenosMmioBase + 0x32u * 4u, 4, 0u));
     // A non-matching condition consumes the packet without writing its target.
     put_guest_be32(0xA00100ACu,
         0xC0000000u | (5u << 16) | (0x45u << 8));
@@ -569,9 +573,6 @@ int main() {
     // Guest-memory WAIT_REG_MEM wakes from a translated PPC RAM store that
     // overlaps the watched physical dword; no extra CP_RB_WPTR is required.
     assert(imports.initialize_xenos_ring(0x00010000u, 6u, &error));
-    assert(GuestMmioBus::global().write_unobserved(
-        kXenosMmioBase + 0x34u * 4u, 4, 0u));
-    put_guest_be32(0xA0060000u, 0u);
     put_guest_be32(0xA0010000u,
         0xC0000000u | (4u << 16) | (0x3Cu << 8)); // WAIT_REG_MEM, five operands.
     put_guest_be32(0xA0010004u, 0x13u);           // Equal, memory source.
@@ -733,6 +734,144 @@ int main() {
     compare_strings.r6.u32 = 3u;
     call_test_import(0x82001214u, compare_strings);
     assert(compare_strings.r3.u32 == 0u);
+
+    // Kernel IRQL/critical-region operations are per host guest-thread.
+    PPCContext enter_critical{};
+    call_test_import(0x8200121Cu, enter_critical); // KeEnterCriticalRegion.
+    call_test_import(0x8200121Cu, enter_critical); // Nested enter.
+    PPCContext leave_critical{};
+    call_test_import(0x82001220u, leave_critical); // KeLeaveCriticalRegion.
+    call_test_import(0x82001220u, leave_critical); // Balanced nested leave.
+
+    constexpr std::uint32_t guest_spin_lock = 0x82012300u;
+    ppc_test_store_u32(memory.base(), guest_spin_lock, 0u);
+    PPCContext acquire_spin{};
+    acquire_spin.r3.u32 = guest_spin_lock;
+    call_test_import(0x8200122Cu, acquire_spin); // KfAcquireSpinLock.
+    assert(acquire_spin.r3.u32 == 0u); // Previous PASSIVE_LEVEL.
+    assert(ppc_test_load_u32(memory.base(), guest_spin_lock) == 1u);
+
+    // A second host guest thread must wait for the guest big-endian lock word.
+    std::atomic<bool> waiter_started{false};
+    std::atomic<bool> waiter_acquired{false};
+    std::thread spin_waiter([&] {
+        waiter_started.store(true, std::memory_order_release);
+        PPCContext wait_acquire{};
+        wait_acquire.r3.u32 = guest_spin_lock;
+        call_test_import(0x82001218u, wait_acquire); // KeAcquireSpinLockAtRaisedIrql.
+        waiter_acquired.store(true, std::memory_order_release);
+        PPCContext wait_release{};
+        wait_release.r3.u32 = guest_spin_lock;
+        call_test_import(0x82001228u, wait_release); // KeReleaseSpinLockFromRaisedIrql.
+    });
+    const auto waiter_start_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!waiter_started.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < waiter_start_deadline)
+        std::this_thread::yield();
+    assert(waiter_started.load(std::memory_order_acquire));
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    assert(!waiter_acquired.load(std::memory_order_acquire));
+
+    PPCContext release_spin{};
+    release_spin.r3.u32 = guest_spin_lock;
+    release_spin.r4.u32 = acquire_spin.r3.u32; // Restore old IRQL.
+    call_test_import(0x82001234u, release_spin); // KfReleaseSpinLock.
+    spin_waiter.join();
+    assert(waiter_acquired.load(std::memory_order_acquire));
+    assert(ppc_test_load_u32(memory.base(), guest_spin_lock) == 0u);
+
+    PPCContext raise_irql{};
+    call_test_import(0x82001224u, raise_irql); // KeRaiseIrqlToDpcLevel.
+    assert(raise_irql.r3.u32 == 0u);
+    PPCContext raised_acquire{};
+    raised_acquire.r3.u32 = guest_spin_lock;
+    call_test_import(0x82001218u, raised_acquire);
+    assert(ppc_test_load_u32(memory.base(), guest_spin_lock) == 1u);
+    PPCContext raised_release{};
+    raised_release.r3.u32 = guest_spin_lock;
+    call_test_import(0x82001228u, raised_release);
+    assert(ppc_test_load_u32(memory.base(), guest_spin_lock) == 0u);
+    PPCContext lower_irql{};
+    lower_irql.r3.u32 = raise_irql.r3.u32;
+    call_test_import(0x82001230u, lower_irql); // KfLowerIrql.
+    raise_irql = {};
+    call_test_import(0x82001224u, raise_irql);
+    assert(raise_irql.r3.u32 == 0u); // Previous IRQL was restored.
+
+    // Xbox critical-region depth and IRQL are tracked per guest host thread.
+    PPCContext enter_critical{};
+    call_test_import(0x8200121Cu, enter_critical); // KeEnterCriticalRegion.
+    call_test_import(0x8200121Cu, enter_critical); // Nested enter.
+    PPCContext leave_critical{};
+    call_test_import(0x82001220u, leave_critical); // KeLeaveCriticalRegion.
+    call_test_import(0x82001220u, leave_critical); // Balanced nested leave.
+
+    constexpr std::uint32_t guest_spin_lock = 0x82012300u;
+    ppc_test_store_u32(memory.base(), guest_spin_lock, 0u);
+    PPCContext acquire_spin{};
+    acquire_spin.r3.u32 = guest_spin_lock;
+    call_test_import(0x8200122Cu, acquire_spin); // KfAcquireSpinLock.
+    assert(acquire_spin.r3.u32 == 0u); // Previous PASSIVE_LEVEL.
+    assert(ppc_test_load_u32(memory.base(), guest_spin_lock) == 1u);
+
+    // A second host guest thread must wait until the big-endian guest lock
+    // word is released. Each host thread has an independent IRQL context.
+    std::atomic<bool> waiter_started{false};
+    std::atomic<bool> waiter_acquired{false};
+    std::thread spin_waiter([&] {
+        PPCContext waiter_raise{};
+        call_test_import(0x82001224u, waiter_raise); // KeRaiseIrqlToDpcLevel.
+        assert(waiter_raise.r3.u32 == 0u);
+        waiter_started.store(true, std::memory_order_release);
+        PPCContext wait_acquire{};
+        wait_acquire.r3.u32 = guest_spin_lock;
+        call_test_import(0x82001218u, wait_acquire); // KeAcquireSpinLockAtRaisedIrql.
+        waiter_acquired.store(true, std::memory_order_release);
+        PPCContext wait_release{};
+        wait_release.r3.u32 = guest_spin_lock;
+        call_test_import(0x82001228u, wait_release); // KeReleaseSpinLockFromRaisedIrql.
+        PPCContext waiter_lower{};
+        waiter_lower.r3.u32 = waiter_raise.r3.u32;
+        call_test_import(0x82001230u, waiter_lower); // KfLowerIrql.
+    });
+    const auto waiter_start_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!waiter_started.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < waiter_start_deadline)
+        std::this_thread::yield();
+    assert(waiter_started.load(std::memory_order_acquire));
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    assert(!waiter_acquired.load(std::memory_order_acquire));
+
+    PPCContext release_spin{};
+    release_spin.r3.u32 = guest_spin_lock;
+    release_spin.r4.u32 = acquire_spin.r3.u32; // Restore old IRQL.
+    call_test_import(0x82001234u, release_spin); // KfReleaseSpinLock.
+    spin_waiter.join();
+    assert(waiter_acquired.load(std::memory_order_acquire));
+    assert(ppc_test_load_u32(memory.base(), guest_spin_lock) == 0u);
+
+    PPCContext raise_irql{};
+    call_test_import(0x82001224u, raise_irql); // KeRaiseIrqlToDpcLevel.
+    assert(raise_irql.r3.u32 == 0u);
+    PPCContext raised_acquire{};
+    raised_acquire.r3.u32 = guest_spin_lock;
+    call_test_import(0x82001218u, raised_acquire);
+    assert(ppc_test_load_u32(memory.base(), guest_spin_lock) == 1u);
+    PPCContext raised_release{};
+    raised_release.r3.u32 = guest_spin_lock;
+    call_test_import(0x82001228u, raised_release);
+    assert(ppc_test_load_u32(memory.base(), guest_spin_lock) == 0u);
+    PPCContext lower_irql{};
+    lower_irql.r3.u32 = raise_irql.r3.u32;
+    call_test_import(0x82001230u, lower_irql); // KfLowerIrql.
+    raise_irql = {};
+    call_test_import(0x82001224u, raise_irql);
+    assert(raise_irql.r3.u32 == 0u); // Previous IRQL was restored.
+    lower_irql = {};
+    lower_irql.r3.u32 = raise_irql.r3.u32;
+    call_test_import(0x82001230u, lower_irql);
 
     // The volume-information export uses the Xbox ABI:
     // (handle, iosb, information, length, information_class).
