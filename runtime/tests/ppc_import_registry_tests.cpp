@@ -360,9 +360,9 @@ int main() {
     put_guest_be32(0xA00100D4u,
         0xC0000000u | (4u << 16) | (0x3Cu << 8));
     put_guest_be32(0xA00100D8u, 3u); // Equal, register source.
-    put_guest_be32(0xA00100DCu, 0x12345678u);
-    put_guest_be32(0xA00100E0u, 0xFFFFFFFFu);
-    put_guest_be32(0xA00100E4u, 0u);
+    put_guest_be32(0xA00100DCu, 3u); // Poll Xenos register index 3.
+    put_guest_be32(0xA00100E0u, 0x12345678u); // Expected register value.
+    put_guest_be32(0xA00100E4u, 0xFFFFFFFFu); // Compare all bits.
     put_guest_be32(0xA00100E8u, 0u);
     ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 59u);
     assert(imports.xenos_command_processor().read_index() == 53u);
