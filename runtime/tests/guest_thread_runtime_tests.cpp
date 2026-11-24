@@ -128,7 +128,7 @@ int main() {
         create_cooperative.r8.u32 = 0x10203040u;
         assert(threads.create_thread(create_cooperative, memory.base()) == 0u);
         const auto cooperative_handle = read_be32(memory.base(), handle_out);
-        const auto entry_deadline = std::chrono::steady_clock::now() + 2s;
+        const auto entry_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
         while (suspend_entry_iterations.load(std::memory_order_acquire) < 10u &&
                std::chrono::steady_clock::now() < entry_deadline)
             std::this_thread::yield();
@@ -151,7 +151,7 @@ int main() {
         resume_cooperative.r4.u32 = 0x82005010u;
         assert(threads.resume_thread(resume_cooperative, memory.base()) == 0u);
         assert(read_be32(memory.base(), 0x82005010u) == 1u);
-        const auto resume_deadline = std::chrono::steady_clock::now() + 2s;
+        const auto resume_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
         while (suspend_entry_iterations.load(std::memory_order_acquire) ==
                    paused_iterations &&
                std::chrono::steady_clock::now() < resume_deadline)
