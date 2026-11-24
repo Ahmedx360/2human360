@@ -36,6 +36,9 @@ public:
     [[nodiscard]] bool resume(GuestThreadHandle handle,
                               std::uint32_t* previous_count = nullptr,
                               std::string* error = nullptr);
+    [[nodiscard]] bool suspend(GuestThreadHandle handle,
+                               std::uint32_t* previous_count = nullptr,
+                               std::string* error = nullptr);
     [[nodiscard]] GuestThreadWaitResult wait(
         GuestThreadHandle handle,
         std::optional<std::chrono::milliseconds> timeout = std::nullopt);
