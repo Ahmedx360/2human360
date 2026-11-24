@@ -564,6 +564,9 @@ int main() {
     // Guest-memory WAIT_REG_MEM wakes from a translated PPC RAM store that
     // overlaps the watched physical dword; no extra CP_RB_WPTR is required.
     assert(imports.initialize_xenos_ring(0x00010000u, 6u, &error));
+    // The same physical word was written by the earlier MEM_WRITE coverage;
+    // clear it so this wait starts with an unmet comparison.
+    put_guest_be32(0xA0060000u, 0u);
     put_guest_be32(0xA0010000u,
         0xC0000000u | (4u << 16) | (0x3Cu << 8)); // WAIT_REG_MEM, five operands.
     put_guest_be32(0xA0010004u, 0x13u);           // Equal, memory source.
