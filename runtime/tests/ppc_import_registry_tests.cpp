@@ -428,9 +428,9 @@ int main() {
     put_guest_be32(0xA0030008u,
         0xC0000000u | (4u << 16) | (0x3Cu << 8));
     put_guest_be32(0xA003000Cu, 3u); // Equal, register source.
-    put_guest_be32(0xA0030010u, 0xCAFEBABEu);
-    put_guest_be32(0xA0030014u, 0xFFFFFFFFu);
-    put_guest_be32(0xA0030018u, 0u);
+    put_guest_be32(0xA0030010u, 3u); // Poll Xenos register index 3.
+    put_guest_be32(0xA0030014u, 0xCAFEBABEu); // Expected register value.
+    put_guest_be32(0xA0030018u, 0xFFFFFFFFu); // Compare all bits.
     put_guest_be32(0xA003001Cu, 0u);
     put_guest_be32(0xA0030020u, 0x35u); // Type-0 write after the wait.
     put_guest_be32(0xA0030024u, 0xBBBBBBBBu);
