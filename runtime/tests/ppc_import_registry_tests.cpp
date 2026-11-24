@@ -167,11 +167,12 @@ int main() {
         {"xboxkrnl.exe", 0x0089u, 0, 1, 0x82001228u},
         {"xboxkrnl.exe", 0x00B1u, 0, 1, 0x8200122Cu},
         {"xboxkrnl.exe", 0x00B3u, 0, 1, 0x82001230u},
-        {"xboxkrnl.exe", 0x00B4u, 0, 1, 0x82001234u}
+        {"xboxkrnl.exe", 0x00B4u, 0, 1, 0x82001234u},
+        {"xboxkrnl.exe", 0x012Du, 0, 1, 0x82001238u}
     };
     std::size_t registered = 0;
     assert(imports.install(memory, metadata, &registered, &error));
-    assert(registered == 78u);
+    assert(registered == 79u);
     assert(memory.get_function<PPCFunc*>(0x82001100u) != &test_default_handler);
 
     // The real kernel imports configure the per-title primary Xenos ring.
@@ -734,6 +735,34 @@ int main() {
     compare_strings.r6.u32 = 3u;
     call_test_import(0x82001214u, compare_strings);
     assert(compare_strings.r3.u32 == 0u);
+
+    // RtlInitUnicodeString writes a big-endian UNICODE_STRING descriptor
+    // over the guest UTF-16 source without allocating or copying its buffer.
+    constexpr std::uint32_t unicode_descriptor = 0x82012040u;
+    constexpr std::uint32_t unicode_source = 0x82012400u;
+    const auto put_guest_be16 = [&](std::uint32_t address, std::uint16_t value) {
+        memory.base()[address] = static_cast<std::uint8_t>(value >> 8);
+        memory.base()[address + 1u] = static_cast<std::uint8_t>(value);
+    };
+    put_guest_be16(unicode_source, static_cast<std::uint16_t>('H'));
+    put_guest_be16(unicode_source + 2u, static_cast<std::uint16_t>('i'));
+    put_guest_be16(unicode_source + 4u, 0u);
+    PPCContext init_unicode{};
+    init_unicode.r3.u32 = unicode_descriptor;
+    init_unicode.r4.u32 = unicode_source;
+    call_test_import(0x82001238u, init_unicode);
+    assert(read_guest_be32(unicode_descriptor) == 0x00040006u);
+    assert(read_guest_be32(unicode_descriptor + 4u) == unicode_source);
+
+    // A null source resets all three fields, including the previous buffer.
+    put_guest_be32(unicode_descriptor, 0xFFFFFFFFu);
+    put_guest_be32(unicode_descriptor + 4u, 0xFFFFFFFFu);
+    PPCContext reset_unicode{};
+    reset_unicode.r3.u32 = unicode_descriptor;
+    reset_unicode.r4.u32 = 0u;
+    call_test_import(0x82001238u, reset_unicode);
+    assert(read_guest_be32(unicode_descriptor) == 0u);
+    assert(read_guest_be32(unicode_descriptor + 4u) == 0u);
 
     // Kernel IRQL/critical-region operations are per host guest-thread.
     PPCContext enter_critical{};
