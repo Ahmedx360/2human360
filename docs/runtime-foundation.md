@@ -42,7 +42,10 @@ When the generated library is enabled, `TooHumanPpcRuntime` registers every non-
 `MmGetPhysicalAddress` (xboxkrnl ordinal `0x00BE`) currently resolves committed addresses in the runtime's uncached physical alias (`0xA0000000..0xBFFFFFFF`) by subtracting the alias base. It returns zero for ordinary virtual addresses or uncommitted alias pages because this runtime does not yet model a general virtual-to-physical page map.
 `MmAllocatePhysicalMemoryEx` allocates and zeroes a block from the 128 MiB kernel-variable heap with at least 4 KiB alignment; `MmFreePhysicalMemory` releases the exact returned base address. This is a compatibility allocator only: physical min/max constraints, cache modifiers, large-page flags, and device-specific physical heaps are not modeled. Invalid or repeated frees are rejected without changing allocator state.
 `MmQueryAddressProtect` reports `X_PAGE_READWRITE`, `X_PAGE_READONLY`, or `X_PAGE_NOACCESS` for tracked heap allocations by inspecting the current committed guest page permissions. It returns zero for addresses outside those tracked allocations. This is limited to the guest heaps and does not implement a complete physical-memory manager.
+
+
 `MmSetAddressProtect` applies those same supported XDK protection states to an allocation. For `NtAllocateVirtualMemory` regions it also splits/coalesces the per-page metadata used by `NtQueryVirtualMemory`; for pool and stack allocations it requires the complete page-aligned range to fit inside one allocation so it cannot change permissions on a neighboring small allocation. Execute/guard flags and untracked or cross-allocation ranges remain unsupported.
+
 `RtlCompareStringN` (xboxkrnl ordinal `0x011D`) compares two bounded ANSI byte spans and supports the XDK `0xFFFF` NUL-terminated-length sentinel. Case-insensitive comparison currently folds ASCII `A`–`Z` only; full locale/Unicode collation is not implemented. NUL scans are bounded to 64 KiB and validated against readable guest memory.
 `RtlInitUnicodeString` (xboxkrnl ordinal `0x012D`) scans at most 32,766 UTF-16 code units from readable guest memory and writes the big-endian `{Length, MaximumLength, Buffer}` descriptor without allocating or copying the source. `RtlInitAnsiString` (ordinal `0x012C`) applies the same validation to single-byte strings with a 65,534-byte bound. Both handlers clear the descriptor for a null source and return `STATUS_ACCESS_VIOLATION` for invalid descriptor/source ranges before changing it.
 
@@ -272,7 +275,7 @@ registers the 0x10-byte guest dispatcher record by address, `KeSetEvent` and
 events signaled. `KePulseEvent` and `NtPulseEvent` release only threads already queued at the
 pulse instant (one for synchronization events, all for notification events)
 and leave the event unsignaled. Priority increment and wait-switch hints are
-ignored; multiple-object waits remain unimplemented.
+ignored. Both `NtWaitForMultipleObjectsEx` (handle array) and `KeWaitForMultipleObjects` (native dispatcher-object pointer array) now implement WaitAll and WaitAny. The `Ke` form currently accepts validated native event and semaphore records; its WaitBlockArray and scheduling hints are ignored.
 
 Waitable timer handles now support `NtCreateTimer`, `NtSetTimerEx` and
 `NtCancelTimer`. Notification timers remain signaled after expiry, while
@@ -297,16 +300,14 @@ plus limit), and `KeWaitForSingleObject` can wait on the address registered by
 `KeInitializeSemaphore`. When an XDK-inlined initializer bypasses the import,
 first-touch wait/set/reset/release lazily recognizes only validated native
 header types 0/1 (event) and 5 (semaphore). Other dispatcher object types are
-still rejected. Named semaphore attributes and multiple-object waits remain
-unsupported.
+still rejected. Named semaphore attributes remain unsupported. Native multi-waits currently synthesize only event and semaphore dispatcher records; native mutant/timer layouts are not yet supported.
 
 The synchronization subset is deliberately bounded. Critical sections use recursive host mutexes and mirror the
 28-byte guest structure's lock count, recursion count, and owner. Events support notification/manual-reset and
 synchronization/auto-reset behavior, initial state, set/clear, finite or infinite waits, and close. The Xbox ABI is
 preserved: `NtCreateEvent` receives its output handle in r3, object attributes in r4, event type in r5 and initial
-state in r6; `NtWaitForSingleObjectEx` receives handle, wait mode, alertable flag and timeout pointer in r3-r6.
-`NtWaitForSingleObjectEx` and `NtClose` use the shared object table. Event set/clear remains event-only. Named-object
-lookup, APC delivery/alertable completion, multiple-wait operations, and other dispatcher-object types are not implemented. Kernel TLS values are per host thread, matching the intended one-host-thread-per-guest-thread
+state in r6; `NtWaitForSingleObjectEx` receives handle, wait mode, alertable flag and timeout pointer in r3-r6; `NtWaitForMultipleObjectsEx` receives count, handle-array pointer, WaitType, wait mode, alertable flag and timeout pointer in r3-r8.
+`NtWaitForSingleObjectEx`, `NtWaitForMultipleObjectsEx`, and `NtClose` use the shared object table. The multiple-wait handler accepts up to 64 handles and implements both WaitAll and WaitAny with finite or infinite timeouts; WaitAll rejects duplicate object references, while WaitAny preserves first-ready-slot behavior for duplicate entries. Events, semaphores, mutants, and timers are checked and acquired while their object locks are held in a stable order, so WaitAll does not consume a partial set; completed thread objects are probed as level-triggered objects. The wait engine uses a shared epoch-based condition-variable notification domain, with timer deadlines as timed wake sources; it does not poll at a fixed interval. Event set/clear remains event-only. Named-object lookup, APC delivery/alertable completion, pulse-event participation in multi-waits, and other dispatcher-object types remain incomplete. Kernel TLS values are per host thread, matching the intended one-host-thread-per-guest-thread
 execution model.
 
 Thread stacks and both guard regions use the host's native page size, with a 16 KiB minimum guest stack. This avoids assuming every host has 4 KiB pages. Partial context-allocation failures roll back already allocated runtime blocks and the stack reservation.
@@ -324,12 +325,17 @@ workers and waits for cleanup callbacks before the runtime heaps can be destroye
 PCR, TLS and stack context, then invokes the selected entry through `invoke_recompiled_function`. The API startup
 routine receives the user start address and context in r3/r4; without a startup routine, the start function receives
 its context in r3. Creation flag bit 0 requests initial suspension; bit 0x80 selects the native KTHREAD address as the
-guest handle. `NtResumeThread` and `KeResumeThread` resume the same typed thread object. `ExTerminateThread` unwinds
-the current worker using a guest-thread exit signal. Registry shutdown requests cancellation, observed at the next
-HLE/import dispatch boundary; pure PPC loops that never cross an HLE boundary are not preemptible yet.
+guest handle. `NtResumeThread` and `KeResumeThread` resume the same typed thread object. `NtSuspendThread` increments
+that thread's suspend count and optionally returns the previous count through its output pointer. A suspended worker
+blocks at the next HLE/import-dispatch checkpoint and remains paused until the count reaches zero. This is cooperative
+suspension: it cannot interrupt a long translated PPC loop that does not call into the runtime. `ExTerminateThread`
+unwinds the current worker using a guest-thread exit signal. Registry shutdown requests cancellation, observed at the
+next HLE/import dispatch boundary; pure PPC loops that never cross an HLE boundary are not preemptible yet.
 
-This is not a complete Xbox scheduler. APCs, alertable waits, arbitrary-thread suspend/terminate, processor affinity,
-priority semantics, and fully synchronized concurrent access to shared guest memory remain incomplete. `TooHumanGuestThreadRuntimeTests` exercises the PPC execution bridge and its guest register/context setup.
+This is not a complete Xbox scheduler. APCs, alertable waits, arbitrary-thread terminate, processor affinity,
+priority semantics, hard preemption, and fully synchronized concurrent access to shared guest memory remain
+incomplete. `TooHumanGuestThreadRuntimeTests` exercises the PPC execution bridge and its guest register/context setup;
+`TooHumanGuestThreadManagerTests` covers suspend-count behavior and cooperative pause/resume at safe points.
 
 `XamShowMessageBoxUIEx` auto-selects the focused choice in this headless runtime. XConfig support is limited to the
 explicit categories/settings in the handler. `DbgPrint` logs the format string without expanding guest varargs;
@@ -370,6 +376,12 @@ metadata queries, and stateful directory enumeration. Directory enumeration
 sorts entries deterministically, supports case-insensitive `*`/`?` matching,
 retains its search expression and cursor across calls, and reports
 `STATUS_NO_SUCH_FILE` separately from `STATUS_NO_MORE_FILES`.
+
+The Too Human executable opens `game:\\filetable.txt`, whose rows map a stored disc filename to its logical asset filename. The stored first column is truncated to the disc's 42-byte filename limit; the logical second column can be longer (up to 63 bytes in the current parser). `GuestVfs` lazily reads this table and resolves root-level logical names to stored names, case-insensitively. The mapping also applies to opens relative to a handle for the game-volume root. Invalid, overlong, duplicate-ambiguous, or path-traversal rows are ignored. The host directory continues to contain the stored filenames; callers open the logical name used by the game.
+
+When a read-only game-volume request has no exact file but a sibling with an added `.gz` suffix exists (for example `game:\\contents.zzz` backed by `contents.zzz.gz`), the VFS opens that sibling. It deliberately returns the gzip bytes unchanged: the title contains its own compression handling, including gzip header/CRC checks, and the host VFS must not decompress the stream a second time. The `contents.zzz` catalog itself is not yet decoded by the runtime; its uploaded sample contains a 248-entry 20-byte table and a 248-entry sorted 32-bit table, whose semantic fields still need to be confirmed against the game’s parser.
+
+
 
 The Xbox 360 `NtQueryDirectoryFile` export uses this title's compact ABI:
 `r3` is the directory handle, `r7` the I/O status block, `r8` the output

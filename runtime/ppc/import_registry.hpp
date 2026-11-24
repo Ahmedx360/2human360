@@ -60,13 +60,14 @@ public:
                                                     std::uint8_t* base);
     [[nodiscard]] std::uint32_t resume_guest_thread(PPCContext& context,
                                                     std::uint8_t* base);
+    [[nodiscard]] std::uint32_t suspend_guest_thread(PPCContext& context,
+                                                     std::uint8_t* base);
     [[nodiscard]] std::uint32_t resume_guest_kernel_thread(PPCContext& context);
 
     void dispatch(PPCContext& context, std::uint8_t* base);
     void set_guest_address_protection(std::uint32_t address,
                                       std::uint32_t length,
                                       std::uint32_t protection_bits);
-
 
     // Allocate runtime memory from the committed private guest virtual range.
     [[nodiscard]] std::optional<std::uint32_t> allocate_runtime_memory(

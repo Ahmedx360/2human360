@@ -23,6 +23,7 @@
 #include <unordered_map>
 #include <thread>
 #include <utility>
+#include <vector>
 
 namespace toohuman::runtime {
 
@@ -1196,6 +1197,10 @@ PPC_FUNC(NtResumeThread) {
     auto* registry = PpcImportRegistry::active();
     ctx.r3.u32 = registry ? registry->resume_guest_thread(ctx, base) : kStatusUnsuccessful;
 }
+PPC_FUNC(NtSuspendThread) {
+    auto* registry = PpcImportRegistry::active();
+    ctx.r3.u32 = registry ? registry->suspend_guest_thread(ctx, base) : kStatusUnsuccessful;
+}
 PPC_FUNC(KeResumeThread) {
     auto* registry = PpcImportRegistry::active();
     ctx.r3.u32 = registry ? registry->resume_guest_kernel_thread(ctx) : 0xFFFFFFFFu;
@@ -1586,6 +1591,96 @@ PPC_FUNC(KeResetEvent) {
     ctx.r3.u32 = previous;
 }
 
+// xboxkrnl #0xAF. Wait on guest-addressed native dispatcher objects.
+PPC_FUNC(KeWaitForMultipleObjects) {
+    const auto count = ctx.r3.u32;
+    const auto objects_address = ctx.r4.u32;
+    const auto wait_type = ctx.r5.u32;
+    const auto wait_mode = ctx.r7.u32;
+    const auto alertable = ctx.r8.u32;
+    const auto timeout_address = ctx.r9.u32;
+
+    if (count == 0u || count > 64u || wait_type > 1u ||
+        wait_mode > 1u || alertable > 1u) {
+        ctx.r3.u32 = kStatusInvalidParameter;
+        return;
+    }
+    const auto array_size = static_cast<std::size_t>(count) * 4u;
+    if (objects_address == 0u ||
+        !guest_range_valid(base, objects_address, array_size, GuestMemoryAccess::Read)) {
+        ctx.r3.u32 = kStatusAccessViolation;
+        return;
+    }
+    if (timeout_address != 0u &&
+        !guest_range_valid(base, timeout_address, 8u, GuestMemoryAccess::Read)) {
+        ctx.r3.u32 = kStatusAccessViolation;
+        return;
+    }
+
+    std::vector<std::shared_ptr<GuestKernelObject>> objects;
+    try {
+        objects.reserve(count);
+        for (std::uint32_t i = 0; i < count; ++i) {
+            const auto address = get_be32(at(base, objects_address + i * 4u));
+            auto object = get_or_create_native_dispatcher_object(base, address);
+            if (!object || object->guest_object_address() != address) {
+                ctx.r3.u32 = kStatusAbandonedWait0;
+                return;
+            }
+            if (!guest_range_valid(base, address + 4u, 4u, GuestMemoryAccess::Write)) {
+                ctx.r3.u32 = kStatusAccessViolation;
+                return;
+            }
+            if (wait_type == 0u) {
+                for (const auto& previous : objects) {
+                    if (previous.get() == object.get()) {
+                        ctx.r3.u32 = kStatusInvalidParameter;
+                        return;
+                    }
+                }
+            }
+            objects.push_back(std::move(object));
+        }
+    } catch (...) {
+        ctx.r3.u32 = 0xC0000017u; // STATUS_NO_MEMORY.
+        return;
+    }
+
+    // WaitReason and WaitBlockArray are not needed by the host wait engine.
+    // WaitMode is range-checked but guest access-mode checks and APC delivery
+    // are not implemented. The shared wait-set domain avoids fixed polling.
+    const auto timeout = decode_guest_timeout(base, timeout_address);
+    std::size_t signaled_index = 0;
+    GuestKernelObjectWaitResult result{};
+    try {
+        result = process_kernel_objects().wait_multiple_objects(
+            objects, wait_type == 0u, timeout, &signaled_index);
+    } catch (...) {
+        ctx.r3.u32 = 0xC0000017u; // STATUS_NO_MEMORY.
+        return;
+    }
+    if (result == GuestKernelObjectWaitResult::Signaled) {
+        const auto begin = wait_type == 0u ? 0u : signaled_index;
+        const auto end = wait_type == 0u ? objects.size() : signaled_index + 1u;
+        for (std::size_t i = begin; i < end; ++i) {
+            if (auto event = std::dynamic_pointer_cast<GuestEventObject>(objects[i])) {
+                put_be32(at(base, event->guest_object_address() + 4u),
+                         event->is_signaled() ? 1u : 0u);
+            } else if (auto semaphore =
+                           std::dynamic_pointer_cast<GuestSemaphoreObject>(objects[i])) {
+                put_be32(at(base, semaphore->guest_object_address() + 4u),
+                         semaphore->count());
+            }
+        }
+        ctx.r3.u32 = wait_type == 0u ? 0u : static_cast<std::uint32_t>(signaled_index);
+    } else if (result == GuestKernelObjectWaitResult::Timeout) {
+        ctx.r3.u32 = kStatusTimeout;
+    } else {
+        ctx.r3.u32 = kStatusAbandonedWait0;
+    }
+}
+
+
 PPC_FUNC(KeWaitForSingleObject) {
     const auto object_address = ctx.r3.u32;
     auto object = get_or_create_native_dispatcher_object(base, object_address);
@@ -1688,6 +1783,83 @@ PPC_FUNC(NtWaitForSingleObjectEx) {
     case GuestKernelObjectWaitResult::InvalidHandle: ctx.r3.u32 = kStatusInvalidHandle; break;
     }
 }
+// xboxkrnl #0xFE. WaitType 0 is WaitAll; 1 is WaitAny.
+PPC_FUNC(NtWaitForMultipleObjectsEx) {
+    const auto count = ctx.r3.u32;
+    const auto handles_address = ctx.r4.u32;
+    const auto wait_type = ctx.r5.u32;
+    const auto wait_mode = ctx.r6.u32;
+    const auto alertable = ctx.r7.u32;
+    const auto timeout_address = ctx.r8.u32;
+
+    if (count == 0u || count > 64u || wait_type > 1u ||
+        wait_mode > 1u || alertable > 1u) {
+        ctx.r3.u32 = kStatusInvalidParameter;
+        return;
+    }
+    const auto handles_size = static_cast<std::size_t>(count) * 4u;
+    if (handles_address == 0u ||
+        !guest_range_valid(base, handles_address, handles_size, GuestMemoryAccess::Read)) {
+        ctx.r3.u32 = kStatusAccessViolation;
+        return;
+    }
+    if (timeout_address != 0u &&
+        !guest_range_valid(base, timeout_address, 8u, GuestMemoryAccess::Read)) {
+        ctx.r3.u32 = kStatusAccessViolation;
+        return;
+    }
+
+    std::vector<std::shared_ptr<GuestKernelObject>> objects;
+    try {
+        objects.reserve(count);
+        for (std::uint32_t i = 0; i < count; ++i) {
+            const auto handle = get_be32(at(base, handles_address + i * 4u));
+            auto object = process_kernel_objects().lookup(handle);
+            if (!object) {
+                ctx.r3.u32 = kStatusInvalidHandle;
+                return;
+            }
+            if (wait_type == 0u) {
+                for (const auto& previous : objects) {
+                    if (previous.get() == object.get()) {
+                        ctx.r3.u32 = kStatusInvalidParameter;
+                        return;
+                    }
+                }
+            }
+            objects.push_back(std::move(object));
+        }
+    } catch (...) {
+        ctx.r3.u32 = 0xC0000017u; // STATUS_NO_MEMORY.
+        return;
+    }
+
+    // Alertable completion/APC delivery is not implemented yet. The alertable
+    // flag is accepted for ABI compatibility; waits remain non-alertable.
+    const auto timeout = decode_guest_timeout(base, timeout_address);
+    std::size_t signaled_index = 0;
+    GuestKernelObjectWaitResult result{};
+    try {
+        result = process_kernel_objects().wait_multiple_objects(
+            objects, wait_type == 0u, timeout, &signaled_index);
+    } catch (...) {
+        ctx.r3.u32 = 0xC0000017u; // STATUS_NO_MEMORY.
+        return;
+    }
+    switch (result) {
+    case GuestKernelObjectWaitResult::Signaled:
+        ctx.r3.u32 = wait_type == 0u ? 0u : static_cast<std::uint32_t>(signaled_index);
+        break;
+    case GuestKernelObjectWaitResult::Timeout:
+        ctx.r3.u32 = kStatusTimeout;
+        break;
+    case GuestKernelObjectWaitResult::InvalidHandle:
+        ctx.r3.u32 = kStatusInvalidHandle;
+        break;
+    }
+}
+
+
 // xboxkrnl #0xDA. NtDuplicateObject(HANDLE src /*r3*/, HANDLE* out /*r4*/, ULONG options /*r5*/).
 // Pseudo-handles (-1 process, -2 thread) are given a placeholder signaled event object.
 PPC_FUNC(NtDuplicateObject) {
@@ -1769,6 +1941,16 @@ PPC_FUNC(MmSetAddressProtect) {
         registry->set_guest_address_protection(
             ctx.r3.u32, ctx.r4.u32, ctx.r5.u32);
     }
+}
+
+// xam #0x2D9. XamShowDirtyDiscErrorUI: the title could not read its disc data.
+PPC_FUNC(XamShowDirtyDiscErrorUI) {
+    std::fprintf(stderr,
+                 "[TooHuman] The game reported a disc read error: its data files were not found.\n"
+                 "           Set TH_GAME_ROOT to the extracted disc contents "
+                 "(folder holding filetable.txt and contents.zzz).\n");
+    std::fflush(stderr);
+    std::exit(2);
 }
 
 PPC_FUNC(NtClose) {
