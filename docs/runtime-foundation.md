@@ -46,6 +46,8 @@ When the generated library is enabled, `TooHumanPpcRuntime` registers every non-
 
 `MmSetAddressProtect` applies those same supported XDK protection states to an allocation. For `NtAllocateVirtualMemory` regions it also splits/coalesces the per-page metadata used by `NtQueryVirtualMemory`; for pool and stack allocations it requires the complete page-aligned range to fit inside one allocation so it cannot change permissions on a neighboring small allocation. Execute/guard flags and untracked or cross-allocation ranges remain unsupported.
 
+`RtlCompareStringN` (xboxkrnl ordinal `0x011D`) compares two bounded ANSI byte spans and supports the XDK `0xFFFF` NUL-terminated-length sentinel. Case-insensitive comparison currently folds ASCII `A`–`Z` only; full locale/Unicode collation is not implemented. NUL scans are bounded to 64 KiB and validated against readable guest memory.
+
 The PE-only workflow cannot provide this metadata. Use the optional XEX TOML configuration with the matching original `default.xex` to preserve imports when regenerating the PPC translation. The `TooHumanXexImportAudit <default.xex>` utility now loads and audits the supplied XEX directly; the two-file `<default.xex> <default.exe>` form remains available for extracted PE workflows. The audit prints library IDs/versions, descriptor records, function/IAT pairings and genuine variable imports. The supplied Too Human executable has two import libraries (`xam.xex` and `xboxkrnl.exe`), 242 function thunks and 11 genuine variable imports.
 
 ## Implemented: guest virtual-memory query and protection

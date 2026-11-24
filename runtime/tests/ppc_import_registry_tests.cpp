@@ -159,11 +159,12 @@ int main() {
         {"xboxkrnl.exe", 0x01B6u, 0, 1, 0x820011BCu},
         {"xboxkrnl.exe", 0x01C3u, 0, 1, 0x820011C0u},
         {"xboxkrnl.exe", 0x00FCu, 0, 1, 0x82001210u},
-        {"xboxkrnl.exe", 0x00BEu, 0, 1, 0x82001300u}
+        {"xboxkrnl.exe", 0x00BEu, 0, 1, 0x82001300u},
+        {"xboxkrnl.exe", 0x011Du, 0, 1, 0x82001214u}
     };
     std::size_t registered = 0;
     assert(imports.install(memory, metadata, &registered, &error));
-    assert(registered == 70u);
+    assert(registered == 71u);
     assert(memory.get_function<PPCFunc*>(0x82001100u) != &test_default_handler);
 
     // The real kernel imports configure the per-title primary Xenos ring.
@@ -697,6 +698,46 @@ int main() {
     uncommitted_alias_query.r3.u32 = 0xA0080000u;
     call_test_import(0x82001300u, uncommitted_alias_query);
     assert(uncommitted_alias_query.r3.u32 == 0u);
+
+const auto store_guest_ascii = [&](std::uint32_t address, const char* value) {
+        std::size_t length = 0;
+        while (value[length] != '\0') {
+            memory.base()[address + static_cast<std::uint32_t>(length)] =
+                static_cast<std::uint8_t>(value[length]);
+            ++length;
+        }
+        memory.base()[address + static_cast<std::uint32_t>(length)] = 0u;
+    };
+    store_guest_ascii(0x82012200u, "Alpha");
+    store_guest_ascii(0x82012220u, "alpha");
+    store_guest_ascii(0x82012240u, "Alphabet");
+    PPCContext compare_strings{};
+    compare_strings.r3.u32 = 0x82012200u;
+    compare_strings.r4.u32 = 5u;
+    compare_strings.r5.u32 = 0x82012220u;
+    compare_strings.r6.u32 = 5u;
+    compare_strings.r7.u32 = 0u;
+    call_test_import(0x82001214u, compare_strings);
+    assert(compare_strings.r3.u32 == 0xFFFFFFE0u);
+
+    compare_strings = {};
+    compare_strings.r3.u32 = 0x82012200u;
+    compare_strings.r4.u32 = 0xFFFFu;
+    compare_strings.r5.u32 = 0x82012220u;
+    compare_strings.r6.u32 = 0xFFFFu;
+    compare_strings.r7.u32 = 1u;
+    call_test_import(0x82001214u, compare_strings);
+    assert(compare_strings.r3.u32 == 0u);
+
+    // Explicit lengths compare only the shared prefix, matching the XDK's
+    // RtlCompareStringN behavior for two supplied spans.
+    compare_strings = {};
+    compare_strings.r3.u32 = 0x82012200u;
+    compare_strings.r4.u32 = 3u;
+    compare_strings.r5.u32 = 0x82012240u;
+    compare_strings.r6.u32 = 3u;
+    call_test_import(0x82001214u, compare_strings);
+    assert(compare_strings.r3.u32 == 0u);
 
     // The volume-information export uses the Xbox ABI:
     // (handle, iosb, information, length, information_class).
