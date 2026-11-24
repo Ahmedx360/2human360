@@ -1903,6 +1903,8 @@ int main() {
     physical_free.r3.u32 = 0u; // Allocation type.
     physical_free.r4.u32 = physical_block;
     call_import(thunk_base + 44, physical_free);
+    // Repeated frees are rejected without damaging the free-list state.
+    call_import(thunk_base + 44, physical_free);
 
     PPCContext physical_reallocate{};
     physical_reallocate.r4.u32 = 0x1000u;
