@@ -1468,11 +1468,12 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
             return;
         }
         if (import.ordinal == 0x00B3) { // KfLowerIrql
-            if (context.r3.u32 <= kGuestIrqlDispatch) {
+            if (context.r3.u32 <= g_guest_irql &&
+                context.r3.u32 <= kGuestIrqlDispatch) {
                 g_guest_irql = context.r3.u32;
             } else {
                 std::fprintf(stderr,
-                    "[TooHuman] KfLowerIrql rejected level=0x%08X\\n",
+                    "[TooHuman] KfLowerIrql rejected level=0x%08X\n",
                     static_cast<unsigned>(context.r3.u32));
             }
             return;
@@ -1484,7 +1485,7 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
                 g_guest_irql = std::max(g_guest_irql, kGuestIrqlDispatch);
             } else {
                 std::fprintf(stderr,
-                    "[TooHuman] KfAcquireSpinLock rejected address=0x%08X\\n",
+                    "[TooHuman] KfAcquireSpinLock rejected address=0x%08X\n",
                     static_cast<unsigned>(lock_address));
             }
             context.r3.u32 = previous_irql;
@@ -1497,7 +1498,7 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
                 g_guest_irql = previous_irql;
             if (!release_guest_spin_lock(base, lock_address)) {
                 std::fprintf(stderr,
-                    "[TooHuman] KfReleaseSpinLock rejected address=0x%08X\\n",
+                    "[TooHuman] KfReleaseSpinLock rejected address=0x%08X\n",
                     static_cast<unsigned>(lock_address));
             }
             return;
@@ -1506,7 +1507,7 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
             const auto lock_address = context.r3.u32;
             if (!acquire_guest_spin_lock(base, lock_address)) {
                 std::fprintf(stderr,
-                    "[TooHuman] KeAcquireSpinLockAtRaisedIrql rejected address=0x%08X\\n",
+                    "[TooHuman] KeAcquireSpinLockAtRaisedIrql rejected address=0x%08X\n",
                     static_cast<unsigned>(lock_address));
             }
             return;
@@ -1515,7 +1516,7 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
             const auto lock_address = context.r3.u32;
             if (!release_guest_spin_lock(base, lock_address)) {
                 std::fprintf(stderr,
-                    "[TooHuman] KeReleaseSpinLockFromRaisedIrql rejected address=0x%08X\\n",
+                    "[TooHuman] KeReleaseSpinLockFromRaisedIrql rejected address=0x%08X\n",
                     static_cast<unsigned>(lock_address));
             }
             return;
