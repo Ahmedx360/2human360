@@ -1329,6 +1329,30 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
             return;
         }
     }
+    if (binding.handler == nullptr &&
+        import.library == "xboxkrnl.exe" && import.ordinal == 0x00BE) {
+        // MmGetPhysicalAddress. This runtime currently exposes the Xbox
+        // uncached physical-memory alias (0xA0000000..0xBFFFFFFF) directly.
+        // Translate only committed bytes in that alias; image/ordinary virtual
+        // addresses have no modeled physical-page mapping yet.
+        constexpr std::uint32_t kPhysicalAliasBase = 0xA0000000u;
+        constexpr std::uint64_t kPhysicalAliasSize = 0x20000000ull;
+        const auto guest_address = context.r3.u32;
+        const auto alias_end =
+            static_cast<std::uint64_t>(kPhysicalAliasBase) + kPhysicalAliasSize;
+        if (guest_address >= kPhysicalAliasBase &&
+            static_cast<std::uint64_t>(guest_address) < alias_end &&
+            GuestAddressSpace::is_accessible_range(
+                base, guest_address, 1u, GuestMemoryAccess::Read)) {
+            context.r3.u32 = guest_address - kPhysicalAliasBase;
+        } else {
+            // Unsupported or uncommitted virtual addresses have no physical
+            // mapping in the current runtime model.
+            context.r3.u32 = 0u;
+        }
+        return;
+    }
+
     if (binding.handler == nullptr && import.library == "xboxkrnl.exe") {
         // These byte-oriented RTL helpers are safe to implement without
         // emulating scheduler, object-manager, or device state. Xbox PPC
