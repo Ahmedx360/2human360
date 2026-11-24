@@ -73,6 +73,58 @@ bool guest_range_valid(std::uint32_t address, std::uint64_t length) noexcept {
                                 (std::uint64_t{1} << 32));
 }
 
+// Minimal per-host-thread Xbox execution state. APC delivery is not implemented,
+// but tracking these counters gives IRQL and critical-region imports consistent
+// nesting semantics across guest calls on the same emulated thread.
+thread_local std::uint32_t g_guest_irql = 0u;
+thread_local std::uint32_t g_guest_critical_region_depth = 0u;
+constexpr std::uint32_t kGuestIrqlDispatch = 2u;
+constexpr std::uint32_t kGuestSpinLockHeldBigEndian = 0x01000000u;
+
+bool acquire_guest_spin_lock(std::uint8_t* base, std::uint32_t address) {
+    if (address == 0u || (address & 3u) != 0u ||
+        !GuestAddressSpace::is_accessible_range(
+            base, address, sizeof(std::uint32_t), GuestMemoryAccess::Read) ||
+        !GuestAddressSpace::is_accessible_range(
+            base, address, sizeof(std::uint32_t), GuestMemoryAccess::Write)) {
+        return false;
+    }
+    auto* host_word = reinterpret_cast<std::uint32_t*>(base + address);
+    if ((reinterpret_cast<std::uintptr_t>(host_word) &
+         (alignof(std::uint32_t) - 1u)) != 0u) return false;
+    std::atomic_ref<std::uint32_t> lock(*host_word);
+    for (;;) {
+        std::uint32_t expected = 0u;
+        if (lock.compare_exchange_weak(
+                expected, kGuestSpinLockHeldBigEndian,
+                std::memory_order_acquire, std::memory_order_relaxed)) {
+            return true;
+        }
+        // Let cancellation and cooperative thread suspension take effect
+        // while contending for a guest dispatcher spin lock.
+        throw_if_guest_thread_stop_requested();
+        std::this_thread::yield();
+    }
+}
+
+bool release_guest_spin_lock(std::uint8_t* base,
+                             std::uint32_t address) noexcept {
+    if (address == 0u || (address & 3u) != 0u ||
+        !GuestAddressSpace::is_accessible_range(
+            base, address, sizeof(std::uint32_t), GuestMemoryAccess::Read) ||
+        !GuestAddressSpace::is_accessible_range(
+            base, address, sizeof(std::uint32_t), GuestMemoryAccess::Write)) {
+        return false;
+    }
+    auto* host_word = reinterpret_cast<std::uint32_t*>(base + address);
+    if ((reinterpret_cast<std::uintptr_t>(host_word) &
+         (alignof(std::uint32_t) - 1u)) != 0u) return false;
+    std::atomic_ref<std::uint32_t> lock(*host_word);
+    auto expected = kGuestSpinLockHeldBigEndian;
+    return lock.compare_exchange_strong(
+        expected, 0u, std::memory_order_release, std::memory_order_relaxed);
+}
+
 bool translate_guest_protection(std::uint32_t flags,
                                 GuestMemoryProtection& protection) noexcept {
     // Cache modifiers are accepted. Guard pages and unknown flags are not
@@ -1396,6 +1448,80 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
     }
 
     if (binding.handler == nullptr && import.library == "xboxkrnl.exe") {
+        // IRQL and critical-region imports are per guest thread. APC delivery
+        // remains unsupported, so the critical-region depth is bookkeeping.
+        if (import.ordinal == 0x005F) { // KeEnterCriticalRegion
+            if (g_guest_critical_region_depth !=
+                std::numeric_limits<std::uint32_t>::max())
+                ++g_guest_critical_region_depth;
+            return;
+        }
+        if (import.ordinal == 0x007D) { // KeLeaveCriticalRegion
+            if (g_guest_critical_region_depth != 0u)
+                --g_guest_critical_region_depth;
+            return;
+        }
+        if (import.ordinal == 0x0085) { // KeRaiseIrqlToDpcLevel
+            const auto previous = g_guest_irql;
+            g_guest_irql = std::max(g_guest_irql, kGuestIrqlDispatch);
+            context.r3.u32 = previous;
+            return;
+        }
+        if (import.ordinal == 0x00B3) { // KfLowerIrql
+            if (context.r3.u32 <= g_guest_irql &&
+                context.r3.u32 <= kGuestIrqlDispatch) {
+                g_guest_irql = context.r3.u32;
+            } else {
+                std::fprintf(stderr,
+                    "[TooHuman] KfLowerIrql rejected level=0x%08X\n",
+                    static_cast<unsigned>(context.r3.u32));
+            }
+            return;
+        }
+        if (import.ordinal == 0x00B1) { // KfAcquireSpinLock
+            const auto lock_address = context.r3.u32;
+            const auto previous_irql = g_guest_irql;
+            if (acquire_guest_spin_lock(base, lock_address)) {
+                g_guest_irql = std::max(g_guest_irql, kGuestIrqlDispatch);
+            } else {
+                std::fprintf(stderr,
+                    "[TooHuman] KfAcquireSpinLock rejected address=0x%08X\n",
+                    static_cast<unsigned>(lock_address));
+            }
+            context.r3.u32 = previous_irql;
+            return;
+        }
+        if (import.ordinal == 0x00B4) { // KfReleaseSpinLock
+            const auto lock_address = context.r3.u32;
+            const auto previous_irql = context.r4.u32;
+            if (previous_irql <= kGuestIrqlDispatch)
+                g_guest_irql = previous_irql;
+            if (!release_guest_spin_lock(base, lock_address)) {
+                std::fprintf(stderr,
+                    "[TooHuman] KfReleaseSpinLock rejected address=0x%08X\n",
+                    static_cast<unsigned>(lock_address));
+            }
+            return;
+        }
+        if (import.ordinal == 0x004D) { // KeAcquireSpinLockAtRaisedIrql
+            const auto lock_address = context.r3.u32;
+            if (!acquire_guest_spin_lock(base, lock_address)) {
+                std::fprintf(stderr,
+                    "[TooHuman] KeAcquireSpinLockAtRaisedIrql rejected address=0x%08X\n",
+                    static_cast<unsigned>(lock_address));
+            }
+            return;
+        }
+        if (import.ordinal == 0x0089) { // KeReleaseSpinLockFromRaisedIrql
+            const auto lock_address = context.r3.u32;
+            if (!release_guest_spin_lock(base, lock_address)) {
+                std::fprintf(stderr,
+                    "[TooHuman] KeReleaseSpinLockFromRaisedIrql rejected address=0x%08X\n",
+                    static_cast<unsigned>(lock_address));
+            }
+            return;
+        }
+
         // These byte-oriented RTL helpers are safe to implement without
         // emulating scheduler, object-manager, or device state. Xbox PPC
         // ULONG values are big-endian in guest memory.
