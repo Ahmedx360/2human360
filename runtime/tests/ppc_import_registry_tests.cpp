@@ -1799,6 +1799,12 @@ int main() {
         {"xboxkrnl.exe", 0x0193u, 0, 0, 0x82000604u, 0}
     };
     toohuman::runtime::PpcImportRegistry variable_registry;
+    // The real title registry installs this HLE through register_boot_imports;
+    // this synthetic registry registers the same handler explicitly so the
+    // protection tests exercise the production MmSetAddressProtect path.
+    assert(variable_registry.register_handler(
+        "xboxkrnl.exe", 0x00C7u,
+        &toohuman::runtime::boot_hle::MmSetAddressProtect, &error));
     std::size_t bound_variables = 0;
     assert(variable_registry.prepare_variable_imports(
         variable_memory, variable_image, xex_header, variable_imports,
