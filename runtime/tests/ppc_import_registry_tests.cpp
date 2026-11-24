@@ -352,7 +352,7 @@ int main() {
     put_guest_be32(0xA00100C4u, 0x12345678u);
     ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 50u);
     assert(imports.xenos_command_processor().read_index() == 50u);
-    assert(GuestMmioBus::global().read(kXenosMmioBase + 0x32u * 4u, 4) == 0u);
+    assert(GuestMmioBus::global().read(kXenosMmioBase + 0x32u * 4u, 4) == 0xFEEDBEEFu);
 
     // WAIT_REG_MEM defers without consuming the packet or publishing RPTR.
     // A guest write to the polled register wakes the pump and retries the wait.
