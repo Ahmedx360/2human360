@@ -353,10 +353,9 @@ std::optional<std::string> GuestVfs::filetable_storage_name(
                                 value.pop_back();
                             return value;
                         };
-                        const auto is_root_filename = [](const std::string& value) {
-                            // The title stores each side in a 64-byte field and
-                            // enumerates the assets from the game-volume root.
-                            return !value.empty() && value.size() <= 63u &&
+                        const auto is_root_filename = [](const std::string& value,
+                                                          std::size_t max_bytes) {
+                            return !value.empty() && value.size() <= max_bytes &&
                                 value != "." && value != ".." &&
                                 value.find_first_of("/\\:,") == std::string::npos &&
                                 value.find('\0') == std::string::npos;
@@ -376,8 +375,8 @@ std::optional<std::string> GuestVfs::filetable_storage_name(
                             // with "game:\\" when constructing its lookup key.
                             const auto stored_name = trim(line.substr(0, separator));
                             const auto logical_file = trim(line.substr(separator + 1u));
-                            if (!is_root_filename(stored_name) ||
-                                !is_root_filename(logical_file))
+                            if (!is_root_filename(stored_name, 42u) ||
+                                !is_root_filename(logical_file, 63u))
                                 continue;
 
                             const auto logical_key = lower(logical_file);
@@ -412,6 +411,7 @@ std::optional<fs::path> GuestVfs::resolve(
     fs::path root;
     bool can_write = false;
     bool game_volume = false;
+    bool game_root_handle = false;
     if (root_dir != nullptr) {
         // Root-directory handles may only be used for relative names and may
         // never acquire more write access than their originating volume.
@@ -441,22 +441,32 @@ std::optional<fs::path> GuestVfs::resolve(
             }
         }
         game_volume = game;
+        game_root_handle = game;
         root = game ? game_root_ : save_root_;
         can_write = !game;
     }
 
+    const auto canonical_root = canonical_path(root);
+    if (!canonical_root) return std::nullopt;
+    if (root_dir != nullptr) {
+        const auto canonical_game_root = canonical_path(game_root_);
+        if (canonical_game_root && is_within(*canonical_game_root, *canonical_root)) {
+            game_volume = true;
+            game_root_handle = *canonical_game_root == *canonical_root;
+        }
+    }
+
     // Leading separators in device paths are root-relative, not host absolute.
     while (!name.empty() && name.front() == '/') name.erase(name.begin());
-    if (game_volume) {
+    // filetable aliases are root-level game-volume names. Directory-relative
+    // opens work too when the directory handle is the game-volume root.
+    if (game_root_handle) {
         if (const auto stored_name = filetable_storage_name(name))
             name = *stored_name;
     }
     if (writable) *writable = can_write;
 
-    const auto canonical_root = canonical_path(root);
-    if (!canonical_root) return std::nullopt;
     fs::path result = *canonical_root;
-
     std::size_t start = 0;
     while (start < name.size()) {
         const auto end = name.find('/', start);
@@ -509,7 +519,6 @@ std::optional<fs::path> GuestVfs::resolve(
     }
     return result;
 }
-
 GuestVfsOpenResult GuestVfs::open(
     const std::string& guest_name, const fs::path* root_dir,
     std::uint32_t disposition, bool want_write, bool directory_only,
