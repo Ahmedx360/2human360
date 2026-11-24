@@ -764,6 +764,23 @@ int main() {
     assert(read_guest_be32(unicode_descriptor) == 0u);
     assert(read_guest_be32(unicode_descriptor + 4u) == 0u);
 
+    PPCContext invalid_unicode_descriptor{};
+    invalid_unicode_descriptor.r3.u32 = 0x82018000u;
+    invalid_unicode_descriptor.r4.u32 = unicode_source;
+    call_test_import(0x82001238u, invalid_unicode_descriptor);
+    assert(invalid_unicode_descriptor.r3.u32 == 0xC0000005u);
+
+    // Invalid source memory must not partially overwrite the destination.
+    put_guest_be32(unicode_descriptor, 0xFFFFFFFFu);
+    put_guest_be32(unicode_descriptor + 4u, 0xFFFFFFFFu);
+    PPCContext invalid_unicode_source{};
+    invalid_unicode_source.r3.u32 = unicode_descriptor;
+    invalid_unicode_source.r4.u32 = 0x82018000u; // Uncommitted guest page.
+    call_test_import(0x82001238u, invalid_unicode_source);
+    assert(invalid_unicode_source.r3.u32 == 0xC0000005u);
+    assert(read_guest_be32(unicode_descriptor) == 0xFFFFFFFFu);
+    assert(read_guest_be32(unicode_descriptor + 4u) == 0xFFFFFFFFu);
+
     // Kernel IRQL/critical-region operations are per host guest-thread.
     PPCContext enter_critical{};
     call_test_import(0x8200121Cu, enter_critical); // KeEnterCriticalRegion.
