@@ -158,11 +158,12 @@ int main() {
         {"xboxkrnl.exe", 0x00E2u, 0, 1, 0x820011F8u},
         {"xboxkrnl.exe", 0x01B6u, 0, 1, 0x820011BCu},
         {"xboxkrnl.exe", 0x01C3u, 0, 1, 0x820011C0u},
-        {"xboxkrnl.exe", 0x00FCu, 0, 1, 0x82001210u}
+        {"xboxkrnl.exe", 0x00FCu, 0, 1, 0x82001210u},
+        {"xboxkrnl.exe", 0x00BEu, 0, 1, 0x82001300u}
     };
     std::size_t registered = 0;
     assert(imports.install(memory, metadata, &registered, &error));
-    assert(registered == 69u);
+    assert(registered == 70u);
     assert(memory.get_function<PPCFunc*>(0x82001100u) != &test_default_handler);
 
     // The real kernel imports configure the per-title primary Xenos ring.
@@ -680,6 +681,23 @@ int main() {
         assert(function != nullptr);
         function(ctx, memory.base());
     };
+    // MmGetPhysicalAddress resolves committed addresses in the runtime's
+    // uncached physical alias, and does not invent mappings for arbitrary VAs.
+    PPCContext physical_alias_query{};
+    physical_alias_query.r3.u32 = 0xA0060000u;
+    call_test_import(0x82001300u, physical_alias_query);
+    assert(physical_alias_query.r3.u32 == 0x00060000u);
+
+    PPCContext ordinary_virtual_query{};
+    ordinary_virtual_query.r3.u32 = 0x82012000u;
+    call_test_import(0x82001300u, ordinary_virtual_query);
+    assert(ordinary_virtual_query.r3.u32 == 0u);
+
+    PPCContext uncommitted_alias_query{};
+    uncommitted_alias_query.r3.u32 = 0xA0080000u;
+    call_test_import(0x82001300u, uncommitted_alias_query);
+    assert(uncommitted_alias_query.r3.u32 == 0u);
+
     // The volume-information export uses the Xbox ABI:
     // (handle, iosb, information, length, information_class).
     // Supply valid non-handle arguments so the test reaches handle dispatch.
@@ -1837,12 +1855,15 @@ int main() {
         {"xboxkrnl.exe", 0x00CCu, 0, 1, thunk_base + 24, 0},
         {"xboxkrnl.exe", 0x00DCu, 0, 1, thunk_base + 28, 0},
         {"xboxkrnl.exe", 0x00EEu, 0, 1, thunk_base + 32, 0},
-        {"xboxkrnl.exe", 0x00E1u, 0, 1, thunk_base + 36, 0}
+        {"xboxkrnl.exe", 0x00E1u, 0, 1, thunk_base + 36, 0},
+        {"xboxkrnl.exe", 0x00BAu, 0, 1, thunk_base + 40, 0},
+        {"xboxkrnl.exe", 0x00BDu, 0, 1, thunk_base + 44, 0},
+        {"xboxkrnl.exe", 0x00C4u, 0, 1, thunk_base + 48, 0}
     };
     std::size_t registered_pool_imports = 0;
     assert(variable_registry.install(
         variable_memory, pool_imports, &registered_pool_imports, &error));
-    assert(registered_pool_imports == 10);
+    assert(registered_pool_imports == 13);
 
     PPCContext header_field_context{};
     header_field_context.ctr.u32 = thunk_base + 16;
@@ -1886,6 +1907,46 @@ int main() {
         assert(function != nullptr);
         function(ctx, variable_memory.base());
     };
+    // Physical allocations come from the dedicated XEX kernel heap.
+    // MmFreePhysicalMemory takes (type, base_address); the heap only releases
+    // the exact allocation returned by MmAllocatePhysicalMemoryEx.
+    PPCContext physical_allocate{};
+    physical_allocate.r4.u32 = 0x1000u;
+    physical_allocate.r5.u32 = 0x04u; // PAGE_READWRITE.
+    physical_allocate.r8.u32 = 0x1000u;
+    call_import(thunk_base + 40, physical_allocate);
+    const auto physical_block = physical_allocate.r3.u32;
+    assert(physical_block >= 0x86000000u && physical_block < 0x8E000000u);
+    assert(variable_memory.base()[physical_block] == 0u);
+
+    PPCContext physical_protection{};
+    physical_protection.r3.u32 = physical_block;
+    call_import(thunk_base + 48, physical_protection);
+    assert(physical_protection.r3.u32 == 0x04u); // X_PAGE_READWRITE.
+
+    PPCContext physical_free{};
+    physical_free.r3.u32 = 0u; // Allocation type.
+    physical_free.r4.u32 = physical_block;
+    call_import(thunk_base + 44, physical_free);
+    // Repeated frees are rejected without damaging the free-list state.
+    call_import(thunk_base + 44, physical_free);
+
+    physical_protection = {};
+    physical_protection.r3.u32 = physical_block;
+    call_import(thunk_base + 48, physical_protection);
+    assert(physical_protection.r3.u32 == 0u); // No longer allocated.
+
+    PPCContext physical_reallocate{};
+    physical_reallocate.r4.u32 = 0x1000u;
+    physical_reallocate.r5.u32 = 0x04u;
+    physical_reallocate.r8.u32 = 0x1000u;
+    call_import(thunk_base + 40, physical_reallocate);
+    assert(physical_reallocate.r3.u32 == physical_block);
+
+    physical_free = {};
+    physical_free.r4.u32 = physical_block;
+    call_import(thunk_base + 44, physical_free);
+
     const auto vm_page_size =
         static_cast<std::uint32_t>(toohuman::runtime::GuestAddressSpace::page_size());
 
@@ -1975,6 +2036,11 @@ int main() {
     assert(read_guest_be(io_buffer + 28) == 0x04u);
     assert(read_guest_be(io_buffer + 32) == 0x00020000u);
 
+    PPCContext address_protection{};
+    address_protection.r3.u32 = virtual_address + 0x100u;
+    call_import(thunk_base + 48, address_protection);
+    assert(address_protection.r3.u32 == 0x04u); // Current PAGE_READWRITE.
+
     // NtProtectVirtualMemory: r3/r4 point to in/out base/size, r5 is PAGE_*,
     // r6 points to OldProtect, and r7 is DebugMemory.
     write_be(*stack_io + 8, virtual_address); // Page-aligned: protect exactly the first page.
@@ -1990,6 +2056,11 @@ int main() {
     assert(read_guest_be(*stack_io + 8) == virtual_address);
     assert(read_guest_be(*stack_io + 12) == vm_page_size);
     assert(read_guest_be(*stack_io + 16) == 0x04u); // Previous PAGE_READWRITE.
+
+    address_protection = {};
+    address_protection.r3.u32 = virtual_address + 0x100u;
+    call_import(thunk_base + 48, address_protection);
+    assert(address_protection.r3.u32 == 0x02u); // Current PAGE_READONLY.
 
     // Query reports protection-homogeneous regions rather than the whole allocation.
     vm_context = {};
@@ -2024,6 +2095,11 @@ int main() {
     call_import(thunk_base + 36, protect_context);
     assert(protect_context.r3.u32 == 0);
     assert(read_guest_be(*stack_io + 16) == 0x02u);
+
+    address_protection = {};
+    address_protection.r3.u32 = virtual_address + 0x100u;
+    call_import(thunk_base + 48, address_protection);
+    assert(address_protection.r3.u32 == 0x04u); // Restored PAGE_READWRITE.
 
     // MEM_RESERVE and MEM_COMMIT have distinct state. Reserve two pages,
     // commit only the first, then query/protect both sides of the boundary.
