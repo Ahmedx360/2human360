@@ -342,6 +342,10 @@ int main() {
     assert(read_guest_be32(0xA0060004u) == 0x11223344u);
     assert(read_guest_be32(0xA0020000u) == 43u);
 
+    // Seed this assertion's input register directly: this fixture must
+    // not depend on an earlier indirect-buffer command having run.
+    assert(GuestMmioBus::global().write_unobserved(
+        kXenosMmioBase + 0x32u * 4u, 4, 0u));
     // A non-matching condition consumes the packet without writing its target.
     put_guest_be32(0xA00100ACu,
         0xC0000000u | (5u << 16) | (0x45u << 8));
