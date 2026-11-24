@@ -1313,6 +1313,20 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
             context.r3.u32 = allocation.value_or(0);
             return;
         }
+        if (import.library == "xboxkrnl.exe" && import.ordinal == 0x00BD) {
+            // MmFreePhysicalMemory(type, base_address). Only exact allocation
+            // bases in the physical heap are releasable; invalid/double frees
+            // are ignored rather than corrupting allocator metadata.
+            const auto base_address = context.r4.u32;
+            if ((base_address & 0x1Fu) != 0 ||
+                !guest_heap_->deallocate(base_address)) {
+                std::fprintf(stderr,
+                    "[TooHuman] MmFreePhysicalMemory rejected base=0x%08X type=0x%08X\\n",
+                    static_cast<unsigned>(base_address),
+                    static_cast<unsigned>(context.r3.u32));
+            }
+            return;
+        }
         if (import.library == "xboxkrnl.exe" && import.ordinal == 0x000F) {
             (void)guest_heap_->deallocate(context.r3.u32);
             context.r3.u32 = 0;
