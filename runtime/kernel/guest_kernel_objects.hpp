@@ -6,12 +6,15 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <thread>
 #include <unordered_map>
 namespace toohuman::runtime {
 using GuestKernelHandle = std::uint32_t;
 enum class GuestKernelObjectType { Event, Semaphore, Mutant, Timer, Thread, File };
 enum class GuestKernelObjectWaitResult { Signaled, Timeout, InvalidHandle };
+// Wake threads blocked in multi-object dispatcher waits after an object changes state.
+void notify_guest_kernel_object_waiters() noexcept;
 class GuestKernelObject {
 public:
     virtual ~GuestKernelObject() = default;
@@ -40,6 +43,7 @@ public:
         return guest_object_address_;
     }
 private:
+    friend class GuestKernelObjectTable;
     const bool manual_reset_;
     const std::uint32_t guest_object_address_{};
     bool signaled_{};
@@ -68,6 +72,7 @@ public:
         return guest_object_address_;
     }
 private:
+    friend class GuestKernelObjectTable;
     std::uint32_t count_{};
     const std::uint32_t maximum_count_{};
     const std::uint32_t guest_object_address_{};
@@ -86,6 +91,7 @@ public:
     [[nodiscard]] bool release() noexcept;
     [[nodiscard]] std::uint32_t recursion_count() noexcept;
 private:
+    friend class GuestKernelObjectTable;
     std::thread::id owner_{};
     std::uint32_t recursion_count_{};
     std::mutex mutex_;
@@ -102,6 +108,7 @@ public:
     [[nodiscard]] bool cancel() noexcept;
     [[nodiscard]] bool is_armed() noexcept;
 private:
+    friend class GuestKernelObjectTable;
     [[nodiscard]] static std::chrono::steady_clock::time_point add_saturated(
         std::chrono::steady_clock::time_point now,
         std::chrono::milliseconds delay) noexcept;
@@ -137,6 +144,17 @@ public:
     [[nodiscard]] GuestKernelObjectWaitResult wait(
         GuestKernelHandle handle,
         std::optional<std::chrono::milliseconds> timeout = std::nullopt) const;
+    // Wait on up to 64 handles. Acquisition of the supported dispatcher objects
+    // is performed while their state locks are held together, so WaitAll does not
+    // consume a partial set when another object is not ready.
+    [[nodiscard]] GuestKernelObjectWaitResult wait_multiple(
+        std::span<const GuestKernelHandle> handles, bool wait_all,
+        std::optional<std::chrono::milliseconds> timeout = std::nullopt,
+        std::size_t* signaled_index = nullptr) const;
+    [[nodiscard]] GuestKernelObjectWaitResult wait_multiple_objects(
+        std::span<const std::shared_ptr<GuestKernelObject>> objects, bool wait_all,
+        std::optional<std::chrono::milliseconds> timeout = std::nullopt,
+        std::size_t* signaled_index = nullptr) const;
     [[nodiscard]] std::size_t size() const;
 private:
     struct ObjectHandleState {

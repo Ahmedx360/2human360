@@ -88,7 +88,7 @@ int main() {
                                     &test_import_handler, &error));
     std::size_t startup_hle_count = 0;
     assert(toohuman::runtime::register_boot_imports(imports, &error, &startup_hle_count));
-    assert(startup_hle_count == 91u);
+    assert(startup_hle_count == 94u);
     const std::vector<toohuman::runtime::XexImport> metadata{
         {"xboxkrnl.exe", 0x0777u, 0, 1, 0x82001100u},
         {"xboxkrnl.exe", 0x011Bu, 0, 1, 0x82001104u},
@@ -158,7 +158,8 @@ int main() {
         {"xboxkrnl.exe", 0x00E2u, 0, 1, 0x820011F8u},
         {"xboxkrnl.exe", 0x01B6u, 0, 1, 0x820011BCu},
         {"xboxkrnl.exe", 0x01C3u, 0, 1, 0x820011C0u},
-        {"xboxkrnl.exe", 0x00BEu, 0, 1, 0x82001210u},
+        {"xboxkrnl.exe", 0x00FCu, 0, 1, 0x82001210u},
+        {"xboxkrnl.exe", 0x00BEu, 0, 1, 0x82001300u},
         {"xboxkrnl.exe", 0x011Du, 0, 1, 0x82001214u},
         {"xboxkrnl.exe", 0x004Du, 0, 1, 0x82001218u},
         {"xboxkrnl.exe", 0x005Fu, 0, 1, 0x8200121Cu},
@@ -171,7 +172,7 @@ int main() {
     };
     std::size_t registered = 0;
     assert(imports.install(memory, metadata, &registered, &error));
-    assert(registered == 78u);
+    assert(registered == 79u);
     assert(memory.get_function<PPCFunc*>(0x82001100u) != &test_default_handler);
 
     // The real kernel imports configure the per-title primary Xenos ring.
@@ -351,10 +352,10 @@ int main() {
     assert(read_guest_be32(0xA0060004u) == 0x11223344u);
     assert(read_guest_be32(0xA0020000u) == 43u);
 
-    // Seed this assertion's input register directly; this fixture must
-    // not depend on earlier indirect-buffer commands.
+    // Seed this assertion's input register directly: reinitializing the
+    // primary ring does not clear the Xenos MMIO register file.
     assert(GuestMmioBus::global().write_unobserved(
-        kXenosMmioBase + 0x32u * 4u, 4, 0u));
+        kXenosMmioBase + 0x32u * 4u, 4, 0xFEEDBEEFu));
     // A non-matching condition consumes the packet without writing its target.
     put_guest_be32(0xA00100ACu,
         0xC0000000u | (5u << 16) | (0x45u << 8));
@@ -366,16 +367,17 @@ int main() {
     put_guest_be32(0xA00100C4u, 0x12345678u);
     ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 50u);
     assert(imports.xenos_command_processor().read_index() == 50u);
-    assert(GuestMmioBus::global().read(kXenosMmioBase + 0x32u * 4u, 4) == 0u);
+    assert(GuestMmioBus::global().read(kXenosMmioBase + 0x32u * 4u, 4) ==
+           0xFEEDBEEFu); // Non-matching COND_WRITE preserves the prior register value.
 
     // WAIT_REG_MEM defers without consuming the packet or publishing RPTR.
     // A guest write to the polled register wakes the pump and retries the wait.
     put_guest_be32(0xA00100D4u,
         0xC0000000u | (4u << 16) | (0x3Cu << 8));
     put_guest_be32(0xA00100D8u, 3u); // Equal, register source.
-    put_guest_be32(0xA00100DCu, 0x12345678u);
-    put_guest_be32(0xA00100E0u, 0xFFFFFFFFu);
-    put_guest_be32(0xA00100E4u, 0u);
+    put_guest_be32(0xA00100DCu, 3u); // Poll Xenos register index 3.
+    put_guest_be32(0xA00100E0u, 0x12345678u); // Expected register value.
+    put_guest_be32(0xA00100E4u, 0xFFFFFFFFu); // Compare all bits.
     put_guest_be32(0xA00100E8u, 0u);
     ppc_test_store_u32(memory.base(), kXenosMmioBase + 0x01C5u * 4u, 59u);
     assert(imports.xenos_command_processor().read_index() == 53u);
@@ -441,9 +443,9 @@ int main() {
     put_guest_be32(0xA0030008u,
         0xC0000000u | (4u << 16) | (0x3Cu << 8));
     put_guest_be32(0xA003000Cu, 3u); // Equal, register source.
-    put_guest_be32(0xA0030010u, 0xCAFEBABEu);
-    put_guest_be32(0xA0030014u, 0xFFFFFFFFu);
-    put_guest_be32(0xA0030018u, 0u);
+    put_guest_be32(0xA0030010u, 3u); // Poll Xenos register index 3.
+    put_guest_be32(0xA0030014u, 0xCAFEBABEu); // Expected register value.
+    put_guest_be32(0xA0030018u, 0xFFFFFFFFu); // Compare all bits.
     put_guest_be32(0xA003001Cu, 0u);
     put_guest_be32(0xA0030020u, 0x35u); // Type-0 write after the wait.
     put_guest_be32(0xA0030024u, 0xBBBBBBBBu);
@@ -577,8 +579,12 @@ int main() {
     // Guest-memory WAIT_REG_MEM wakes from a translated PPC RAM store that
     // overlaps the watched physical dword; no extra CP_RB_WPTR is required.
     assert(imports.initialize_xenos_ring(0x00010000u, 6u, &error));
+    // A ring reinitialization preserves the Xenos MMIO register file. Seed
+    // the deferred packet's following target register to a known value.
     assert(GuestMmioBus::global().write_unobserved(
         kXenosMmioBase + 0x34u * 4u, 4, 0u));
+    // The same physical word was written by the earlier MEM_WRITE coverage;
+    // clear it so this wait starts with an unmet comparison.
     put_guest_be32(0xA0060000u, 0u);
     put_guest_be32(0xA0010000u,
         0xC0000000u | (4u << 16) | (0x3Cu << 8)); // WAIT_REG_MEM, five operands.
@@ -688,21 +694,20 @@ int main() {
     // uncached physical alias, and does not invent mappings for arbitrary VAs.
     PPCContext physical_alias_query{};
     physical_alias_query.r3.u32 = 0xA0060000u;
-    call_test_import(0x82001210u, physical_alias_query);
+    call_test_import(0x82001300u, physical_alias_query);
     assert(physical_alias_query.r3.u32 == 0x00060000u);
 
     PPCContext ordinary_virtual_query{};
     ordinary_virtual_query.r3.u32 = 0x82012000u;
-    call_test_import(0x82001210u, ordinary_virtual_query);
+    call_test_import(0x82001300u, ordinary_virtual_query);
     assert(ordinary_virtual_query.r3.u32 == 0u);
 
     PPCContext uncommitted_alias_query{};
     uncommitted_alias_query.r3.u32 = 0xA0080000u;
-    call_test_import(0x82001210u, uncommitted_alias_query);
+    call_test_import(0x82001300u, uncommitted_alias_query);
     assert(uncommitted_alias_query.r3.u32 == 0u);
-    // RtlCompareStringN compares bounded ANSI spans and optionally folds
-    // ASCII case. The title uses 0xFFFF lengths for NUL-terminated strings.
-    const auto store_guest_ascii = [&](std::uint32_t address, const char* value) {
+
+const auto store_guest_ascii = [&](std::uint32_t address, const char* value) {
         std::size_t length = 0;
         while (value[length] != '\0') {
             memory.base()[address + static_cast<std::uint32_t>(length)] =
@@ -742,7 +747,7 @@ int main() {
     call_test_import(0x82001214u, compare_strings);
     assert(compare_strings.r3.u32 == 0u);
 
-    // Xbox critical-region depth and IRQL are tracked per guest host thread.
+// Xbox critical-region depth and IRQL are tracked per guest host thread.
     PPCContext enter_critical{};
     call_test_import(0x8200121Cu, enter_critical); // KeEnterCriticalRegion.
     call_test_import(0x8200121Cu, enter_critical); // Nested enter.
@@ -1177,6 +1182,11 @@ int main() {
     boot_context = {};
     call_test_import(0x82001194u, boot_context); // NtResumeThread.
     assert(boot_context.r3.u32 == 0xC0000002u);
+    boot_context = {};
+    boot_context.r3.u32 = 0x1000u;
+    boot_context.r4.u32 = 0x82012000u;
+    call_test_import(0x82001210u, boot_context); // NtSuspendThread.
+    assert(boot_context.r3.u32 == 0xC0000008u);
     boot_context = {};
     call_test_import(0x8200118Cu, boot_context); // ExTerminateThread outside a worker.
     assert(boot_context.r3.u32 == 0xC0000001u);
@@ -1924,6 +1934,9 @@ int main() {
         {"xboxkrnl.exe", 0x0193u, 0, 0, 0x82000604u, 0}
     };
     toohuman::runtime::PpcImportRegistry variable_registry;
+    assert(variable_registry.register_handler(
+        "xboxkrnl.exe", 0x00C7u,
+        &toohuman::runtime::boot_hle::MmSetAddressProtect, &error));
     std::size_t bound_variables = 0;
     assert(variable_registry.prepare_variable_imports(
         variable_memory, variable_image, xex_header, variable_imports,
@@ -2187,8 +2200,6 @@ int main() {
     assert(read_guest_be(*stack_io + 12) == vm_page_size);
     assert(read_guest_be(*stack_io + 16) == 0x04u); // Previous PAGE_READWRITE.
 
-    // MmSetAddressProtect changes the second committed page directly and must
-    // keep NtQueryVirtualMemory's per-range protection metadata synchronized.
     PPCContext set_virtual_protection{};
     set_virtual_protection.r3.u32 = virtual_address + vm_page_size + 0x100u;
     set_virtual_protection.r4.u32 = vm_page_size;
