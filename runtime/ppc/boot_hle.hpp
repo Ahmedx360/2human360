@@ -91,6 +91,7 @@ PPCFunc ExCreateThread;
 PPCFunc ExTerminateThread;
 PPCFunc KeResumeThread;
 PPCFunc NtResumeThread;
+PPCFunc NtSuspendThread;
 PPCFunc NtCreateEvent;
 PPCFunc KeInitializeEvent;
 PPCFunc KeSetEvent;

@@ -18,6 +18,7 @@ public:
     GuestThreadRuntime& operator=(const GuestThreadRuntime&) = delete;
     [[nodiscard]] std::uint32_t create_thread(PPCContext& context, std::uint8_t* base);
     [[nodiscard]] std::uint32_t resume_thread(PPCContext& context, std::uint8_t* base);
+    [[nodiscard]] std::uint32_t suspend_thread(PPCContext& context, std::uint8_t* base);
     [[nodiscard]] std::uint32_t resume_kernel_thread(PPCContext& context);
 private:
     [[nodiscard]] bool writable_guest_range(std::uint32_t address,
