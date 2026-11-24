@@ -313,12 +313,17 @@ workers and waits for cleanup callbacks before the runtime heaps can be destroye
 PCR, TLS and stack context, then invokes the selected entry through `invoke_recompiled_function`. The API startup
 routine receives the user start address and context in r3/r4; without a startup routine, the start function receives
 its context in r3. Creation flag bit 0 requests initial suspension; bit 0x80 selects the native KTHREAD address as the
-guest handle. `NtResumeThread` and `KeResumeThread` resume the same typed thread object. `ExTerminateThread` unwinds
-the current worker using a guest-thread exit signal. Registry shutdown requests cancellation, observed at the next
-HLE/import dispatch boundary; pure PPC loops that never cross an HLE boundary are not preemptible yet.
+guest handle. `NtResumeThread` and `KeResumeThread` resume the same typed thread object. `NtSuspendThread` increments
+that thread's suspend count and optionally returns the previous count through its output pointer. A suspended worker
+blocks at the next HLE/import-dispatch checkpoint and remains paused until the count reaches zero. This is cooperative
+suspension: it cannot interrupt a long translated PPC loop that does not call into the runtime. `ExTerminateThread`
+unwinds the current worker using a guest-thread exit signal. Registry shutdown requests cancellation, observed at the
+next HLE/import dispatch boundary; pure PPC loops that never cross an HLE boundary are not preemptible yet.
 
-This is not a complete Xbox scheduler. APCs, alertable waits, arbitrary-thread suspend/terminate, processor affinity,
-priority semantics, and fully synchronized concurrent access to shared guest memory remain incomplete. `TooHumanGuestThreadRuntimeTests` exercises the PPC execution bridge and its guest register/context setup.
+This is not a complete Xbox scheduler. APCs, alertable waits, arbitrary-thread terminate, processor affinity,
+priority semantics, hard preemption, and fully synchronized concurrent access to shared guest memory remain
+incomplete. `TooHumanGuestThreadRuntimeTests` exercises the PPC execution bridge and its guest register/context setup;
+`TooHumanGuestThreadManagerTests` covers suspend-count behavior and cooperative pause/resume at safe points.
 
 `XamShowMessageBoxUIEx` auto-selects the focused choice in this headless runtime. XConfig support is limited to the
 explicit categories/settings in the handler. `DbgPrint` logs the format string without expanding guest varargs;
