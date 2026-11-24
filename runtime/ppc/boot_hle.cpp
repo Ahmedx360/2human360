@@ -1881,6 +1881,16 @@ PPC_FUNC(MmSetAddressProtect) {
     ctx.r3.u32 = 0; // physical-heap pages stay RW on the host
 }
 
+// xam #0x2D9. XamShowDirtyDiscErrorUI: the title could not read its disc data.
+PPC_FUNC(XamShowDirtyDiscErrorUI) {
+    std::fprintf(stderr,
+                 "[TooHuman] The game reported a disc read error: its data files were not found.\n"
+                 "           Set TH_GAME_ROOT to the extracted disc contents "
+                 "(folder holding filetable.txt and contents.zzz).\n");
+    std::fflush(stderr);
+    std::exit(2);
+}
+
 PPC_FUNC(NtClose) {
     ctx.r3.u32 = process_kernel_objects().close(ctx.r3.u32)
         ? kStatusSuccess : kStatusInvalidHandle;

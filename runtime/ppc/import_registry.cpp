@@ -1524,16 +1524,14 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
             const auto allocation_type = context.r5.u32;
             const auto protection = context.r6.u32;
             const auto debug_memory = context.r7.u32;
-            const bool reserve_requested = (allocation_type & kMemReserve) != 0;
+            // As in NT, MEM_COMMIT with no base address implicitly reserves a new region.
+            const bool reserve_requested = (allocation_type & kMemReserve) != 0 ||
+                                           ((allocation_type & kMemCommit) != 0 && requested_base == 0);
             const bool commit_requested = (allocation_type & kMemCommit) != 0;
             GuestMemoryProtection host_protection{};
             if (debug_memory != 0 || requested_size == 0 ||
                 (allocation_type & kMemReset) != 0 ||
                 (!reserve_requested && !commit_requested)) {
-                context.r3.u32 = kStatusInvalidParameter;
-                return;
-            }
-            if (commit_requested && !reserve_requested && requested_base == 0) {
                 context.r3.u32 = kStatusInvalidParameter;
                 return;
             }

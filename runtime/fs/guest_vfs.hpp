@@ -10,6 +10,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace toohuman::runtime {
@@ -119,8 +120,16 @@ public:
     }
 
 private:
+    // filetable.txt maps the logical second column to the stored first-column
+    // name on the game volume. The cache is loaded once per VFS instance.
+    [[nodiscard]] std::optional<std::string> filetable_storage_name(
+        const std::string& logical_name) const;
+
     std::filesystem::path game_root_;
     std::filesystem::path save_root_;
+    mutable std::mutex filetable_mutex_;
+    mutable bool filetable_loaded_{};
+    mutable std::unordered_map<std::string, std::string> filetable_storage_names_;
 };
 
 [[nodiscard]] GuestVfs& process_vfs() noexcept;
