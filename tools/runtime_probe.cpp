@@ -5,16 +5,48 @@
 #include "ppc/boot_hle.hpp"
 #include "ppc/guest_thread_execution.hpp"
 
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
+#include <cstdlib>
 #include <iostream>
 #include <limits>
 #include <optional>
 #include <string>
+#include <mutex>
+#include <stop_token>
+#include <thread>
 #include <vector>
 
 namespace {
+
+std::uint32_t boot_watchdog_seconds() {
+    const char* value = std::getenv("TH_BOOT_WATCHDOG_SECONDS");
+    if (!value || !*value) return 0;
+    char* end = nullptr;
+    const auto parsed = std::strtoul(value, &end, 10);
+    if (end == value || *end != '\0' || parsed > 3600ul) return 0;
+    return static_cast<std::uint32_t>(parsed);
+}
+
+void print_guest_context(const PPCContext& context) {
+    std::cerr << "Guest context at watchdog boundary:"
+              << " r1=0x" << std::hex << context.r1.u32
+              << " r3=0x" << context.r3.u32
+              << " r4=0x" << context.r4.u32
+              << " r5=0x" << context.r5.u32
+              << " r6=0x" << context.r6.u32
+              << " r7=0x" << context.r7.u32
+              << " r8=0x" << context.r8.u32
+              << " r9=0x" << context.r9.u32
+              << " r10=0x" << context.r10.u32
+              << " r13=0x" << context.r13.u32
+              << " lr=0x" << context.lr
+              << std::dec << '\n';
+}
 
 bool read_file(const char* path, std::vector<std::uint8_t>& bytes) {
     std::ifstream stream(path, std::ios::binary | std::ios::ate);
@@ -146,18 +178,52 @@ int main(int argc, char** argv) {
     std::cout << "Invoking game entry point 0x" << std::hex
               << loaded_image->entry_point << std::dec
               << " (this may hit an unimplemented HLE).\n";
+    const auto watchdog_seconds = boot_watchdog_seconds();
+    std::stop_source boot_stop;
+    std::mutex watchdog_mutex;
+    std::condition_variable_any watchdog_condition;
+    std::atomic<bool> entry_finished{false};
+    std::jthread watchdog;
+    if (watchdog_seconds != 0) {
+        watchdog = std::jthread([&](std::stop_token stop) {
+            std::unique_lock lock(watchdog_mutex);
+            const bool finished = watchdog_condition.wait_for(
+                lock, stop, std::chrono::seconds(watchdog_seconds),
+                [&] { return entry_finished.load(std::memory_order_acquire); });
+            if (!finished && !stop.stop_requested() &&
+                !entry_finished.load(std::memory_order_acquire)) {
+                boot_stop.request_stop();
+            }
+        });
+        std::cout << "Guest boot watchdog: " << watchdog_seconds
+                  << " seconds (cooperative import-boundary stop).\\n";
+    }
+
+    const auto finish_watchdog = [&] {
+        entry_finished.store(true, std::memory_order_release);
+        watchdog.request_stop();
+        watchdog_condition.notify_all();
+    };
+
     try {
         // The process entry point runs on the already prepared guest main
-        // thread. Match the execution scope used by worker threads so
-        // ExTerminateThread unwinds this thread rather than returning an
-        // ordinary STATUS_UNSUCCESSFUL result.
-        toohuman::runtime::GuestThreadExecutionScope main_thread_scope(std::stop_token{});
+        // thread. The watchdog token interrupts execution at the next HLE
+        // import boundary so the guest CPU context can be preserved.
+        toohuman::runtime::GuestThreadExecutionScope main_thread_scope(
+            boot_stop.get_token());
         entry(report.main_thread.context, memory.base());
     } catch (const toohuman::runtime::GuestThreadExitSignal& exit) {
+        finish_watchdog();
+        if (boot_stop.stop_requested()) {
+            std::cerr << "Guest boot watchdog expired after " << watchdog_seconds
+                      << " seconds; execution stopped at a cooperative guest import boundary.\\n";
+            print_guest_context(report.main_thread.context);
+            return 124;
+        }
         std::cout << "Guest main thread terminated with exit code 0x"
-                  << std::hex << exit.exit_code() << std::dec << ".\n";
+                  << std::hex << exit.exit_code() << std::dec << ".\\n";
         return 0;
     }
-    std::cout << "Guest entry point returned to the host probe.\n";
-    return 0;
+    finish_watchdog();
+    std::cout << "Guest entry point returned to the host probe.\\n";
 }
