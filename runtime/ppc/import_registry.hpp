@@ -142,11 +142,6 @@ private:
     };
 
     std::unordered_map<std::uint32_t, ImportBinding> imports_by_thunk_;
-    std::atomic<std::uint64_t> dispatch_count_{0};
-    std::atomic<std::uint32_t> last_import_thunk_{0}, last_import_ordinal_{0};
-    std::atomic<std::uint64_t> last_import_lr_{0};
-    std::atomic<std::uint32_t> last_import_r3_{0}, last_import_r4_{0}, last_import_r5_{0}, last_import_r6_{0};
-    std::atomic<std::uint32_t> last_import_r7_{0}, last_import_r8_{0}, last_import_r9_{0}, last_import_r10_{0};
     std::unordered_map<std::string, PPCFunc*> handlers_;
     std::unique_ptr<GuestHeap> guest_heap_;
     std::unique_ptr<GuestHeap> virtual_heap_;

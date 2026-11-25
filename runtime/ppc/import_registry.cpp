@@ -23,6 +23,7 @@ namespace {
 
 std::atomic<PpcImportRegistry*> g_active_registry{nullptr};
 thread_local bool g_trace_current_import = false;
+thread_local LastImportDiagnostic g_last_import_diagnostic{};
 
 std::uint64_t import_trace_limit() {
     static const std::uint64_t limit = [] {
@@ -1345,27 +1346,18 @@ Pm4CallbackResult PpcImportRegistry::dispatch_xenos_type3(
 }
 
 LastImportDiagnostic PpcImportRegistry::last_import_diagnostic() const noexcept {
-    LastImportDiagnostic result{};
-    result.count = dispatch_count_.load(std::memory_order_relaxed);
-    result.thunk = last_import_thunk_.load(std::memory_order_relaxed);
-    result.ordinal = last_import_ordinal_.load(std::memory_order_relaxed);
-    result.lr = last_import_lr_.load(std::memory_order_relaxed);
-    result.r3 = last_import_r3_.load(std::memory_order_relaxed);
-    result.r4 = last_import_r4_.load(std::memory_order_relaxed);
-    result.r5 = last_import_r5_.load(std::memory_order_relaxed);
-    result.r6 = last_import_r6_.load(std::memory_order_relaxed);
-    result.r7 = last_import_r7_.load(std::memory_order_relaxed);
-    result.r8 = last_import_r8_.load(std::memory_order_relaxed);
-    result.r9 = last_import_r9_.load(std::memory_order_relaxed);
-    result.r10 = last_import_r10_.load(std::memory_order_relaxed);
-    return result;
+    // The runtime probe reads this on the same host thread that executed the
+    // main guest context. Keep the snapshot thread-local so worker-thread HLE
+    // traffic cannot overwrite the main thread's last import at the watchdog.
+    return g_last_import_diagnostic;
 }
 
 void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
-    throw_if_guest_thread_stop_requested();
     const auto thunk_address = context.ctr.u32;
     const auto import_it = imports_by_thunk_.find(thunk_address);
     if (import_it == imports_by_thunk_.end()) {
+        // A pending watchdog stop takes precedence over the unknown-import
+        // diagnostic, but known imports below are recorded before cancellation.
         std::fprintf(stderr,
                      "[TooHuman] Unknown import thunk 0x%08X (LR=0x%016llX ctx=%p base=%p r3=%08X r4=%08X)\n",
                      static_cast<unsigned>(thunk_address),
@@ -1379,18 +1371,21 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
 
     const auto& binding = import_it->second;
     const auto& import = binding.import;
-    dispatch_count_.fetch_add(1, std::memory_order_relaxed);
-    last_import_thunk_.store(thunk_address, std::memory_order_relaxed);
-    last_import_ordinal_.store(import.ordinal, std::memory_order_relaxed);
-    last_import_lr_.store(context.lr, std::memory_order_relaxed);
-    last_import_r3_.store(context.r3.u32, std::memory_order_relaxed);
-    last_import_r4_.store(context.r4.u32, std::memory_order_relaxed);
-    last_import_r5_.store(context.r5.u32, std::memory_order_relaxed);
-    last_import_r6_.store(context.r6.u32, std::memory_order_relaxed);
-    last_import_r7_.store(context.r7.u32, std::memory_order_relaxed);
-    last_import_r8_.store(context.r8.u32, std::memory_order_relaxed);
-    last_import_r9_.store(context.r9.u32, std::memory_order_relaxed);
-    last_import_r10_.store(context.r10.u32, std::memory_order_relaxed);
+    auto& diagnostic = g_last_import_diagnostic;
+    ++diagnostic.count;
+    diagnostic.thunk = thunk_address;
+    diagnostic.ordinal = import.ordinal;
+    diagnostic.lr = context.lr;
+    diagnostic.r3 = context.r3.u32;
+    diagnostic.r4 = context.r4.u32;
+    diagnostic.r5 = context.r5.u32;
+    diagnostic.r6 = context.r6.u32;
+    diagnostic.r7 = context.r7.u32;
+    diagnostic.r8 = context.r8.u32;
+    diagnostic.r9 = context.r9.u32;
+    diagnostic.r10 = context.r10.u32;
+    // Capture the exact import boundary before honoring cooperative stop.
+    throw_if_guest_thread_stop_requested();
     static const bool trace_imports = std::getenv("TH_TRACE_IMPORTS") != nullptr;
     static std::atomic<std::uint64_t> trace_count{0};
     if (trace_imports) {
