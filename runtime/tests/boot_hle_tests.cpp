@@ -1243,6 +1243,36 @@ int main() {
     boot_hle::RtlUnicodeToMultiByteN(ctx, base());
     assert(be32(0x6F04) == 1);
 
+    // XeCrypt SHA-1 streaming HLE: split input across calls and verify the digest.
+    // SHA1("abc") = a9993e364706816aba3e25717850c26c9cd0d89d.
+    {
+        constexpr std::uint32_t state = 0x8000u;
+        constexpr std::uint32_t input = 0x8100u;
+        constexpr std::uint32_t digest = 0x8200u;
+        std::memset(base() + state, 0, 0x58u);
+        poke(input, "abc");
+        PPCContext sha{};
+        sha.r3.u32 = state;
+        boot_hle::XeCryptShaInit(sha, base());
+        assert(sha.r3.u32 == state);
+        sha = {};
+        sha.r3.u32 = state; sha.r4.u32 = input; sha.r5.u32 = 1u;
+        boot_hle::XeCryptShaUpdate(sha, base());
+        assert(sha.r3.u32 == state && be32(state) == 1u);
+        sha = {};
+        sha.r3.u32 = state; sha.r4.u32 = input + 1u; sha.r5.u32 = 2u;
+        boot_hle::XeCryptShaUpdate(sha, base());
+        assert(sha.r3.u32 == state && be32(state) == 3u);
+        sha = {};
+        sha.r3.u32 = state; sha.r4.u32 = digest; sha.r5.u32 = 20u;
+        boot_hle::XeCryptShaFinal(sha, base());
+        const std::uint8_t expected[20] = {
+            0xA9,0x99,0x3E,0x36,0x47,0x06,0x81,0x6A,0xBA,0x3E,
+            0x25,0x71,0x78,0x50,0xC2,0x6C,0x9C,0xD0,0xD8,0x9D
+        };
+        assert(std::memcmp(base() + digest, expected, sizeof(expected)) == 0);
+    }
+
     test_executable_module_lookup();
     test_rtl_image_xex_header_field();
     test_query_volume_information_file();
