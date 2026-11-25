@@ -114,6 +114,7 @@ jobs:
         env:
           TH_TRACE_IMPORTS: "1"
           TH_TRACE_IMPORT_LIMIT: "10000"
+          TH_BOOT_WATCHDOG_SECONDS: "110"
           TH_GAME_ROOT: ${{ github.workspace }}
           TH_SAVE_ROOT: ${{ runner.temp }}/too-human-save
         shell: bash
@@ -121,7 +122,7 @@ jobs:
           mkdir -p build/diagnostics "$TH_SAVE_ROOT"
           ulimit -c 0
           set +e
-          timeout --signal=TERM --kill-after=5s 120s ./build/clang/runtime/TooHumanRuntimeProbe Default.xex --run > build/diagnostics/title-boot.log 2>&1
+          timeout --signal=TERM --kill-after=5s 130s ./build/clang/runtime/TooHumanRuntimeProbe Default.xex --run > build/diagnostics/title-boot.log 2>&1
           result=$?
           echo "Runtime probe exit code: $result" | tee build/diagnostics/title-boot-exit.txt
           cat build/diagnostics/title-boot.log
