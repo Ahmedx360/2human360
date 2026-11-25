@@ -1344,6 +1344,23 @@ Pm4CallbackResult PpcImportRegistry::dispatch_xenos_type3(
     return Pm4CallbackResult::Rejected;
 }
 
+LastImportDiagnostic PpcImportRegistry::last_import_diagnostic() const noexcept {
+    LastImportDiagnostic result{};
+    result.count = dispatch_count_.load(std::memory_order_relaxed);
+    result.thunk = last_import_thunk_.load(std::memory_order_relaxed);
+    result.ordinal = last_import_ordinal_.load(std::memory_order_relaxed);
+    result.lr = last_import_lr_.load(std::memory_order_relaxed);
+    result.r3 = last_import_r3_.load(std::memory_order_relaxed);
+    result.r4 = last_import_r4_.load(std::memory_order_relaxed);
+    result.r5 = last_import_r5_.load(std::memory_order_relaxed);
+    result.r6 = last_import_r6_.load(std::memory_order_relaxed);
+    result.r7 = last_import_r7_.load(std::memory_order_relaxed);
+    result.r8 = last_import_r8_.load(std::memory_order_relaxed);
+    result.r9 = last_import_r9_.load(std::memory_order_relaxed);
+    result.r10 = last_import_r10_.load(std::memory_order_relaxed);
+    return result;
+}
+
 void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
     throw_if_guest_thread_stop_requested();
     const auto thunk_address = context.ctr.u32;
@@ -1362,6 +1379,18 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
 
     const auto& binding = import_it->second;
     const auto& import = binding.import;
+    dispatch_count_.fetch_add(1, std::memory_order_relaxed);
+    last_import_thunk_.store(thunk_address, std::memory_order_relaxed);
+    last_import_ordinal_.store(import.ordinal, std::memory_order_relaxed);
+    last_import_lr_.store(context.lr, std::memory_order_relaxed);
+    last_import_r3_.store(context.r3.u32, std::memory_order_relaxed);
+    last_import_r4_.store(context.r4.u32, std::memory_order_relaxed);
+    last_import_r5_.store(context.r5.u32, std::memory_order_relaxed);
+    last_import_r6_.store(context.r6.u32, std::memory_order_relaxed);
+    last_import_r7_.store(context.r7.u32, std::memory_order_relaxed);
+    last_import_r8_.store(context.r8.u32, std::memory_order_relaxed);
+    last_import_r9_.store(context.r9.u32, std::memory_order_relaxed);
+    last_import_r10_.store(context.r10.u32, std::memory_order_relaxed);
     static const bool trace_imports = std::getenv("TH_TRACE_IMPORTS") != nullptr;
     static std::atomic<std::uint64_t> trace_count{0};
     if (trace_imports) {
