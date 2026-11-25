@@ -75,7 +75,7 @@ void print_critical_section_state(
     if (!toohuman::runtime::GuestAddressSpace::is_accessible_range(
             base, last.r3, 0x1Cu, toohuman::runtime::GuestMemoryAccess::Read)) {
         std::cerr << "Critical-section snapshot unavailable at guest address 0x"
-                  << std::hex << last.r3 << std::dec << '\\n';
+                  << std::hex << last.r3 << std::dec << '\n';
         return;
     }
     const auto* cs = base + last.r3;
@@ -89,7 +89,7 @@ void print_critical_section_state(
               << " recursion=0x" << read_guest_be32(cs + 0x14)
               << " owner=0x" << read_guest_be32(cs + 0x18)
               << " PCR.current_thread=0x" << pcr_thread
-              << " (28-byte object)" << std::dec << '\\n';
+              << " (28-byte object)" << std::dec << '\n';
 }
 
 bool read_file(const char* path, std::vector<std::uint8_t>& bytes) {
