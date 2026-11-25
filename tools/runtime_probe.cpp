@@ -60,6 +60,38 @@ void print_guest_context(const PPCContext& context) {
               << std::dec << '\n';
 }
 
+std::uint32_t read_guest_be32(const std::uint8_t* p) {
+    return (static_cast<std::uint32_t>(p[0]) << 24) |
+           (static_cast<std::uint32_t>(p[1]) << 16) |
+           (static_cast<std::uint32_t>(p[2]) << 8) |
+           static_cast<std::uint32_t>(p[3]);
+}
+
+void print_critical_section_state(
+    const toohuman::runtime::PpcImportRegistry& imports,
+    const PPCContext& context, std::uint8_t* base) {
+    const auto last = imports.last_import_diagnostic();
+    if (last.ordinal != 0x125u && last.ordinal != 0x130u) return;
+    if (!toohuman::runtime::GuestAddressSpace::is_accessible_range(
+            base, last.r3, 0x1Cu, toohuman::runtime::GuestMemoryAccess::Read)) {
+        std::cerr << "Critical-section snapshot unavailable at guest address 0x"
+                  << std::hex << last.r3 << std::dec << '\\n';
+        return;
+    }
+    const auto* cs = base + last.r3;
+    const auto pcr_thread = context.r13.u32 != 0 &&
+        toohuman::runtime::GuestAddressSpace::is_accessible_range(
+            base, context.r13.u32 + 0x100u, 4u,
+            toohuman::runtime::GuestMemoryAccess::Read)
+        ? read_guest_be32(base + context.r13.u32 + 0x100u) : 0u;
+    std::cerr << "Critical-section snapshot: address=0x" << std::hex << last.r3
+              << " lock_count=0x" << read_guest_be32(cs + 0x10)
+              << " recursion=0x" << read_guest_be32(cs + 0x14)
+              << " owner=0x" << read_guest_be32(cs + 0x18)
+              << " PCR.current_thread=0x" << pcr_thread
+              << " (28-byte object)" << std::dec << '\\n';
+}
+
 bool read_file(const char* path, std::vector<std::uint8_t>& bytes) {
     std::ifstream stream(path, std::ios::binary | std::ios::ate);
     if (!stream) {
@@ -231,6 +263,7 @@ int main(int argc, char** argv) {
                       << " seconds; execution stopped at a cooperative guest import boundary.\n";
             print_guest_context(report.main_thread.context);
             print_last_import(imports);
+            print_critical_section_state(imports, report.main_thread.context, memory.base());
             return 124;
         }
         std::cout << "Guest main thread terminated with exit code 0x"
