@@ -699,7 +699,7 @@ int main() {
     };
 
 
-    // InterlockedPopEntrySList removes the head, updates depth, and preserves sequence.
+    // InterlockedPopEntrySList removes the head and advances depth and sequence.
     constexpr std::uint32_t slist_header = 0x82014200u;
     constexpr std::uint32_t slist_entry_a = 0x82014220u;
     constexpr std::uint32_t slist_entry_b = 0x82014230u;
@@ -724,10 +724,14 @@ int main() {
     assert(slist_pop_b.r3.u32 == slist_entry_b);
     assert(read_guest_be32(slist_header) == 0u);
     assert(memory.base()[slist_header + 5u] == 0u);
+    assert(memory.base()[slist_header + 6u] == 0x12u &&
+           memory.base()[slist_header + 7u] == 0x36u);
     PPCContext slist_pop_empty{};
     slist_pop_empty.r3.u32 = slist_header;
     call_test_import(0x82001320u, slist_pop_empty);
     assert(slist_pop_empty.r3.u32 == 0u);
+    assert(memory.base()[slist_header + 6u] == 0x12u &&
+           memory.base()[slist_header + 7u] == 0x36u);
 
     // XeCrypt SHA-1 state/update/final and one-shot entry points match SHA-1("abc").
     constexpr std::uint32_t sha_state = 0x82014000u;
