@@ -238,7 +238,7 @@ std::uint32_t open_common(std::uint8_t* base, std::uint32_t out_handle,
 
     const auto file_trace = next_file_trace_sequence();
     if (file_trace)
-        std::fprintf(stderr, "[file:%llu] open '%s' access=%08X disp=%u\\n",
+        std::fprintf(stderr, "[file:%llu] open '%s' access=%08X disp=%u\n",
                      static_cast<unsigned long long>(*file_trace),
                      name.c_str(), access, disposition);
 
@@ -248,7 +248,7 @@ std::uint32_t open_common(std::uint8_t* base, std::uint32_t out_handle,
     if (result.status != GuestVfsStatus::Success) {
         const auto status = static_cast<std::uint32_t>(result.status);
         if (file_trace)
-            std::fprintf(stderr, "[file:%llu] -> VFS status=0x%08X\\n",
+            std::fprintf(stderr, "[file:%llu] -> VFS status=0x%08X\n",
                          static_cast<unsigned long long>(*file_trace), status);
         set_iosb(base, iosb, status, 0);
         return status;
@@ -267,7 +267,7 @@ std::uint32_t open_common(std::uint8_t* base, std::uint32_t out_handle,
     set_iosb(base, iosb, kSuccess, result.information);
     if (file_trace) {
         const auto resolved = result.file->path().string();
-        std::fprintf(stderr, "[file:%llu] -> success info=%u resolved='%s'\\n",
+        std::fprintf(stderr, "[file:%llu] -> success info=%u resolved='%s'\n",
                      static_cast<unsigned long long>(*file_trace),
                      result.information, resolved.c_str());
     }
