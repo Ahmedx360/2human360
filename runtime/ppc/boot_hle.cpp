@@ -2139,6 +2139,44 @@ PPC_FUNC(NetDll_WSAStartup) {
 
 // xboxkrnl #0x18F-0x192. XeCrypt SHA-1 uses a 0x58-byte guest state:
 // count at +0, five big-endian digest words at +4, and the 64-byte block at +0x18.
+
+PPC_FUNC(InterlockedPopEntrySList) {
+    // X_SLIST_HEADER is an 8-byte big-endian structure:
+    // { next: u32, depth: u16, sequence: u16 }.
+    const auto header = ctx.r3.u32;
+    if ((header & 7u) != 0u ||
+        !guest_range_valid(base, header, 8u, GuestMemoryAccess::Read) ||
+        !guest_range_valid(base, header, 8u, GuestMemoryAccess::Write)) {
+        ctx.r3.u32 = 0u;
+        return;
+    }
+
+    // Serialize host-side callers while preserving the guest's exact 8-byte
+    // header representation. The sequence field is unchanged by PopEntry.
+    static std::mutex slist_mutex;
+    std::lock_guard lock(slist_mutex);
+    auto* h = at(base, header);
+    const auto first = get_be32(h);
+    if (first == 0u) {
+        ctx.r3.u32 = 0u;
+        return;
+    }
+    if (!guest_range_valid(base, first, 4u, GuestMemoryAccess::Read)) {
+        ctx.r3.u32 = 0u;
+        return;
+    }
+
+    const auto next = get_be32(at(base, first));
+    const auto depth = static_cast<std::uint16_t>(
+        (static_cast<std::uint16_t>(h[4]) << 8) | h[5]);
+    put_be32(h, next);
+    const auto new_depth = static_cast<std::uint16_t>(depth - 1u);
+    h[4] = static_cast<std::uint8_t>(new_depth >> 8);
+    h[5] = static_cast<std::uint8_t>(new_depth);
+    guest_memory_write_observed(h, 8u);
+    ctx.r3.u32 = first;
+}
+
 PPC_FUNC(XeCryptShaInit) {
     if (!guest_range_valid(base, ctx.r3.u32, 0x58u, GuestMemoryAccess::Write)) {
         ctx.r3.u32 = kStatusInvalidParameter;
