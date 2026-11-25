@@ -314,6 +314,99 @@ bool write_display_information(std::uint8_t* base, std::uint32_t output) {
     put_be16(at(base, output + 0x56u), 1280u);
     return true;
 }
+
+struct GuestSha1State {
+    std::uint32_t count{};
+    std::array<std::uint32_t, 5> hash{};
+    std::array<std::uint8_t, 64> buffer{};
+};
+
+std::uint32_t sha1_rotl(std::uint32_t value, unsigned amount) {
+    return (value << amount) | (value >> (32u - amount));
+}
+
+void sha1_transform(std::array<std::uint32_t, 5>& hash,
+                    const std::uint8_t* block) {
+    std::uint32_t words[80]{};
+    for (unsigned i = 0; i < 16; ++i) words[i] = get_be32(block + i * 4u);
+    for (unsigned i = 16; i < 80; ++i)
+        words[i] = sha1_rotl(words[i - 3] ^ words[i - 8] ^
+                             words[i - 14] ^ words[i - 16], 1);
+    auto a = hash[0], b = hash[1], c = hash[2], d = hash[3], e = hash[4];
+    for (unsigned i = 0; i < 80; ++i) {
+        std::uint32_t f{}, k{};
+        if (i < 20) { f = (b & c) | (~b & d); k = 0x5A827999u; }
+        else if (i < 40) { f = b ^ c ^ d; k = 0x6ED9EBA1u; }
+        else if (i < 60) { f = (b & c) | (b & d) | (c & d); k = 0x8F1BBCDCu; }
+        else { f = b ^ c ^ d; k = 0xCA62C1D6u; }
+        const auto temp = sha1_rotl(a, 5) + f + e + k + words[i];
+        e = d; d = c; c = sha1_rotl(b, 30); b = a; a = temp;
+    }
+    hash[0] += a; hash[1] += b; hash[2] += c; hash[3] += d; hash[4] += e;
+}
+
+void sha1_update(GuestSha1State& state, const std::uint8_t* input,
+                 std::uint32_t length) {
+    std::uint32_t consumed = 0;
+    const auto buffered = state.count & 63u;
+    state.count += length;
+    if (buffered != 0u) {
+        const auto take = std::min<std::uint32_t>(64u - buffered, length);
+        std::memcpy(state.buffer.data() + buffered, input, take);
+        consumed += take;
+        if (buffered + take == 64u) sha1_transform(state.hash, state.buffer.data());
+    }
+    while (length - consumed >= 64u) {
+        sha1_transform(state.hash, input + consumed);
+        consumed += 64u;
+    }
+    if (consumed < length) {
+        const auto remaining = length - consumed;
+        std::memcpy(state.buffer.data(), input + consumed, remaining);
+    }
+}
+
+void sha1_finish(GuestSha1State& state, std::uint8_t digest[20]) {
+    const auto tail = state.count & 63u;
+    std::array<std::uint8_t, 128> final_blocks{};
+    if (tail != 0u) std::memcpy(final_blocks.data(), state.buffer.data(), tail);
+    final_blocks[tail] = 0x80u;
+    const auto blocks = tail < 56u ? 64u : 128u;
+    const auto bit_count = static_cast<std::uint64_t>(state.count) * 8u;
+    for (unsigned i = 0; i < 8; ++i)
+        final_blocks[blocks - 1u - i] =
+            static_cast<std::uint8_t>(bit_count >> (i * 8u));
+    sha1_transform(state.hash, final_blocks.data());
+    if (blocks == 128u) sha1_transform(state.hash, final_blocks.data() + 64u);
+    for (unsigned i = 0; i < 5; ++i) put_be32(digest + i * 4u, state.hash[i]);
+}
+
+bool load_guest_sha1_state(std::uint8_t* base, std::uint32_t address,
+                           GuestSha1State& state) {
+    if (!guest_range_valid(base, address, 0x58u, GuestMemoryAccess::Read)) return false;
+    const auto* p = at(base, address);
+    state.count = get_be32(p);
+    for (unsigned i = 0; i < 5; ++i) state.hash[i] = get_be32(p + 4u + i * 4u);
+    std::memcpy(state.buffer.data(), p + 0x18u, 64u);
+    return true;
+}
+
+void store_guest_sha1_state(std::uint8_t* base, std::uint32_t address,
+                            const GuestSha1State& state) {
+    auto* p = at(base, address);
+    put_be32(p, state.count);
+    for (unsigned i = 0; i < 5; ++i) put_be32(p + 4u + i * 4u, state.hash[i]);
+    std::memcpy(p + 0x18u, state.buffer.data(), 64u);
+    guest_memory_write_observed(p + 0x18u, 64u);
+}
+
+GuestSha1State new_guest_sha1_state() {
+    GuestSha1State state{};
+    state.hash = {0x67452301u, 0xEFCDAB89u, 0x98BADCFEu,
+                  0x10325476u, 0xC3D2E1F0u};
+    return state;
+}
+
 } // namespace
 
 void set_executable_module_handle(std::uint32_t handle) noexcept {
@@ -2037,6 +2130,73 @@ PPC_FUNC(NetDll_WSAStartup) {
     (void)base;
     ctx.r3.u32 = 0;
 }
+
+// xboxkrnl #0x18F-0x192. XeCrypt SHA-1 uses a 0x58-byte guest state:
+// count at +0, five big-endian digest words at +4, and the 64-byte block at +0x18.
+PPC_FUNC(XeCryptShaInit) {
+    if (!guest_range_valid(base, ctx.r3.u32, 0x58u, GuestMemoryAccess::Write)) {
+        ctx.r3.u32 = kStatusInvalidParameter;
+        return;
+    }
+    auto state = new_guest_sha1_state();
+    store_guest_sha1_state(base, ctx.r3.u32, state);
+}
+PPC_FUNC(XeCryptShaUpdate) {
+    GuestSha1State state{};
+    if (!load_guest_sha1_state(base, ctx.r3.u32, state) ||
+        (ctx.r5.u32 != 0u && !guest_range_valid(base, ctx.r4.u32, ctx.r5.u32,
+                                                GuestMemoryAccess::Read))) {
+        ctx.r3.u32 = kStatusInvalidParameter;
+        return;
+    }
+    if (ctx.r5.u32 != 0u) sha1_update(state, at(base, ctx.r4.u32), ctx.r5.u32);
+    store_guest_sha1_state(base, ctx.r3.u32, state);
+}
+PPC_FUNC(XeCryptShaFinal) {
+    GuestSha1State state{};
+    if (!load_guest_sha1_state(base, ctx.r3.u32, state) ||
+        (ctx.r5.u32 != 0u && !guest_range_valid(base, ctx.r4.u32,
+            std::min<std::uint32_t>(ctx.r5.u32, 20u), GuestMemoryAccess::Write))) {
+        ctx.r3.u32 = kStatusInvalidParameter;
+        return;
+    }
+    std::uint8_t digest[20]{};
+    sha1_finish(state, digest);
+    if (ctx.r5.u32 != 0u) {
+        const auto count = std::min<std::uint32_t>(ctx.r5.u32, 20u);
+        std::memcpy(at(base, ctx.r4.u32), digest, count);
+        guest_memory_write_observed(at(base, ctx.r4.u32), count);
+    }
+    for (unsigned i = 0; i < 5; ++i) put_be32(at(base, ctx.r3.u32) + 4u + i * 4u,
+                                               state.hash[i]);
+}
+PPC_FUNC(XeCryptSha) {
+    const std::uint32_t input_addresses[3] = {ctx.r3.u32, ctx.r5.u32, ctx.r7.u32};
+    const std::uint32_t input_sizes[3] = {ctx.r4.u32, ctx.r6.u32, ctx.r8.u32};
+    if (ctx.r10.u32 != 0u && !guest_range_valid(base, ctx.r9.u32,
+        std::min<std::uint32_t>(ctx.r10.u32, 20u), GuestMemoryAccess::Write)) {
+        ctx.r3.u32 = kStatusInvalidParameter;
+        return;
+    }
+    auto state = new_guest_sha1_state();
+    for (unsigned i = 0; i < 3; ++i) {
+        if (input_sizes[i] == 0u) continue;
+        if (!guest_range_valid(base, input_addresses[i], input_sizes[i],
+                               GuestMemoryAccess::Read)) {
+            ctx.r3.u32 = kStatusInvalidParameter;
+            return;
+        }
+        sha1_update(state, at(base, input_addresses[i]), input_sizes[i]);
+    }
+    std::uint8_t digest[20]{};
+    sha1_finish(state, digest);
+    if (ctx.r10.u32 != 0u) {
+        const auto count = std::min<std::uint32_t>(ctx.r10.u32, 20u);
+        std::memcpy(at(base, ctx.r9.u32), digest, count);
+        guest_memory_write_observed(at(base, ctx.r9.u32), count);
+    }
+}
+
 
 } // namespace boot_hle
 
