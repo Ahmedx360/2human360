@@ -32,6 +32,18 @@ std::uint32_t boot_watchdog_seconds() {
     return static_cast<std::uint32_t>(parsed);
 }
 
+void print_last_import(const toohuman::runtime::PpcImportRegistry& imports) {
+    const auto last = imports.last_import_diagnostic();
+    std::cerr << "Last guest import at watchdog: count=" << std::dec << last.count
+              << " ordinal=0x" << std::hex << last.ordinal
+              << " thunk=0x" << last.thunk
+              << " lr=0x" << last.lr
+              << " args(r3-r10)=" << last.r3 << ',' << last.r4 << ','
+              << last.r5 << ',' << last.r6 << ',' << last.r7 << ','
+              << last.r8 << ',' << last.r9 << ',' << last.r10
+              << std::dec << '\\n';
+}
+
 void print_guest_context(const PPCContext& context) {
     std::cerr << "Guest context at watchdog boundary:"
               << " r1=0x" << std::hex << context.r1.u32
@@ -218,6 +230,7 @@ int main(int argc, char** argv) {
             std::cerr << "Guest boot watchdog expired after " << watchdog_seconds
                       << " seconds; execution stopped at a cooperative guest import boundary.\n";
             print_guest_context(report.main_thread.context);
+            print_last_import(imports);
             return 124;
         }
         std::cout << "Guest main thread terminated with exit code 0x"
