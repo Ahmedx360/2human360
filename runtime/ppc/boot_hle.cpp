@@ -60,6 +60,31 @@ inline std::uint16_t get_be16(const std::uint8_t* p) {
     return static_cast<std::uint16_t>((p[0] << 8) | p[1]);
 }
 
+ // The Xbox 360's default ANSI code page is Windows-1252. The two RTL N
+ // conversion imports do not take a code-page argument, so model that
+ // system code page rather than treating bytes 0x80..0x9F as ISO-8859-1.
+ constexpr std::array<std::uint16_t, 32> kWindows1252High = {
+     0x20AC, 0x0081, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
+     0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x008D, 0x017D, 0x008F,
+     0x0090, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
+     0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x009D, 0x017E, 0x0178
+ };
+
+ inline std::uint16_t windows1252_to_unicode(std::uint8_t value) {
+     return value >= 0x80u && value <= 0x9Fu
+         ? kWindows1252High[value - 0x80u] : value;
+ }
+
+ inline std::uint8_t unicode_to_windows1252(std::uint16_t value) {
+     if (value <= 0x7Fu || (value >= 0xA0u && value <= 0xFFu))
+         return static_cast<std::uint8_t>(value);
+     for (std::size_t i = 0; i < kWindows1252High.size(); ++i) {
+         if (kWindows1252High[i] == value)
+             return static_cast<std::uint8_t>(0x80u + i);
+     }
+     return static_cast<std::uint8_t>('?');
+ }
+
 // Bounded guest C-string length (stops at NUL or `limit`).
 std::uint32_t guest_strnlen(const std::uint8_t* s, std::uint32_t limit) {
     std::uint32_t n = 0;
@@ -1168,14 +1193,14 @@ PPC_FUNC(RtlMultiByteToUnicodeN) {
     const auto out_max = ctx.r4.u32;
     const auto* in = at(base, ctx.r6.u32);
     const auto n = std::min<std::uint32_t>(ctx.r7.u32, out_max / 2);
-    for (std::uint32_t i = 0; i < n; ++i) put_be16(out + i * 2, in[i]);
+    for (std::uint32_t i = 0; i < n; ++i) put_be16(out + i * 2, windows1252_to_unicode(in[i]));
     if (ctx.r5.u32 != 0) put_be32(at(base, ctx.r5.u32), n * 2);
     ctx.r3.u32 = kStatusSuccess;
 }
 
 // xboxkrnl #0x143. RtlUnicodeToMultiByteN(char* out /*r3*/, ULONG outMax /*r4*/, ULONG* outBytes /*r5, opt*/,
 //                                         const WCHAR* in /*r6*/, ULONG inBytes /*r7*/) -> NTSTATUS.
-// Characters above U+00FF become '?'.
+// Windows-1252 characters are mapped through the default Xbox ANSI code page; unsupported characters become '?'.
 PPC_FUNC(RtlUnicodeToMultiByteN) {
     auto* out = at(base, ctx.r3.u32);
     const auto out_max = ctx.r4.u32;
@@ -1183,7 +1208,7 @@ PPC_FUNC(RtlUnicodeToMultiByteN) {
     const auto n = std::min<std::uint32_t>(ctx.r7.u32 / 2, out_max);
     for (std::uint32_t i = 0; i < n; ++i) {
         const auto ch = get_be16(in + i * 2);
-        out[i] = ch <= 0xFF ? static_cast<std::uint8_t>(ch) : static_cast<std::uint8_t>('?');
+        out[i] = unicode_to_windows1252(ch);
     }
     if (ctx.r5.u32 != 0) put_be32(at(base, ctx.r5.u32), n);
     ctx.r3.u32 = kStatusSuccess;
