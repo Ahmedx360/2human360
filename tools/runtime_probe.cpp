@@ -196,7 +196,7 @@ int main(int argc, char** argv) {
             }
         });
         std::cout << "Guest boot watchdog: " << watchdog_seconds
-                  << " seconds (cooperative import-boundary stop).\\n";
+                  << " seconds (cooperative import-boundary stop).\n";
     }
 
     const auto finish_watchdog = [&] {
@@ -216,14 +216,15 @@ int main(int argc, char** argv) {
         finish_watchdog();
         if (boot_stop.stop_requested()) {
             std::cerr << "Guest boot watchdog expired after " << watchdog_seconds
-                      << " seconds; execution stopped at a cooperative guest import boundary.\\n";
+                      << " seconds; execution stopped at a cooperative guest import boundary.\n";
             print_guest_context(report.main_thread.context);
             return 124;
         }
         std::cout << "Guest main thread terminated with exit code 0x"
-                  << std::hex << exit.exit_code() << std::dec << ".\\n";
+                  << std::hex << exit.exit_code() << std::dec << ".\n";
         return 0;
     }
     finish_watchdog();
-    std::cout << "Guest entry point returned to the host probe.\\n";
+    std::cout << "Guest entry point returned to the host probe.\n";
+    return 0;
 }
