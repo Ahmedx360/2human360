@@ -114,6 +114,8 @@ jobs:
         env:
           TH_TRACE_IMPORTS: "1"
           TH_TRACE_IMPORT_LIMIT: "10000"
+          TH_TRACE_FILES: "1"
+          TH_TRACE_FILES_LIMIT: "200"
           TH_BOOT_WATCHDOG_SECONDS: "110"
           TH_GAME_ROOT: ${{ github.workspace }}
           TH_SAVE_ROOT: ${{ runner.temp }}/too-human-save
