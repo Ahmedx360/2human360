@@ -1358,6 +1358,7 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
     if (import_it == imports_by_thunk_.end()) {
         // A pending watchdog stop takes precedence over the unknown-import
         // diagnostic, but known imports below are recorded before cancellation.
+        throw_if_guest_thread_stop_requested();
         std::fprintf(stderr,
                      "[TooHuman] Unknown import thunk 0x%08X (LR=0x%016llX ctx=%p base=%p r3=%08X r4=%08X)\n",
                      static_cast<unsigned>(thunk_address),
