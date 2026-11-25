@@ -113,6 +113,7 @@ jobs:
         timeout-minutes: 3
         env:
           TH_TRACE_IMPORTS: "1"
+          TH_TRACE_IMPORT_LIMIT: "10000"
           TH_GAME_ROOT: ${{ github.workspace }}
           TH_SAVE_ROOT: ${{ runner.temp }}/too-human-save
         shell: bash
