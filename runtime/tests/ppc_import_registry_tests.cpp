@@ -88,7 +88,7 @@ int main() {
                                     &test_import_handler, &error));
     std::size_t startup_hle_count = 0;
     assert(toohuman::runtime::register_boot_imports(imports, &error, &startup_hle_count));
-    assert(startup_hle_count == 99u);
+    assert(startup_hle_count == 100u);
     const std::vector<toohuman::runtime::XexImport> metadata{
         {"xboxkrnl.exe", 0x0777u, 0, 1, 0x82001100u},
         {"xboxkrnl.exe", 0x011Bu, 0, 1, 0x82001104u},
@@ -174,11 +174,12 @@ int main() {
         {"xboxkrnl.exe", 0x018Fu, 0, 1, 0x82001310u},
         {"xboxkrnl.exe", 0x0190u, 0, 1, 0x82001314u},
         {"xboxkrnl.exe", 0x0191u, 0, 1, 0x82001318u},
-        {"xboxkrnl.exe", 0x0192u, 0, 1, 0x8200131Cu}
+        {"xboxkrnl.exe", 0x0192u, 0, 1, 0x8200131Cu},
+        {"xboxkrnl.exe", 0x002Cu, 0, 1, 0x82001320u}
     };
     std::size_t registered = 0;
     assert(imports.install(memory, metadata, &registered, &error));
-    assert(registered == 85u);
+    assert(registered == 86u);
     assert(memory.get_function<PPCFunc*>(0x82001100u) != &test_default_handler);
 
     // The real kernel imports configure the per-title primary Xenos ring.
@@ -696,6 +697,37 @@ int main() {
         assert(function != nullptr);
         function(ctx, memory.base());
     };
+
+
+    // InterlockedPopEntrySList removes the head, updates depth, and preserves sequence.
+    constexpr std::uint32_t slist_header = 0x82014200u;
+    constexpr std::uint32_t slist_entry_a = 0x82014220u;
+    constexpr std::uint32_t slist_entry_b = 0x82014230u;
+    write_guest_be32(slist_header, slist_entry_a);
+    memory.base()[slist_header + 4u] = 0u;
+    memory.base()[slist_header + 5u] = 2u;
+    memory.base()[slist_header + 6u] = 0x12u;
+    memory.base()[slist_header + 7u] = 0x34u;
+    write_guest_be32(slist_entry_a, slist_entry_b);
+    write_guest_be32(slist_entry_b, 0u);
+    PPCContext slist_pop_a{};
+    slist_pop_a.r3.u32 = slist_header;
+    call_test_import(0x82001320u, slist_pop_a);
+    assert(slist_pop_a.r3.u32 == slist_entry_a);
+    assert(read_guest_be32(slist_header) == slist_entry_b);
+    assert(memory.base()[slist_header + 5u] == 1u);
+    assert(memory.base()[slist_header + 6u] == 0x12u &&
+           memory.base()[slist_header + 7u] == 0x34u);
+    PPCContext slist_pop_b{};
+    slist_pop_b.r3.u32 = slist_header;
+    call_test_import(0x82001320u, slist_pop_b);
+    assert(slist_pop_b.r3.u32 == slist_entry_b);
+    assert(read_guest_be32(slist_header) == 0u);
+    assert(memory.base()[slist_header + 5u] == 0u);
+    PPCContext slist_pop_empty{};
+    slist_pop_empty.r3.u32 = slist_header;
+    call_test_import(0x82001320u, slist_pop_empty);
+    assert(slist_pop_empty.r3.u32 == 0u);
 
     // XeCrypt SHA-1 state/update/final and one-shot entry points match SHA-1("abc").
     constexpr std::uint32_t sha_state = 0x82014000u;
@@ -2329,7 +2361,7 @@ const auto store_guest_ascii = [&](std::uint32_t address, const char* value) {
 
     PPCContext set_virtual_protection{};
     set_virtual_protection.r3.u32 = virtual_address + vm_page_size + 0x100u;
-    set_virtual_protection.r4.u32 = vm_page_size;
+    set_virtual_protection.r4.u32 = vm_page_size - 0x100u;
     set_virtual_protection.r5.u32 = 0x02u; // PAGE_READONLY.
     call_import(thunk_base + 52, set_virtual_protection);
     vm_context = {};
