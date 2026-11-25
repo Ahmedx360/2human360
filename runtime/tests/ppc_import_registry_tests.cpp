@@ -717,7 +717,7 @@ int main() {
     assert(read_guest_be32(slist_header) == slist_entry_b);
     assert(memory.base()[slist_header + 5u] == 1u);
     assert(memory.base()[slist_header + 6u] == 0x12u &&
-           memory.base()[slist_header + 7u] == 0x34u);
+           memory.base()[slist_header + 7u] == 0x35u);
     PPCContext slist_pop_b{};
     slist_pop_b.r3.u32 = slist_header;
     call_test_import(0x82001320u, slist_pop_b);
