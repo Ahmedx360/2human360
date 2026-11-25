@@ -703,13 +703,13 @@ int main() {
     constexpr std::uint32_t slist_header = 0x82014200u;
     constexpr std::uint32_t slist_entry_a = 0x82014220u;
     constexpr std::uint32_t slist_entry_b = 0x82014230u;
-    write_guest_be32(slist_header, slist_entry_a);
+    put_guest_be32(slist_header, slist_entry_a);
     memory.base()[slist_header + 4u] = 0u;
     memory.base()[slist_header + 5u] = 2u;
     memory.base()[slist_header + 6u] = 0x12u;
     memory.base()[slist_header + 7u] = 0x34u;
-    write_guest_be32(slist_entry_a, slist_entry_b);
-    write_guest_be32(slist_entry_b, 0u);
+    put_guest_be32(slist_entry_a, slist_entry_b);
+    put_guest_be32(slist_entry_b, 0u);
     PPCContext slist_pop_a{};
     slist_pop_a.r3.u32 = slist_header;
     call_test_import(0x82001320u, slist_pop_a);
