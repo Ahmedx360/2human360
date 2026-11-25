@@ -41,7 +41,7 @@ void print_last_import(const toohuman::runtime::PpcImportRegistry& imports) {
               << " args(r3-r10)=" << last.r3 << ',' << last.r4 << ','
               << last.r5 << ',' << last.r6 << ',' << last.r7 << ','
               << last.r8 << ',' << last.r9 << ',' << last.r10
-              << std::dec << '\\n';
+              << std::dec << '\n';
 }
 
 void print_guest_context(const PPCContext& context) {
