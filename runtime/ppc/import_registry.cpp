@@ -22,6 +22,20 @@ namespace toohuman::runtime {
 namespace {
 
 std::atomic<PpcImportRegistry*> g_active_registry{nullptr};
+thread_local bool g_trace_current_import = false;
+thread_local LastImportDiagnostic g_last_import_diagnostic{};
+
+std::uint64_t import_trace_limit() {
+    static const std::uint64_t limit = [] {
+        const char* value = std::getenv("TH_TRACE_IMPORT_LIMIT");
+        if (!value || !*value) return std::uint64_t{10000};
+        char* end = nullptr;
+        const auto parsed = std::strtoull(value, &end, 10);
+        return end != value && *end == '\0'
+            ? static_cast<std::uint64_t>(parsed) : std::uint64_t{10000};
+    }();
+    return limit;
+}
 
 PPC_FUNC_IMPL(toohuman_import_trampoline) {
     auto* registry = g_active_registry.load(std::memory_order_acquire);
@@ -35,8 +49,10 @@ PPC_FUNC_IMPL(toohuman_import_trampoline) {
         std::abort();
     }
     registry->dispatch(ctx, base);
-    static const bool trace_ret = std::getenv("TH_TRACE_IMPORTS") != nullptr;
-    if (trace_ret) std::fprintf(stderr, "    -> r3=%08X\n", static_cast<unsigned>(ctx.r3.u32));
+    if (g_trace_current_import) {
+        std::fprintf(stderr, "    -> r3=%08X\n", static_cast<unsigned>(ctx.r3.u32));
+        g_trace_current_import = false;
+    }
 }
 
 void set_error(std::string* error, const char* message) {
@@ -1329,11 +1345,20 @@ Pm4CallbackResult PpcImportRegistry::dispatch_xenos_type3(
     return Pm4CallbackResult::Rejected;
 }
 
+LastImportDiagnostic PpcImportRegistry::last_import_diagnostic() const noexcept {
+    // The runtime probe reads this on the same host thread that executed the
+    // main guest context. Keep the snapshot thread-local so worker-thread HLE
+    // traffic cannot overwrite the main thread's last import at the watchdog.
+    return g_last_import_diagnostic;
+}
+
 void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
-    throw_if_guest_thread_stop_requested();
     const auto thunk_address = context.ctr.u32;
     const auto import_it = imports_by_thunk_.find(thunk_address);
     if (import_it == imports_by_thunk_.end()) {
+        // A pending watchdog stop takes precedence over the unknown-import
+        // diagnostic, but known imports below are recorded before cancellation.
+        throw_if_guest_thread_stop_requested();
         std::fprintf(stderr,
                      "[TooHuman] Unknown import thunk 0x%08X (LR=0x%016llX ctx=%p base=%p r3=%08X r4=%08X)\n",
                      static_cast<unsigned>(thunk_address),
@@ -1347,13 +1372,37 @@ void PpcImportRegistry::dispatch(PPCContext& context, std::uint8_t* base) {
 
     const auto& binding = import_it->second;
     const auto& import = binding.import;
+    auto& diagnostic = g_last_import_diagnostic;
+    ++diagnostic.count;
+    diagnostic.thunk = thunk_address;
+    diagnostic.ordinal = import.ordinal;
+    diagnostic.lr = context.lr;
+    diagnostic.r3 = context.r3.u32;
+    diagnostic.r4 = context.r4.u32;
+    diagnostic.r5 = context.r5.u32;
+    diagnostic.r6 = context.r6.u32;
+    diagnostic.r7 = context.r7.u32;
+    diagnostic.r8 = context.r8.u32;
+    diagnostic.r9 = context.r9.u32;
+    diagnostic.r10 = context.r10.u32;
+    // Capture the exact import boundary before honoring cooperative stop.
+    throw_if_guest_thread_stop_requested();
     static const bool trace_imports = std::getenv("TH_TRACE_IMPORTS") != nullptr;
+    static std::atomic<std::uint64_t> trace_count{0};
     if (trace_imports) {
-        std::fprintf(stderr, "[import] %s#%u r3=%08X r4=%08X r5=%08X r6=%08X lr=%08X\n",
-                     import.library.c_str(), static_cast<unsigned>(import.ordinal),
-                     static_cast<unsigned>(context.r3.u32), static_cast<unsigned>(context.r4.u32),
-                     static_cast<unsigned>(context.r5.u32), static_cast<unsigned>(context.r6.u32),
-                     static_cast<unsigned>(context.lr));
+        const auto sequence = trace_count.fetch_add(1, std::memory_order_relaxed);
+        g_trace_current_import = sequence < import_trace_limit();
+        if (g_trace_current_import) {
+            std::fprintf(stderr, "[import:%llu] %s#%u r3=%08X r4=%08X r5=%08X r6=%08X lr=%08X\n",
+                         static_cast<unsigned long long>(sequence), import.library.c_str(),
+                         static_cast<unsigned>(import.ordinal),
+                         static_cast<unsigned>(context.r3.u32), static_cast<unsigned>(context.r4.u32),
+                         static_cast<unsigned>(context.r5.u32), static_cast<unsigned>(context.r6.u32),
+                         static_cast<unsigned>(context.lr));
+        } else if (sequence == import_trace_limit()) {
+            std::fprintf(stderr, "[import] trace limit (%llu calls) reached; suppressing further import records\n",
+                         static_cast<unsigned long long>(import_trace_limit()));
+        }
     }
     if (binding.handler == nullptr && guest_heap_) {
         if (import.library == "xboxkrnl.exe" && import.ordinal == 0x000B) {

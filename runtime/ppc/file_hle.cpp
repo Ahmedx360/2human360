@@ -6,6 +6,8 @@
 #include "memory/guest_mmio.hpp"
 
 #include <algorithm>
+#include <atomic>
+#include <cstdlib>
 #include <cstdint>
 #include <chrono>
 #include <cstdio>
@@ -28,6 +30,25 @@ constexpr std::uint32_t kFileIsADirectory = 0xC00000BAu;
 constexpr std::uint32_t kNotImplemented = 0xC0000002u;
 constexpr std::uint32_t kAccessDenied = 0xC0000022u;
 constexpr std::uint32_t kInfoLengthMismatch = 0xC0000004u;
+
+std::optional<std::uint64_t> next_file_trace_sequence() {
+    if (!std::getenv("TH_TRACE_FILES")) return std::nullopt;
+    static const std::uint64_t limit = [] {
+        const char* value = std::getenv("TH_TRACE_FILES_LIMIT");
+        if (!value || !*value) return std::uint64_t{200};
+        char* end = nullptr;
+        const auto parsed = std::strtoull(value, &end, 10);
+        return end != value && *end == '\0'
+            ? static_cast<std::uint64_t>(parsed) : std::uint64_t{200};
+    }();
+    static std::atomic<std::uint64_t> count{0};
+    const auto sequence = count.fetch_add(1, std::memory_order_relaxed);
+    if (sequence < limit) return sequence;
+    if (sequence == limit)
+        std::fprintf(stderr, "[file] trace limit (%llu opens) reached; suppressing further file records\n",
+                     static_cast<unsigned long long>(limit));
+    return std::nullopt;
+}
 
 enum class NameReadResult { Success, InvalidParameter, AccessViolation };
 
@@ -215,8 +236,10 @@ std::uint32_t open_common(std::uint8_t* base, std::uint32_t out_handle,
     const bool want_write = (access & kWriteMask) != 0;
     const bool directory_only = (options & 0x1u) != 0; // FILE_DIRECTORY_FILE
 
-    if (std::getenv("TH_TRACE_FILES"))
-        std::fprintf(stderr, "    [file] open '%s' access=%08X disp=%u\n",
+    const auto file_trace = next_file_trace_sequence();
+    if (file_trace)
+        std::fprintf(stderr, "[file:%llu] open '%s' access=%08X disp=%u\n",
+                     static_cast<unsigned long long>(*file_trace),
                      name.c_str(), access, disposition);
 
     auto result = process_vfs().open(
@@ -224,6 +247,9 @@ std::uint32_t open_common(std::uint8_t* base, std::uint32_t out_handle,
         root_writable, want_read);
     if (result.status != GuestVfsStatus::Success) {
         const auto status = static_cast<std::uint32_t>(result.status);
+        if (file_trace)
+            std::fprintf(stderr, "[file:%llu] -> VFS status=0x%08X\n",
+                         static_cast<unsigned long long>(*file_trace), status);
         set_iosb(base, iosb, status, 0);
         return status;
     }
@@ -239,6 +265,12 @@ std::uint32_t open_common(std::uint8_t* base, std::uint32_t out_handle,
     }
     wr32(base, out_handle, *handle);
     set_iosb(base, iosb, kSuccess, result.information);
+    if (file_trace) {
+        const auto resolved = result.file->path().string();
+        std::fprintf(stderr, "[file:%llu] -> success info=%u resolved='%s'\n",
+                     static_cast<unsigned long long>(*file_trace),
+                     result.information, resolved.c_str());
+    }
     return kSuccess;
 }
 

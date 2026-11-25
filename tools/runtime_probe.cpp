@@ -5,16 +5,92 @@
 #include "ppc/boot_hle.hpp"
 #include "ppc/guest_thread_execution.hpp"
 
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
+#include <cstdlib>
 #include <iostream>
 #include <limits>
 #include <optional>
 #include <string>
+#include <mutex>
+#include <stop_token>
+#include <thread>
 #include <vector>
 
 namespace {
+
+std::uint32_t boot_watchdog_seconds() {
+    const char* value = std::getenv("TH_BOOT_WATCHDOG_SECONDS");
+    if (!value || !*value) return 0;
+    char* end = nullptr;
+    const auto parsed = std::strtoul(value, &end, 10);
+    if (end == value || *end != '\0' || parsed > 3600ul) return 0;
+    return static_cast<std::uint32_t>(parsed);
+}
+
+void print_last_import(const toohuman::runtime::PpcImportRegistry& imports) {
+    const auto last = imports.last_import_diagnostic();
+    std::cerr << "Last guest import at watchdog: count=" << std::dec << last.count
+              << " ordinal=0x" << std::hex << last.ordinal
+              << " thunk=0x" << last.thunk
+              << " lr=0x" << last.lr
+              << " args(r3-r10)=" << last.r3 << ',' << last.r4 << ','
+              << last.r5 << ',' << last.r6 << ',' << last.r7 << ','
+              << last.r8 << ',' << last.r9 << ',' << last.r10
+              << std::dec << '\n';
+}
+
+void print_guest_context(const PPCContext& context) {
+    std::cerr << "Guest context at watchdog boundary:"
+              << " r1=0x" << std::hex << context.r1.u32
+              << " r3=0x" << context.r3.u32
+              << " r4=0x" << context.r4.u32
+              << " r5=0x" << context.r5.u32
+              << " r6=0x" << context.r6.u32
+              << " r7=0x" << context.r7.u32
+              << " r8=0x" << context.r8.u32
+              << " r9=0x" << context.r9.u32
+              << " r10=0x" << context.r10.u32
+              << " r13=0x" << context.r13.u32
+              << " lr=0x" << context.lr
+              << std::dec << '\n';
+}
+
+std::uint32_t read_guest_be32(const std::uint8_t* p) {
+    return (static_cast<std::uint32_t>(p[0]) << 24) |
+           (static_cast<std::uint32_t>(p[1]) << 16) |
+           (static_cast<std::uint32_t>(p[2]) << 8) |
+           static_cast<std::uint32_t>(p[3]);
+}
+
+void print_critical_section_state(
+    const toohuman::runtime::PpcImportRegistry& imports,
+    const PPCContext& context, std::uint8_t* base) {
+    const auto last = imports.last_import_diagnostic();
+    if (last.ordinal != 0x125u && last.ordinal != 0x130u) return;
+    if (!toohuman::runtime::GuestAddressSpace::is_accessible_range(
+            base, last.r3, 0x1Cu, toohuman::runtime::GuestMemoryAccess::Read)) {
+        std::cerr << "Critical-section snapshot unavailable at guest address 0x"
+                  << std::hex << last.r3 << std::dec << '\n';
+        return;
+    }
+    const auto* cs = base + last.r3;
+    const auto pcr_thread = context.r13.u32 != 0 &&
+        toohuman::runtime::GuestAddressSpace::is_accessible_range(
+            base, context.r13.u32 + 0x100u, 4u,
+            toohuman::runtime::GuestMemoryAccess::Read)
+        ? read_guest_be32(base + context.r13.u32 + 0x100u) : 0u;
+    std::cerr << "Critical-section snapshot: address=0x" << std::hex << last.r3
+              << " lock_count=0x" << read_guest_be32(cs + 0x10)
+              << " recursion=0x" << read_guest_be32(cs + 0x14)
+              << " owner=0x" << read_guest_be32(cs + 0x18)
+              << " PCR.current_thread=0x" << pcr_thread
+              << " (28-byte object)" << std::dec << '\n';
+}
 
 bool read_file(const char* path, std::vector<std::uint8_t>& bytes) {
     std::ifstream stream(path, std::ios::binary | std::ios::ate);
@@ -146,18 +222,55 @@ int main(int argc, char** argv) {
     std::cout << "Invoking game entry point 0x" << std::hex
               << loaded_image->entry_point << std::dec
               << " (this may hit an unimplemented HLE).\n";
+    const auto watchdog_seconds = boot_watchdog_seconds();
+    std::stop_source boot_stop;
+    std::mutex watchdog_mutex;
+    std::condition_variable_any watchdog_condition;
+    std::atomic<bool> entry_finished{false};
+    std::jthread watchdog;
+    if (watchdog_seconds != 0) {
+        watchdog = std::jthread([&](std::stop_token stop) {
+            std::unique_lock lock(watchdog_mutex);
+            const bool finished = watchdog_condition.wait_for(
+                lock, stop, std::chrono::seconds(watchdog_seconds),
+                [&] { return entry_finished.load(std::memory_order_acquire); });
+            if (!finished && !stop.stop_requested() &&
+                !entry_finished.load(std::memory_order_acquire)) {
+                boot_stop.request_stop();
+            }
+        });
+        std::cout << "Guest boot watchdog: " << watchdog_seconds
+                  << " seconds (cooperative import-boundary stop).\n";
+    }
+
+    const auto finish_watchdog = [&] {
+        entry_finished.store(true, std::memory_order_release);
+        watchdog.request_stop();
+        watchdog_condition.notify_all();
+    };
+
     try {
         // The process entry point runs on the already prepared guest main
-        // thread. Match the execution scope used by worker threads so
-        // ExTerminateThread unwinds this thread rather than returning an
-        // ordinary STATUS_UNSUCCESSFUL result.
-        toohuman::runtime::GuestThreadExecutionScope main_thread_scope(std::stop_token{});
+        // thread. The watchdog token interrupts execution at the next HLE
+        // import boundary so the guest CPU context can be preserved.
+        toohuman::runtime::GuestThreadExecutionScope main_thread_scope(
+            boot_stop.get_token());
         entry(report.main_thread.context, memory.base());
     } catch (const toohuman::runtime::GuestThreadExitSignal& exit) {
+        finish_watchdog();
+        if (boot_stop.stop_requested()) {
+            std::cerr << "Guest boot watchdog expired after " << watchdog_seconds
+                      << " seconds; execution stopped at a cooperative guest import boundary.\n";
+            print_guest_context(report.main_thread.context);
+            print_last_import(imports);
+            print_critical_section_state(imports, report.main_thread.context, memory.base());
+            return 124;
+        }
         std::cout << "Guest main thread terminated with exit code 0x"
                   << std::hex << exit.exit_code() << std::dec << ".\n";
         return 0;
     }
+    finish_watchdog();
     std::cout << "Guest entry point returned to the host probe.\n";
     return 0;
 }

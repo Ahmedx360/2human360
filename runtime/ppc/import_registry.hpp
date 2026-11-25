@@ -6,6 +6,7 @@
 #include "memory/guest_heap.hpp"
 #include "gpu/xenos_command_processor.hpp"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -21,6 +22,14 @@ namespace toohuman::runtime {
 
 class GuestThreadRuntime;
 struct GuestThreadStartup;
+
+struct LastImportDiagnostic {
+    std::uint64_t count{};
+    std::uint32_t thunk{};
+    std::uint32_t ordinal{};
+    std::uint64_t lr{};
+    std::uint32_t r3{}, r4{}, r5{}, r6{}, r7{}, r8{}, r9{}, r10{};
+};
 
 // Routes XEX2 function-import thunks through one generic PPC trampoline.
 // Handlers are keyed by the exact library name and ordinal; unknown imports
@@ -65,6 +74,7 @@ public:
     [[nodiscard]] std::uint32_t resume_guest_kernel_thread(PPCContext& context);
 
     void dispatch(PPCContext& context, std::uint8_t* base);
+    [[nodiscard]] LastImportDiagnostic last_import_diagnostic() const noexcept;
     void set_guest_address_protection(std::uint32_t address,
                                       std::uint32_t length,
                                       std::uint32_t protection_bits);

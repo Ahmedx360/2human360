@@ -122,6 +122,11 @@ PPCFunc KeBugCheckEx;
 PPCFunc HalReturnToFirmware;
 PPCFunc NetDll_XNetStartup;
 PPCFunc NetDll_WSAStartup;
+PPCFunc InterlockedPopEntrySList;
+PPCFunc XeCryptShaInit;
+PPCFunc XeCryptShaUpdate;
+PPCFunc XeCryptShaFinal;
+PPCFunc XeCryptSha;
 } // namespace boot_hle
 
 } // namespace toohuman::runtime

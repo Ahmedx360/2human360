@@ -88,7 +88,7 @@ int main() {
                                     &test_import_handler, &error));
     std::size_t startup_hle_count = 0;
     assert(toohuman::runtime::register_boot_imports(imports, &error, &startup_hle_count));
-    assert(startup_hle_count == 94u);
+    assert(startup_hle_count == 100u);
     const std::vector<toohuman::runtime::XexImport> metadata{
         {"xboxkrnl.exe", 0x0777u, 0, 1, 0x82001100u},
         {"xboxkrnl.exe", 0x011Bu, 0, 1, 0x82001104u},
@@ -170,11 +170,16 @@ int main() {
         {"xboxkrnl.exe", 0x00B3u, 0, 1, 0x82001230u},
         {"xboxkrnl.exe", 0x00B4u, 0, 1, 0x82001234u},
         {"xboxkrnl.exe", 0x012Du, 0, 1, 0x82001238u},
-        {"xboxkrnl.exe", 0x012Cu, 0, 1, 0x8200123Cu}
+        {"xboxkrnl.exe", 0x012Cu, 0, 1, 0x8200123Cu},
+        {"xboxkrnl.exe", 0x018Fu, 0, 1, 0x82001310u},
+        {"xboxkrnl.exe", 0x0190u, 0, 1, 0x82001314u},
+        {"xboxkrnl.exe", 0x0191u, 0, 1, 0x82001318u},
+        {"xboxkrnl.exe", 0x0192u, 0, 1, 0x8200131Cu},
+        {"xboxkrnl.exe", 0x002Cu, 0, 1, 0x82001320u}
     };
     std::size_t registered = 0;
     assert(imports.install(memory, metadata, &registered, &error));
-    assert(registered == 81u);
+    assert(registered == 86u);
     assert(memory.get_function<PPCFunc*>(0x82001100u) != &test_default_handler);
 
     // The real kernel imports configure the per-title primary Xenos ring.
@@ -692,6 +697,82 @@ int main() {
         assert(function != nullptr);
         function(ctx, memory.base());
     };
+
+
+    // InterlockedPopEntrySList removes the head and advances depth and sequence.
+    constexpr std::uint32_t slist_header = 0x82014200u;
+    constexpr std::uint32_t slist_entry_a = 0x82014220u;
+    constexpr std::uint32_t slist_entry_b = 0x82014230u;
+    put_guest_be32(slist_header, slist_entry_a);
+    memory.base()[slist_header + 4u] = 0u;
+    memory.base()[slist_header + 5u] = 2u;
+    memory.base()[slist_header + 6u] = 0x12u;
+    memory.base()[slist_header + 7u] = 0x34u;
+    put_guest_be32(slist_entry_a, slist_entry_b);
+    put_guest_be32(slist_entry_b, 0u);
+    PPCContext slist_pop_a{};
+    slist_pop_a.r3.u32 = slist_header;
+    call_test_import(0x82001320u, slist_pop_a);
+    assert(slist_pop_a.r3.u32 == slist_entry_a);
+    assert(read_guest_be32(slist_header) == slist_entry_b);
+    assert(memory.base()[slist_header + 5u] == 1u);
+    assert(memory.base()[slist_header + 6u] == 0x12u &&
+           memory.base()[slist_header + 7u] == 0x35u);
+    PPCContext slist_pop_b{};
+    slist_pop_b.r3.u32 = slist_header;
+    call_test_import(0x82001320u, slist_pop_b);
+    assert(slist_pop_b.r3.u32 == slist_entry_b);
+    assert(read_guest_be32(slist_header) == 0u);
+    assert(memory.base()[slist_header + 5u] == 0u);
+    assert(memory.base()[slist_header + 6u] == 0x12u &&
+           memory.base()[slist_header + 7u] == 0x36u);
+    PPCContext slist_pop_empty{};
+    slist_pop_empty.r3.u32 = slist_header;
+    call_test_import(0x82001320u, slist_pop_empty);
+    assert(slist_pop_empty.r3.u32 == 0u);
+    assert(memory.base()[slist_header + 6u] == 0x12u &&
+           memory.base()[slist_header + 7u] == 0x36u);
+
+    // XeCrypt SHA-1 state/update/final and one-shot entry points match SHA-1("abc").
+    constexpr std::uint32_t sha_state = 0x82014000u;
+    constexpr std::uint32_t sha_input_a = 0x82014100u;
+    constexpr std::uint32_t sha_input_bc = 0x82014110u;
+    constexpr std::uint32_t sha_digest = 0x82014120u;
+    constexpr std::uint8_t sha_abc[] = {'a', 'b', 'c'};
+    std::memcpy(memory.base() + sha_input_a, sha_abc, 1u);
+    std::memcpy(memory.base() + sha_input_bc, sha_abc + 1u, 2u);
+    PPCContext sha_init{};
+    sha_init.r3.u32 = sha_state;
+    call_test_import(0x82001310u, sha_init);
+    PPCContext sha_update_a{};
+    sha_update_a.r3.u32 = sha_state;
+    sha_update_a.r4.u32 = sha_input_a;
+    sha_update_a.r5.u32 = 1u;
+    call_test_import(0x82001314u, sha_update_a);
+    PPCContext sha_update_bc{};
+    sha_update_bc.r3.u32 = sha_state;
+    sha_update_bc.r4.u32 = sha_input_bc;
+    sha_update_bc.r5.u32 = 2u;
+    call_test_import(0x82001314u, sha_update_bc);
+    PPCContext sha_final{};
+    sha_final.r3.u32 = sha_state;
+    sha_final.r4.u32 = sha_digest;
+    sha_final.r5.u32 = 20u;
+    call_test_import(0x82001318u, sha_final);
+    constexpr std::uint8_t expected_sha1[20] = {
+        0xA9, 0x99, 0x3E, 0x36, 0x47, 0x06, 0x81, 0x6A, 0xBA, 0x3E,
+        0x25, 0x71, 0x78, 0x50, 0xC2, 0x6C, 0x9C, 0xD0, 0xD8, 0x9D
+    };
+    assert(std::memcmp(memory.base() + sha_digest, expected_sha1, 20u) == 0);
+    PPCContext sha_one_shot{};
+    sha_one_shot.r3.u32 = sha_input_a;
+    sha_one_shot.r4.u32 = 1u;
+    sha_one_shot.r5.u32 = sha_input_bc;
+    sha_one_shot.r6.u32 = 2u;
+    sha_one_shot.r9.u32 = sha_digest;
+    sha_one_shot.r10.u32 = 20u;
+    call_test_import(0x8200131Cu, sha_one_shot);
+    assert(std::memcmp(memory.base() + sha_digest, expected_sha1, 20u) == 0);
     // MmGetPhysicalAddress resolves committed addresses in the runtime's
     // uncached physical alias, and does not invent mappings for arbitrary VAs.
     PPCContext physical_alias_query{};
@@ -1268,7 +1349,7 @@ const auto store_guest_ascii = [&](std::uint32_t address, const char* value) {
     boot_context.r3.u32 = 0x1000u;
     boot_context.r4.u32 = 0x82012000u;
     call_test_import(0x82001210u, boot_context); // NtSuspendThread.
-    assert(boot_context.r3.u32 == 0xC0000008u);
+    assert(boot_context.r3.u32 == 0xC0000002u);
     boot_context = {};
     call_test_import(0x8200118Cu, boot_context); // ExTerminateThread outside a worker.
     assert(boot_context.r3.u32 == 0xC0000001u);
@@ -2284,7 +2365,7 @@ const auto store_guest_ascii = [&](std::uint32_t address, const char* value) {
 
     PPCContext set_virtual_protection{};
     set_virtual_protection.r3.u32 = virtual_address + vm_page_size + 0x100u;
-    set_virtual_protection.r4.u32 = vm_page_size;
+    set_virtual_protection.r4.u32 = vm_page_size - 0x100u;
     set_virtual_protection.r5.u32 = 0x02u; // PAGE_READONLY.
     call_import(thunk_base + 52, set_virtual_protection);
     vm_context = {};
