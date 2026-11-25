@@ -88,7 +88,7 @@ int main() {
                                     &test_import_handler, &error));
     std::size_t startup_hle_count = 0;
     assert(toohuman::runtime::register_boot_imports(imports, &error, &startup_hle_count));
-    assert(startup_hle_count == 95u);
+    assert(startup_hle_count == 99u);
     const std::vector<toohuman::runtime::XexImport> metadata{
         {"xboxkrnl.exe", 0x0777u, 0, 1, 0x82001100u},
         {"xboxkrnl.exe", 0x011Bu, 0, 1, 0x82001104u},
@@ -1268,7 +1268,7 @@ const auto store_guest_ascii = [&](std::uint32_t address, const char* value) {
     boot_context.r3.u32 = 0x1000u;
     boot_context.r4.u32 = 0x82012000u;
     call_test_import(0x82001210u, boot_context); // NtSuspendThread.
-    assert(boot_context.r3.u32 == 0xC0000008u);
+    assert(boot_context.r3.u32 == 0xC0000002u);
     boot_context = {};
     call_test_import(0x8200118Cu, boot_context); // ExTerminateThread outside a worker.
     assert(boot_context.r3.u32 == 0xC0000001u);
