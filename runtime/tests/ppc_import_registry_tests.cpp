@@ -170,11 +170,15 @@ int main() {
         {"xboxkrnl.exe", 0x00B3u, 0, 1, 0x82001230u},
         {"xboxkrnl.exe", 0x00B4u, 0, 1, 0x82001234u},
         {"xboxkrnl.exe", 0x012Du, 0, 1, 0x82001238u},
-        {"xboxkrnl.exe", 0x012Cu, 0, 1, 0x8200123Cu}
+        {"xboxkrnl.exe", 0x012Cu, 0, 1, 0x8200123Cu},
+        {"xboxkrnl.exe", 0x018Fu, 0, 1, 0x82001310u},
+        {"xboxkrnl.exe", 0x0190u, 0, 1, 0x82001314u},
+        {"xboxkrnl.exe", 0x0191u, 0, 1, 0x82001318u},
+        {"xboxkrnl.exe", 0x0192u, 0, 1, 0x8200131Cu}
     };
     std::size_t registered = 0;
     assert(imports.install(memory, metadata, &registered, &error));
-    assert(registered == 81u);
+    assert(registered == 85u);
     assert(memory.get_function<PPCFunc*>(0x82001100u) != &test_default_handler);
 
     // The real kernel imports configure the per-title primary Xenos ring.
@@ -692,6 +696,47 @@ int main() {
         assert(function != nullptr);
         function(ctx, memory.base());
     };
+
+    // XeCrypt SHA-1 state/update/final and one-shot entry points match SHA-1("abc").
+    constexpr std::uint32_t sha_state = 0x82014000u;
+    constexpr std::uint32_t sha_input_a = 0x82014100u;
+    constexpr std::uint32_t sha_input_bc = 0x82014110u;
+    constexpr std::uint32_t sha_digest = 0x82014120u;
+    constexpr std::uint8_t sha_abc[] = {'a', 'b', 'c'};
+    std::memcpy(memory.base() + sha_input_a, sha_abc, 1u);
+    std::memcpy(memory.base() + sha_input_bc, sha_abc + 1u, 2u);
+    PPCContext sha_init{};
+    sha_init.r3.u32 = sha_state;
+    call_test_import(0x82001310u, sha_init);
+    PPCContext sha_update_a{};
+    sha_update_a.r3.u32 = sha_state;
+    sha_update_a.r4.u32 = sha_input_a;
+    sha_update_a.r5.u32 = 1u;
+    call_test_import(0x82001314u, sha_update_a);
+    PPCContext sha_update_bc{};
+    sha_update_bc.r3.u32 = sha_state;
+    sha_update_bc.r4.u32 = sha_input_bc;
+    sha_update_bc.r5.u32 = 2u;
+    call_test_import(0x82001314u, sha_update_bc);
+    PPCContext sha_final{};
+    sha_final.r3.u32 = sha_state;
+    sha_final.r4.u32 = sha_digest;
+    sha_final.r5.u32 = 20u;
+    call_test_import(0x82001318u, sha_final);
+    constexpr std::uint8_t expected_sha1[20] = {
+        0xA9, 0x99, 0x3E, 0x36, 0x47, 0x06, 0x81, 0x6A, 0xBA, 0x3E,
+        0x25, 0x71, 0x78, 0x50, 0xC2, 0x6C, 0x9C, 0xD0, 0xD8, 0x9D
+    };
+    assert(std::memcmp(memory.base() + sha_digest, expected_sha1, 20u) == 0);
+    PPCContext sha_one_shot{};
+    sha_one_shot.r3.u32 = sha_input_a;
+    sha_one_shot.r4.u32 = 1u;
+    sha_one_shot.r5.u32 = sha_input_bc;
+    sha_one_shot.r6.u32 = 2u;
+    sha_one_shot.r9.u32 = sha_digest;
+    sha_one_shot.r10.u32 = 20u;
+    call_test_import(0x8200131Cu, sha_one_shot);
+    assert(std::memcmp(memory.base() + sha_digest, expected_sha1, 20u) == 0);
     // MmGetPhysicalAddress resolves committed addresses in the runtime's
     // uncached physical alias, and does not invent mappings for arbitrary VAs.
     PPCContext physical_alias_query{};
