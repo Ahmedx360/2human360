@@ -378,7 +378,13 @@ void sha1_finish(GuestSha1State& state, std::uint8_t digest[20]) {
             static_cast<std::uint8_t>(bit_count >> (i * 8u));
     sha1_transform(state.hash, final_blocks.data());
     if (blocks == 128u) sha1_transform(state.hash, final_blocks.data() + 64u);
-    for (unsigned i = 0; i < 5; ++i) put_be32(digest + i * 4u, state.hash[i]);
+    for (unsigned i = 0; i < 5; ++i) {
+        const auto word = state.hash[i];
+        digest[i * 4u] = static_cast<std::uint8_t>(word >> 24);
+        digest[i * 4u + 1u] = static_cast<std::uint8_t>(word >> 16);
+        digest[i * 4u + 2u] = static_cast<std::uint8_t>(word >> 8);
+        digest[i * 4u + 3u] = static_cast<std::uint8_t>(word);
+    }
 }
 
 bool load_guest_sha1_state(std::uint8_t* base, std::uint32_t address,
