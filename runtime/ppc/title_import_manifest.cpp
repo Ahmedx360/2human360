@@ -99,7 +99,7 @@ constexpr std::array<TitleExportName, 258> kTitleImports{{
     {"xboxkrnl.exe", 0x001b, "ExThreadObjectType", true},
     {"xboxkrnl.exe", 0x0021, "FscSetCacheElementCount", false},
     {"xboxkrnl.exe", 0x0028, "HalReturnToFirmware", false},
-    {"xboxkrnl.exe", 0x002c, "InterlockedPopEntrySList", false},
+    {"xboxkrnl.exe", 0x002c, "InterlockedPopEntrySList", true},
     {"xboxkrnl.exe", 0x0034, "IoCheckShareAccess", false},
     {"xboxkrnl.exe", 0x0035, "IoCompleteRequest", false},
     {"xboxkrnl.exe", 0x0037, "IoCreateDevice", false},
