@@ -2177,7 +2177,7 @@ PPC_FUNC(InterlockedPopEntrySList) {
     }
 
     // Serialize host-side callers while preserving the guest's exact 8-byte
-    // header representation. The sequence field is unchanged by PopEntry.
+    // header representation. The sequence field advances on every successful pop.
     static std::mutex slist_mutex;
     std::lock_guard lock(slist_mutex);
     auto* h = at(base, header);
@@ -2196,8 +2196,13 @@ PPC_FUNC(InterlockedPopEntrySList) {
         (static_cast<std::uint16_t>(h[4]) << 8) | h[5]);
     put_be32(h, next);
     const auto new_depth = static_cast<std::uint16_t>(depth - 1u);
+    const auto sequence = static_cast<std::uint16_t>(
+        (static_cast<std::uint16_t>(h[6]) << 8) | h[7]);
+    const auto new_sequence = static_cast<std::uint16_t>(sequence + 1u);
     h[4] = static_cast<std::uint8_t>(new_depth >> 8);
     h[5] = static_cast<std::uint8_t>(new_depth);
+    h[6] = static_cast<std::uint8_t>(new_sequence >> 8);
+    h[7] = static_cast<std::uint8_t>(new_sequence);
     guest_memory_write_observed(h, 8u);
     ctx.r3.u32 = first;
 }
